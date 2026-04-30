@@ -2,7 +2,7 @@
 
 **Product display name:** Craft Compass
 **Code identifier:** `CraftCompass` (no spaces — used in addon folder, SavedVariables, file names)
-**Repo folder name:** `WowSim` (legacy, not renamed)
+**Repo folder name:** `CraftCompass`
 
 ## Read these first, in order
 
