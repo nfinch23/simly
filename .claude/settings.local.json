@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//c/Users/noahf/.bun/bin/**)",
+      "Bash(bun --version)",
+      "Bash(export BUN_INSTALL=\"$HOME/.bun\")",
+      "Bash(export PATH=\"$BUN_INSTALL/bin:$PATH\")",
+      "Bash(./setup)",
+      "Bash(~/.claude/skills/gstack/bin/gstack-global-discover.exe)"
+    ]
+  }
+}

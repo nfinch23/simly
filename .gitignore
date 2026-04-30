@@ -1,0 +1,35 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Build outputs
+dist/
+out/
+build/
+*.tsbuildinfo
+
+# Electron
+release/
+electron-builder-output/
+
+# Test data + local SimC binaries
+test-savedvars/
+.simc-cache/
+data/cache/
+
+# Editor / OS
+.DS_Store
+Thumbs.db
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+.idea/
+
+# Env
+.env
+.env.local
+*.log
+
+# WoW SavedVariables snapshots used during development
+*.savedvars.lua
