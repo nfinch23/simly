@@ -24,6 +24,11 @@ Current phase: **Phase 0 complete; Phase 1 (round-trip spike) not started** — 
 
 Update this line as phases complete.
 
+### Phase 1 prep TODOs
+
+- Bump `electron` in `desktop/package.json` from `^31` to a current release (clears 4 npm audit advisories before we add IPC and SimC subprocess spawning).
+- When real IPC lands, switch `BrowserWindow` to `sandbox: true` and route everything through `contextBridge` in the preload.
+
 ## gstack
 
 Use the `/browse` skill from gstack for all web browsing. Never use `mcp__claude-in-chrome__*` tools.

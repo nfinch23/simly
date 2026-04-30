@@ -251,14 +251,14 @@ Each phase is a checkpoint with concrete acceptance criteria. Don't move to phas
 - Initialize npm workspaces in root `package.json`.
 - Set up `shared/` package with TS types from sections 4 and 5.
 - Set up `desktop/` package with electron-vite scaffold.
-- Stub out `addon/` with empty `.toc` and `CraftCompass.lua` printing "CraftCompass loaded" on login.
+- Stub out `addon/` with empty `.toc` and `CraftCompass.lua` printing "Craft Compass loaded" on login.
 - Add `.gitignore` (node_modules, dist, .DS_Store, electron-builder output, WoW SavedVariables test data).
 - Write a stub `README.md`.
 
 **Acceptance:**
 - `npm install` from root works.
 - `npm run dev` in `desktop/` opens an empty Electron window.
-- Dropping `addon/` into `Interface/AddOns/CraftCompass/` and launching WoW prints "CraftCompass loaded" to chat.
+- Dropping `addon/` into `Interface/AddOns/CraftCompass/` and launching WoW prints "Craft Compass loaded" to chat.
 
 ### Phase 1 — Round-Trip Spike
 
