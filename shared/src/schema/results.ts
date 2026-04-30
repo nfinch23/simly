@@ -1,0 +1,41 @@
+/**
+ * Results file schema written by the desktop app and read by the addon.
+ * Mirrors SCOPE.md section 5. One file, one character.
+ */
+
+export const RESULTS_SCHEMA_VERSION = 1;
+
+export interface BestFlaskResult {
+  label: string;
+  best: { item_id: number; name: string; dps: number };
+  alternatives: Array<{
+    item_id: number;
+    name: string;
+    dps: number;
+    delta_pct: number;
+  }>;
+}
+
+export interface BestGemsResult {
+  label: string;
+  slots: Array<{
+    slot: string;
+    item_id: number;
+    gem_id: number;
+    gem_name: string;
+  }>;
+}
+
+export interface QuestionResults {
+  best_flask?: BestFlaskResult;
+  best_gems?: BestGemsResult;
+  [questionId: string]: unknown;
+}
+
+export interface CraftCompassResults {
+  schema_version: number;
+  generated_at: number;
+  simc_version: string;
+  character_key: string;
+  questions: QuestionResults;
+}

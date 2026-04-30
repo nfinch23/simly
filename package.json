@@ -1,0 +1,17 @@
+{
+  "name": "craftcompass",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Craft Compass — in-game SimulationCraft answers for WoW.",
+  "license": "MIT",
+  "author": "Noah Finch",
+  "workspaces": [
+    "shared",
+    "desktop"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspace desktop",
+    "build": "npm run build --workspace shared && npm run build --workspace desktop",
+    "typecheck": "npm run typecheck --workspaces --if-present"
+  }
+}
