@@ -148,8 +148,9 @@ Do not substitute without updating SCOPE.md.
 | `main/watcher.ts` | Watch `WTF/Account/<acct>/SavedVariables/Simly.lua`. Debounce file events (Lua flush is atomic; no need to wait long, but 200ms debounce avoids partial reads). |
 | `main/lua-parser.ts` | Parse SavedVars file. Extract `SimlyDB` table. Return typed object. |
 | `main/lua-writer.ts` | Serialize a JS object as a Lua source file (top-level `SimlyResults = { ... }`). |
-| `main/simc-installer.ts` | Check pinned SimC version. Download from `simulationcraft/simc` GitHub Releases. Verify checksum. Extract to app data dir. |
-| `main/simc-runner.ts` | Spawn SimC subprocess with profile + APL. Stream stdout for progress. Parse final result block. |
+| `main/simc-version-source.ts` | Pluggable strategy that decides _which_ SimC version to pin to. Returns `{ tag, downloadUrl, sha256?, publishedAt }`. Default impl: `GitHubNightlyMondayStrategy` — picks the most recent `simulationcraft/simc` nightly release published before Monday 23:00 UTC, holds it for the week. Other strategies (manual pin, stable-only, future Raidbots-mirror) are swappable behind this interface. |
+| `main/simc-installer.ts` | Given a resolved version from `simc-version-source`, download from `simulationcraft/simc` GitHub Releases. Verify SHA256 if provided. Extract to app data dir. Cache previous version for rollback. |
+| `main/simc-runner.ts` | Spawn SimC subprocess with profile + APL. Stream stdout for progress. Use `json2=` flag for deterministic output. Parse final JSON for DPS. |
 | `main/question-suite.ts` | Define the question set. Each question = `{ id, label, mutateProfile(profile), parseResult(simcOutput) }`. Loop through enabled questions when a new export arrives. |
 | `main/ipc.ts` | Renderer ↔ main IPC channels: `sim-status`, `sim-progress`, `sim-result`, `settings-update`. |
 
@@ -277,9 +278,12 @@ Each phase is a checkpoint with concrete acceptance criteria. Don't move to phas
 
 **Tasks:**
 - Vendor SimC addon's `Core.lua` export module into `addon/Core/Export.lua`. Wire it to run on `PLAYER_LOGOUT` and write the real export string into `SimlyDB.simc_export`.
-- Desktop: `simc-installer.ts` downloads the latest SimC release on first launch (with a "use pinned" toggle defaulting to a known-good version). Verify SHA256 against GitHub Release asset.
-- Desktop: `simc-runner.ts` spawns SimC with the exported profile + a single hardcoded "best flask" sim variant (vary `flask=` line, run 5K iterations each).
-- Desktop: parse the resulting DPS numbers, pick the winner, write to `SimlyResults.lua` per section 5 schema.
+- Desktop: `simc-version-source.ts` defines the strategy interface and ships `GitHubNightlyMondayStrategy` as the default — picks the most recent `simulationcraft/simc` nightly published before Monday 23:00 UTC, holds it for the week. Mirrors Raidbots' "weekly" cadence using SimC's own prebuilt nightlies (no scraping, no compile-from-source).
+- Desktop: `simc-installer.ts` consumes a resolved version from the strategy, downloads from GitHub Releases, verifies SHA256, extracts. Keeps previous version on disk for rollback.
+- Desktop: `simc-runner.ts` spawns SimC with the exported profile + a single hardcoded "best flask" sim variant (use SimC `profileset.<name>=flask=...` to run all variants in one invocation). Pass `json2=output.json` for deterministic parsing.
+- Desktop: parse the result JSON, pick the winner, write to `SimlyResults.lua` per section 5 schema.
+
+**Version-source rationale:** Raidbots does not expose a public "current SimC build" feed (probed thoroughly — only per-report disclosure exists). Their weekly build is compiled from `simulationcraft/simc` `main` on Monday nights. We replicate the cadence using SimC's own nightlies — same source code, same prebuilt artifact pipeline SimC's CI publishes. Result: typically within hours of Raidbots' exact build. The strategy interface stays open so we can swap to a Raidbots-mirror, Discord-webhook, or stable-only source later without touching the runner.
 
 **Acceptance:**
 - Real character export from a live WoW session triggers a real SimC run.
@@ -396,7 +400,7 @@ Each phase is a checkpoint with concrete acceptance criteria. Don't move to phas
 
 These are recurring chores, not features. Document each as it comes up.
 
-- Update SimC pinned version after testing each release.
+- SimC version is auto-pinned by `simc-version-source.ts` (default: GitHub nightly, Monday-cadence). Manual bump only needed if auto-update is disabled or the chosen nightly is broken.
 - Regenerate `data/dungeons.json` from KeystoneLoot's latest data after each major patch.
 - Update `data/currencies.json` for new patch currencies.
 - Bump addon `## Interface:` version in `.toc` for each WoW patch.
