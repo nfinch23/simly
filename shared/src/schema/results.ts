@@ -5,7 +5,13 @@
 
 export const RESULTS_SCHEMA_VERSION = 1;
 
-export interface BestFlaskResult {
+/**
+ * Common shape for "best consumable" questions. Each candidate is an
+ * item with a name + item_id (for tooltip lookup) + DPS measurement.
+ * The winner sits in `best`; everything else lands in `alternatives`
+ * with a delta_pct vs the winner.
+ */
+export interface BestConsumableResult {
   label: string;
   best: { item_id: number; name: string; dps: number };
   alternatives: Array<{
@@ -15,6 +21,9 @@ export interface BestFlaskResult {
     delta_pct: number;
   }>;
 }
+
+export type BestFlaskResult = BestConsumableResult;
+export type BestFoodResult = BestConsumableResult;
 
 export interface BestGemsResult {
   label: string;
@@ -28,6 +37,7 @@ export interface BestGemsResult {
 
 export interface QuestionResults {
   best_flask?: BestFlaskResult;
+  best_food?: BestFoodResult;
   best_gems?: BestGemsResult;
   [questionId: string]: unknown;
 }

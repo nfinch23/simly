@@ -43,13 +43,19 @@ describe('buildAllQuestionLines', () => {
 describe('parseAllQuestions', () => {
   it('returns a map keyed by question id with each question\'s result', () => {
     const run = fakeRun([
-      { name: 'flask_tepid_versatility', mean: 100 },
-      { name: 'flask_elemental_chaos', mean: 110 },
+      { name: 'flask_blood_knights', mean: 100 },
+      { name: 'flask_magisters', mean: 110 },
+      { name: 'food_silvermoon_parade', mean: 120 },
+      { name: 'food_royal_roast', mean: 115 },
     ]);
     const all = parseAllQuestions(run);
     expect(all['best_flask']).toBeDefined();
     expect((all['best_flask'] as { best: { name: string } }).best.name).toBe(
-      'Phial of Elemental Chaos',
+      'Flask of the Magisters',
+    );
+    expect(all['best_food']).toBeDefined();
+    expect((all['best_food'] as { best: { name: string } }).best.name).toBe(
+      'Silvermoon Parade',
     );
   });
 
@@ -57,6 +63,7 @@ describe('parseAllQuestions', () => {
     const run = fakeRun([{ name: 'unrelated_profileset', mean: 1 }]);
     const all = parseAllQuestions(run);
     expect(all['best_flask']).toBeUndefined();
-    expect(Object.keys(all)).not.toContain('best_flask');
+    expect(all['best_food']).toBeUndefined();
+    expect(Object.keys(all)).toHaveLength(0);
   });
 });

@@ -14,20 +14,29 @@ interface FlaskCandidate {
   simcFlask: string;
 }
 
-// Minimal patch-12.0.5 candidate list. Phase 4 will load this from a data
-// file regenerated per patch (see SCOPE.md section 6 phase 4 + section 9).
+// Patch 12.0.5 (Midnight) DPS flasks, sourced from simc.exe stock profiles
+// under simc-1205.01.../profiles/MID1/. item_ids are placeholders (0)
+// pending a per-patch data regeneration pass — they're only required by
+// the Phase 3 tooltip hook, not by the DPS comparison itself. Phase 4
+// will load this list from data/ regenerated per patch.
 export const FLASK_CANDIDATES: readonly FlaskCandidate[] = [
   {
-    key: 'tepid_versatility',
-    item_id: 212265,
-    name: 'Phial of Tepid Versatility',
-    simcFlask: 'phial_of_tepid_versatility',
+    key: 'blood_knights',
+    item_id: 0,
+    name: 'Flask of the Blood Knights',
+    simcFlask: 'flask_of_the_blood_knights_2',
   },
   {
-    key: 'elemental_chaos',
-    item_id: 212266,
-    name: 'Phial of Elemental Chaos',
-    simcFlask: 'phial_of_elemental_chaos',
+    key: 'magisters',
+    item_id: 0,
+    name: 'Flask of the Magisters',
+    simcFlask: 'flask_of_the_magisters_2',
+  },
+  {
+    key: 'shattered_sun',
+    item_id: 0,
+    name: 'Flask of the Shattered Sun',
+    simcFlask: 'flask_of_the_shattered_sun_2',
   },
 ];
 
