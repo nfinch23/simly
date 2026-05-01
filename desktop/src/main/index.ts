@@ -7,6 +7,14 @@ import { resolveWowPaths, type WowPaths } from './wow-paths';
 import { watchSavedVars, type WatcherHandle } from './watcher';
 import { writeLuaFile } from './lua-writer';
 import { buildPlaceholderResults } from './question-suite';
+import { resolveSimcPaths } from './simc-paths';
+import { runSimc } from './simc-runner';
+import {
+  buildFlaskProfilesetLines,
+  parseBestFlask,
+} from './questions/best-flask';
+import { STATIC_DESTRO_WARLOCK_PROFILE } from './static-profile';
+import { RESULTS_SCHEMA_VERSION, type SimlyResults } from '@simly/shared';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -71,6 +79,8 @@ async function startRoundTrip(): Promise<WowPaths | undefined> {
     console.error('[main] failed to ensure results .toc:', err);
   }
 
+  // Seed a placeholder file so the addon loads cleanly on first /reload
+  // before any sim has run. Replaced as soon as a real sim completes.
   const placeholder = buildPlaceholderResults('placeholder-character');
   try {
     await writeLuaFile(
@@ -78,17 +88,87 @@ async function startRoundTrip(): Promise<WowPaths | undefined> {
       'SimlyResults',
       placeholder as unknown as Parameters<typeof writeLuaFile>[2],
     );
-    console.log('[main] wrote placeholder SimlyResults.lua');
+    console.log('[main] wrote placeholder SimlyResults.lua (will be replaced by first sim)');
   } catch (err) {
     console.error('[main] failed to write results file:', err);
   }
 
+  let simInFlight = false;
   watcher = watchSavedVars(paths.savedVarsPath, (db) => {
-    console.log('[main] parsed SimlyDB:');
-    console.dir(db, { depth: null });
+    console.log(
+      `[main] SavedVars updated: ${db.character.name}-${db.character.realm} (${db.character.class} ${db.character.spec})`,
+    );
+    if (simInFlight) {
+      console.log('[main] sim already in flight; skipping until current run finishes');
+      return;
+    }
+    simInFlight = true;
+    void runFlaskSim(paths, db.character).finally(() => {
+      simInFlight = false;
+    });
   });
   console.log('[main] watching SavedVariables...');
   return paths;
+}
+
+async function runFlaskSim(
+  paths: WowPaths,
+  character: { name: string; realm: string; region: string },
+): Promise<void> {
+  const characterKey = `${character.name}-${character.realm}-${character.region}`;
+  const simcPaths = resolveSimcPaths();
+  const profileScript = [
+    STATIC_DESTRO_WARLOCK_PROFILE,
+    '',
+    buildFlaskProfilesetLines(),
+  ].join('\n');
+
+  console.log(`[sim] starting flask sim for ${characterKey} via ${simcPaths.binPath}`);
+  const t0 = Date.now();
+  let run;
+  try {
+    run = await runSimc({
+      paths: simcPaths,
+      profileScript,
+      iterations: 1000,
+      scratchTag: `flask-${Date.now()}`,
+    });
+  } catch (err) {
+    console.error('[sim] simc run failed:', err);
+    return;
+  }
+  const dt = ((Date.now() - t0) / 1000).toFixed(1);
+  console.log(
+    `[sim] simc ${run.simcVersion} (${run.gitRevision.slice(0, 8)}) finished in ${dt}s with ${run.profilesets.length} profileset(s)`,
+  );
+
+  const bestFlask = parseBestFlask(run);
+  if (!bestFlask) {
+    console.error('[sim] no matching flask results in SimC output');
+    return;
+  }
+  console.log(
+    `[sim] best flask: ${bestFlask.best.name} @ ${bestFlask.best.dps} dps`,
+  );
+
+  const results: SimlyResults = {
+    schema_version: RESULTS_SCHEMA_VERSION,
+    generated_at: Math.floor(Date.now() / 1000),
+    simc_version: `${run.simcVersion} (${run.gitRevision.slice(0, 8)})`,
+    character_key: characterKey,
+    questions: { best_flask: bestFlask },
+  };
+
+  try {
+    await writeLuaFile(
+      paths.resultsLuaPath,
+      'SimlyResults',
+      results as unknown as Parameters<typeof writeLuaFile>[2],
+    );
+    console.log('[sim] wrote SimlyResults.lua — /reload in WoW to see it');
+  } catch (err) {
+    console.error('[sim] failed to write SimlyResults.lua:', err);
+  }
 }
 
 app.whenReady().then(async () => {
