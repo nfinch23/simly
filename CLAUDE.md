@@ -1,8 +1,8 @@
-# Craft Compass — Agent Guidance
+# Simly — Agent Guidance
 
-**Product display name:** Craft Compass
-**Code identifier:** `CraftCompass` (no spaces — used in addon folder, SavedVariables, file names)
-**Repo folder name:** `CraftCompass`
+**Product display name:** Simly
+**Code identifier:** `Simly` (no spaces — used in addon folder, SavedVariables, file names)
+**Repo folder name:** `Simly`
 
 ## Read these first, in order
 

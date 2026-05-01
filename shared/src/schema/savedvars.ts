@@ -22,7 +22,7 @@ export interface SavedVarsRequest {
   queued_at: number;
 }
 
-export interface CraftCompassDB {
+export interface SimlyDB {
   schema_version: number;
   exported_at: number;
   character: SavedVarsCharacter;

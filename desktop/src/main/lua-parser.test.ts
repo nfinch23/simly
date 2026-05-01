@@ -2,9 +2,9 @@ import { describe, expect, it } from 'vitest';
 import { parseSavedVars } from './lua-parser';
 
 describe('parseSavedVars', () => {
-  it('parses a representative CraftCompassDB block', () => {
+  it('parses a representative SimlyDB block', () => {
     const source = `
-CraftCompassDB = {
+SimlyDB = {
   schema_version = 1,
   exported_at = 1714435200,
   character = {
@@ -31,7 +31,7 @@ CraftCompassDB = {
 
   it('handles a populated requests array', () => {
     const source = `
-CraftCompassDB = {
+SimlyDB = {
   schema_version = 1,
   exported_at = 100,
   character = { name = "X", realm = "Y", region = "us", class = "MAGE", spec = "Fire", level = 1 },
@@ -54,13 +54,13 @@ CraftCompassDB = {
 
   it('throws on unsupported expressions', () => {
     expect(() =>
-      parseSavedVars('CraftCompassDB = { x = 1 + 2 }'),
+      parseSavedVars('SimlyDB = { x = 1 + 2 }'),
     ).toThrow(/Unsupported/);
   });
 
   it('parses negative numbers via unary minus', () => {
     const db = parseSavedVars(`
-CraftCompassDB = {
+SimlyDB = {
   schema_version = 1,
   exported_at = 0,
   character = { name = "X", realm = "Y", region = "us", class = "MAGE", spec = "Fire", level = 1 },

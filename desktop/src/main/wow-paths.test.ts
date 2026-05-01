@@ -32,8 +32,8 @@ describe('resolveWowPaths', () => {
     const paths = resolveWowPaths({ retailRoot: root });
     expect(paths.account).toBe('12345678#1');
     expect(paths.savedVarsPath).toContain('12345678#1');
-    expect(paths.savedVarsPath).toContain('CraftCompass.lua');
-    expect(paths.resultsLuaPath).toContain('CraftCompassResults');
+    expect(paths.savedVarsPath).toContain('Simly.lua');
+    expect(paths.resultsLuaPath).toContain('SimlyResults');
   });
 
   it('ignores the SavedVariables sibling under Account', () => {

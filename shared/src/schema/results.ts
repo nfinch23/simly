@@ -32,7 +32,7 @@ export interface QuestionResults {
   [questionId: string]: unknown;
 }
 
-export interface CraftCompassResults {
+export interface SimlyResults {
   schema_version: number;
   generated_at: number;
   simc_version: string;

@@ -21,7 +21,7 @@ describe('serializeLua', () => {
     expect(out).toContain('["123"] = 3');
   });
 
-  it('round-trips through the parser as CraftCompassDB-shaped data', () => {
+  it('round-trips through the parser as SimlyDB-shaped data', () => {
     const original = {
       schema_version: 1,
       exported_at: 1714435200,
@@ -36,7 +36,7 @@ describe('serializeLua', () => {
       simc_export: 'warrior="Charname"\nlevel=80\n',
       requests: [{ id: 'best_flask', queued_at: 1 }],
     };
-    const lua = serializeLua('CraftCompassDB', original);
+    const lua = serializeLua('SimlyDB', original);
     expect(parseSavedVars(lua)).toEqual(original);
   });
 

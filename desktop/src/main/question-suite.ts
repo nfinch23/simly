@@ -1,13 +1,13 @@
 import {
   RESULTS_SCHEMA_VERSION,
-  type CraftCompassResults,
-} from '@craftcompass/shared';
+  type SimlyResults,
+} from '@simly/shared';
 
 /**
  * Hardcoded results blob used by the phase 1 spike. Phase 2 replaces this
  * with output parsed from a real SimulationCraft run.
  */
-export function buildPlaceholderResults(characterKey: string): CraftCompassResults {
+export function buildPlaceholderResults(characterKey: string): SimlyResults {
   return {
     schema_version: RESULTS_SCHEMA_VERSION,
     generated_at: Math.floor(Date.now() / 1000),

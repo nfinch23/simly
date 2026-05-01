@@ -4,7 +4,7 @@ import { resolve } from 'node:path';
 
 export default defineConfig({
   main: {
-    plugins: [externalizeDepsPlugin({ exclude: ['@craftcompass/shared'] })],
+    plugins: [externalizeDepsPlugin({ exclude: ['@simly/shared'] })],
     build: {
       rollupOptions: {
         input: { index: resolve(__dirname, 'src/main/index.ts') },
@@ -12,7 +12,7 @@ export default defineConfig({
     },
   },
   preload: {
-    plugins: [externalizeDepsPlugin({ exclude: ['@craftcompass/shared'] })],
+    plugins: [externalizeDepsPlugin({ exclude: ['@simly/shared'] })],
     build: {
       rollupOptions: {
         input: { index: resolve(__dirname, 'src/preload/index.ts') },

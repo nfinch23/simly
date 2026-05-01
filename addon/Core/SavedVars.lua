@@ -16,7 +16,7 @@ function SavedVars.WritePlaceholder()
 		if specName then spec = specName end
 	end
 
-	CraftCompassDB = {
+	SimlyDB = {
 		schema_version = SCHEMA_VERSION,
 		exported_at = time(),
 		character = {

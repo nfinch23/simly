@@ -1,8 +1,8 @@
 {
-  "name": "@craftcompass/desktop",
+  "name": "@simly/desktop",
   "version": "0.0.0",
   "private": true,
-  "description": "Craft Compass desktop companion app.",
+  "description": "Simly desktop companion app.",
   "main": "out/main/index.js",
   "scripts": {
     "dev": "electron-vite dev",
@@ -13,7 +13,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@craftcompass/shared": "*",
+    "@simly/shared": "*",
     "chokidar": "^3.6.0",
     "luaparse": "^0.3.1",
     "react": "^18.3.1",

@@ -11,13 +11,13 @@ import { buildPlaceholderResults } from './question-suite';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 const RESULTS_TOC = `## Interface: 120005
-## Title: Craft Compass Results
-## Notes: Auto-generated results file for Craft Compass. Do not edit manually.
+## Title: Simly Results
+## Notes: Auto-generated results file for Simly. Do not edit manually.
 ## Author: Noah Finch
 ## Version: 0.0.0
-## Dependencies: CraftCompass
+## Dependencies: Simly
 
-CraftCompassResults.lua
+SimlyResults.lua
 `;
 
 let watcher: WatcherHandle | undefined;
@@ -26,7 +26,7 @@ function createWindow(): void {
   const win = new BrowserWindow({
     width: 900,
     height: 600,
-    title: 'Craft Compass',
+    title: 'Simly',
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       sandbox: false,
@@ -62,10 +62,10 @@ async function startRoundTrip(): Promise<WowPaths | undefined> {
   // never overwrite an existing .toc in case the user has customized it.
   try {
     await mkdir(paths.resultsAddonDir, { recursive: true });
-    const tocPath = join(paths.resultsAddonDir, 'CraftCompassResults.toc');
+    const tocPath = join(paths.resultsAddonDir, 'SimlyResults.toc');
     if (!existsSync(tocPath)) {
       await writeFile(tocPath, RESULTS_TOC, 'utf8');
-      console.log('[main] wrote CraftCompassResults.toc (was missing)');
+      console.log('[main] wrote SimlyResults.toc (was missing)');
     }
   } catch (err) {
     console.error('[main] failed to ensure results .toc:', err);
@@ -75,16 +75,16 @@ async function startRoundTrip(): Promise<WowPaths | undefined> {
   try {
     await writeLuaFile(
       paths.resultsLuaPath,
-      'CraftCompassResults',
+      'SimlyResults',
       placeholder as unknown as Parameters<typeof writeLuaFile>[2],
     );
-    console.log('[main] wrote placeholder CraftCompassResults.lua');
+    console.log('[main] wrote placeholder SimlyResults.lua');
   } catch (err) {
     console.error('[main] failed to write results file:', err);
   }
 
   watcher = watchSavedVars(paths.savedVarsPath, (db) => {
-    console.log('[main] parsed CraftCompassDB:');
+    console.log('[main] parsed SimlyDB:');
     console.dir(db, { depth: null });
   });
   console.log('[main] watching SavedVariables...');

@@ -20,7 +20,7 @@ const LUA_RESERVED = new Set([
 /**
  * Serialize a JS object as a Lua source file with a single top-level
  * assignment: `<globalName> = { ... }`. Used to write
- * `CraftCompassResults.lua` for the addon. Strings are escaped, tables are
+ * `SimlyResults.lua` for the addon. Strings are escaped, tables are
  * pretty-printed with 2-space indentation. The output is deterministic for
  * a given input (object key order is preserved per V8 insertion order).
  */

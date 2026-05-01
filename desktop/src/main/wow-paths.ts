@@ -17,7 +17,7 @@ export interface ResolveOptions {
 }
 
 /**
- * Resolve the WoW paths Craft Compass needs to read and write. Phase 1
+ * Resolve the WoW paths Simly needs to read and write. Phase 1
  * auto-detects the account folder under WTF/Account/. If exactly one
  * candidate exists we use it; if multiple exist we take the first
  * lexicographically and warn — the Settings UI in phase 5 lets the user
@@ -64,15 +64,15 @@ export function resolveWowPaths(options: ResolveOptions = {}): WowPaths {
       accountsDir,
       account,
       'SavedVariables',
-      'CraftCompass.lua',
+      'Simly.lua',
     ),
-    resultsAddonDir: join(retailRoot, 'Interface', 'AddOns', 'CraftCompassResults'),
+    resultsAddonDir: join(retailRoot, 'Interface', 'AddOns', 'SimlyResults'),
     resultsLuaPath: join(
       retailRoot,
       'Interface',
       'AddOns',
-      'CraftCompassResults',
-      'CraftCompassResults.lua',
+      'SimlyResults',
+      'SimlyResults.lua',
     ),
   };
 }

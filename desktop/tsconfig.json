@@ -6,7 +6,7 @@
     "types": ["node", "electron-vite/node", "vitest/globals"],
     "baseUrl": ".",
     "paths": {
-      "@craftcompass/shared": ["../shared/src/index.ts"]
+      "@simly/shared": ["../shared/src/index.ts"]
     },
     "noEmit": true
   },

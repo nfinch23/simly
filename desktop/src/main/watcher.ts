@@ -1,7 +1,7 @@
 import chokidar from 'chokidar';
 import { readFile } from 'node:fs/promises';
 import { parseSavedVars } from './lua-parser';
-import type { CraftCompassDB } from '@craftcompass/shared';
+import type { SimlyDB } from '@simly/shared';
 
 const DEBOUNCE_MS = 200;
 
@@ -17,7 +17,7 @@ export interface WatcherHandle {
  */
 export function watchSavedVars(
   path: string,
-  onUpdate: (db: CraftCompassDB) => void,
+  onUpdate: (db: SimlyDB) => void,
 ): WatcherHandle {
   let timer: NodeJS.Timeout | undefined;
 

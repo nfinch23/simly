@@ -1,7 +1,7 @@
-# Craft Compass — Project Scope
+# Simly — Project Scope
 
-**Product display name:** Craft Compass
-**Technical identifier (used in code, file names, addon folder, SavedVariables global):** `CraftCompass` (no spaces)
+**Product display name:** Simly
+**Technical identifier (used in code, file names, addon folder, SavedVariables global):** `Simly` (no spaces)
 **Author:** Noah Finch
 **License:** MIT
 
@@ -16,7 +16,7 @@ Implementation scope for Claude Code agents. Read [DESIGN.md](DESIGN.md) first f
 Monorepo. Two main packages plus shared types.
 
 ```
-CraftCompass/
+Simly/
 ├── DESIGN.md                          # The why
 ├── SCOPE.md                           # This file
 ├── README.md                          # User-facing install + usage docs
@@ -26,8 +26,8 @@ CraftCompass/
 ├── tsconfig.base.json                 # Shared TS config
 │
 ├── addon/                             # WoW addon (Lua)
-│   ├── CraftCompass.toc                     # Addon manifest
-│   ├── CraftCompass.lua                     # Entry point
+│   ├── Simly.toc                     # Addon manifest
+│   ├── Simly.lua                     # Entry point
 │   ├── Core/
 │   │   ├── Init.lua                   # Addon initialization, event registration
 │   │   ├── Export.lua                 # SimC profile export (vendored from SimC addon)
@@ -133,9 +133,9 @@ Do not substitute without updating SCOPE.md.
 |---|---|
 | `Core/Init.lua` | Register events: `ADDON_LOADED`, `PLAYER_LOGIN`, `PLAYER_LOGOUT`. Load results on login. Trigger export on logout. |
 | `Core/Export.lua` | Vendored SimC export. Generate the simc-format profile string from current character. |
-| `Core/SavedVars.lua` | Define `CraftCompassDB` SavedVariables table. Read/write helpers. |
-| `Core/ResultsLoader.lua` | Read `CraftCompassResults.lua` file (loaded as a separate addon — see section 5) and expose its data via a Lua module. |
-| `UI/Tooltip.lua` | Register `TooltipDataProcessor.AddTooltipPostCall` for `Item` tooltips. Look up item ID in results table. Append a `CraftCompass:` line. |
+| `Core/SavedVars.lua` | Define `SimlyDB` SavedVariables table. Read/write helpers. |
+| `Core/ResultsLoader.lua` | Read `SimlyResults.lua` file (loaded as a separate addon — see section 5) and expose its data via a Lua module. |
+| `UI/Tooltip.lua` | Register `TooltipDataProcessor.AddTooltipPostCall` for `Item` tooltips. Look up item ID in results table. Append a `Simly:` line. |
 | `UI/SlashCommand.lua` | `/cc` command. v1 only — opens panel. |
 | `UI/Panel.lua` | Question picker frame. v1 only. |
 
@@ -145,9 +145,9 @@ Do not substitute without updating SCOPE.md.
 |---|---|
 | `main/index.ts` | App lifecycle. Tray icon. Renderer window (hidden by default; tray click toggles). |
 | `main/wow-paths.ts` | Locate WoW install. Default to `C:\Program Files (x86)\World of Warcraft\_retail_\`; user-overridable in Settings. |
-| `main/watcher.ts` | Watch `WTF/Account/<acct>/SavedVariables/CraftCompass.lua`. Debounce file events (Lua flush is atomic; no need to wait long, but 200ms debounce avoids partial reads). |
-| `main/lua-parser.ts` | Parse SavedVars file. Extract `CraftCompassDB` table. Return typed object. |
-| `main/lua-writer.ts` | Serialize a JS object as a Lua source file (top-level `CraftCompassResults = { ... }`). |
+| `main/watcher.ts` | Watch `WTF/Account/<acct>/SavedVariables/Simly.lua`. Debounce file events (Lua flush is atomic; no need to wait long, but 200ms debounce avoids partial reads). |
+| `main/lua-parser.ts` | Parse SavedVars file. Extract `SimlyDB` table. Return typed object. |
+| `main/lua-writer.ts` | Serialize a JS object as a Lua source file (top-level `SimlyResults = { ... }`). |
 | `main/simc-installer.ts` | Check pinned SimC version. Download from `simulationcraft/simc` GitHub Releases. Verify checksum. Extract to app data dir. |
 | `main/simc-runner.ts` | Spawn SimC subprocess with profile + APL. Stream stdout for progress. Parse final result block. |
 | `main/question-suite.ts` | Define the question set. Each question = `{ id, label, mutateProfile(profile), parseResult(simcOutput) }`. Loop through enabled questions when a new export arrives. |
@@ -159,10 +159,10 @@ Do not substitute without updating SCOPE.md.
 
 Canonical. Both sides read/write to this exact shape. Addon writes; desktop reads.
 
-File path: `WTF/Account/<acct>/SavedVariables/CraftCompass.lua`
+File path: `WTF/Account/<acct>/SavedVariables/Simly.lua`
 
 ```lua
-CraftCompassDB = {
+SimlyDB = {
   schema_version = 1,
   exported_at = 1714435200,        -- Unix timestamp (UTC)
   character = {
@@ -192,26 +192,26 @@ CraftCompassDB = {
 
 Canonical. Desktop writes; addon reads.
 
-File path: written into a separate addon folder named `CraftCompassResults/` (sibling to `CraftCompass/`). The file is `CraftCompassResults.lua` with a `## SavedVariables` directive in its `.toc` so WoW loads it cleanly. **This is critical:** writing into another addon's folder works, but the cleanest pattern (mirrors TSM_AppHelper) is a dedicated results-only addon.
+File path: written into a separate addon folder named `SimlyResults/` (sibling to `Simly/`). The file is `SimlyResults.lua` with a `## SavedVariables` directive in its `.toc` so WoW loads it cleanly. **This is critical:** writing into another addon's folder works, but the cleanest pattern (mirrors TSM_AppHelper) is a dedicated results-only addon.
 
 ```
-Interface/AddOns/CraftCompassResults/
-├── CraftCompassResults.toc
-└── CraftCompassResults.lua
+Interface/AddOns/SimlyResults/
+├── SimlyResults.toc
+└── SimlyResults.lua
 ```
 
-`CraftCompassResults.toc`:
+`SimlyResults.toc`:
 ```
 ## Interface: 120000
-## Title: CraftCompass Results
-## Notes: Auto-generated results file for CraftCompass. Do not edit manually.
-## Dependencies: CraftCompass
-CraftCompassResults.lua
+## Title: Simly Results
+## Notes: Auto-generated results file for Simly. Do not edit manually.
+## Dependencies: Simly
+SimlyResults.lua
 ```
 
-`CraftCompassResults.lua` (overwritten by desktop app on every sim completion):
+`SimlyResults.lua` (overwritten by desktop app on every sim completion):
 ```lua
-CraftCompassResults = {
+SimlyResults = {
   schema_version = 1,
   generated_at = 1714435200,
   simc_version = "1100-01",
@@ -251,22 +251,22 @@ Each phase is a checkpoint with concrete acceptance criteria. Don't move to phas
 - Initialize npm workspaces in root `package.json`.
 - Set up `shared/` package with TS types from sections 4 and 5.
 - Set up `desktop/` package with electron-vite scaffold.
-- Stub out `addon/` with empty `.toc` and `CraftCompass.lua` printing "Craft Compass loaded" on login.
+- Stub out `addon/` with empty `.toc` and `Simly.lua` printing "Simly loaded" on login.
 - Add `.gitignore` (node_modules, dist, .DS_Store, electron-builder output, WoW SavedVariables test data).
 - Write a stub `README.md`.
 
 **Acceptance:**
 - `npm install` from root works.
 - `npm run dev` in `desktop/` opens an empty Electron window.
-- Dropping `addon/` into `Interface/AddOns/CraftCompass/` and launching WoW prints "Craft Compass loaded" to chat.
+- Dropping `addon/` into `Interface/AddOns/Simly/` and launching WoW prints "Simly loaded" to chat.
 
 ### Phase 1 — Round-Trip Spike
 
 **Tasks:**
-- Addon: on `PLAYER_LOGOUT`, write `CraftCompassDB.simc_export = "PLACEHOLDER_PROFILE"` and a hardcoded character block to SavedVariables.
+- Addon: on `PLAYER_LOGOUT`, write `SimlyDB.simc_export = "PLACEHOLDER_PROFILE"` and a hardcoded character block to SavedVariables.
 - Desktop: tray icon. File watcher on the SavedVariables path (auto-detect WoW install via `wow-paths.ts`; user can override). On change, parse with `luaparse`, log the parsed object to console.
-- Desktop: write a fixed `CraftCompassResults.lua` to a separate `CraftCompassResults/` addon folder. Hardcoded result.
-- Addon: separate `CraftCompassResults` addon defined per section 5. Main `CraftCompass` addon reads `CraftCompassResults` global on login and prints "Best flask: <name>" to chat.
+- Desktop: write a fixed `SimlyResults.lua` to a separate `SimlyResults/` addon folder. Hardcoded result.
+- Addon: separate `SimlyResults` addon defined per section 5. Main `Simly` addon reads `SimlyResults` global on login and prints "Best flask: <name>" to chat.
 
 **Acceptance:**
 - Open WoW → /reload → desktop console logs the parsed SavedVars.
@@ -276,24 +276,24 @@ Each phase is a checkpoint with concrete acceptance criteria. Don't move to phas
 ### Phase 2 — Real SimC Integration
 
 **Tasks:**
-- Vendor SimC addon's `Core.lua` export module into `addon/Core/Export.lua`. Wire it to run on `PLAYER_LOGOUT` and write the real export string into `CraftCompassDB.simc_export`.
+- Vendor SimC addon's `Core.lua` export module into `addon/Core/Export.lua`. Wire it to run on `PLAYER_LOGOUT` and write the real export string into `SimlyDB.simc_export`.
 - Desktop: `simc-installer.ts` downloads the latest SimC release on first launch (with a "use pinned" toggle defaulting to a known-good version). Verify SHA256 against GitHub Release asset.
 - Desktop: `simc-runner.ts` spawns SimC with the exported profile + a single hardcoded "best flask" sim variant (vary `flask=` line, run 5K iterations each).
-- Desktop: parse the resulting DPS numbers, pick the winner, write to `CraftCompassResults.lua` per section 5 schema.
+- Desktop: parse the resulting DPS numbers, pick the winner, write to `SimlyResults.lua` per section 5 schema.
 
 **Acceptance:**
 - Real character export from a live WoW session triggers a real SimC run.
-- Within ~2 minutes (depending on machine), `CraftCompassResults.lua` updates with a real recommendation.
+- Within ~2 minutes (depending on machine), `SimlyResults.lua` updates with a real recommendation.
 - /reload shows the recommendation in chat.
 
 ### Phase 3 — Tooltip Hook
 
 **Tasks:**
-- `addon/UI/Tooltip.lua`: Register `TooltipDataProcessor.AddTooltipPostCall(Enum.TooltipDataType.Item, ...)`. On each item tooltip, look up the item ID in `CraftCompassResults.questions.best_flask.alternatives` (and `.best`). If matched, append a colored line: `|cff00ff00CraftCompass: best flask (+1.2% DPS)|r` or similar.
+- `addon/UI/Tooltip.lua`: Register `TooltipDataProcessor.AddTooltipPostCall(Enum.TooltipDataType.Item, ...)`. On each item tooltip, look up the item ID in `SimlyResults.questions.best_flask.alternatives` (and `.best`). If matched, append a colored line: `|cff00ff00Simly: best flask (+1.2% DPS)|r` or similar.
 - Verify against TipTac, LeatrixPlus loaded — confirm no conflict.
 
 **Acceptance:**
-- Hovering any flask in inventory shows a CraftCompass line.
+- Hovering any flask in inventory shows a Simly line.
 - Best flask shows "(best)"; alternatives show their delta.
 - No errors when other tooltip-modifying addons are loaded.
 
@@ -338,7 +338,7 @@ Each phase is a checkpoint with concrete acceptance criteria. Don't move to phas
 ### Phase 7 — In-Game Panel (Approach C transition)
 
 **Tasks:**
-- `addon/UI/Panel.lua`: in-game frame opened by `/cc`. Shows the question list, last-updated timestamps per question, and click-to-queue (writes to `CraftCompassDB.requests`).
+- `addon/UI/Panel.lua`: in-game frame opened by `/cc`. Shows the question list, last-updated timestamps per question, and click-to-queue (writes to `SimlyDB.requests`).
 - Desktop: when `requests` is non-empty in the SavedVars, prioritize those questions in the next sim cycle.
 - Settings UI in addon (basic): which questions to show in tooltips.
 
@@ -355,7 +355,7 @@ Each phase is a checkpoint with concrete acceptance criteria. Don't move to phas
 - Tabs for indentation (matches WoW addon community).
 - snake_case for SavedVars keys, PascalCase for module names, camelCase for local variables.
 - Always namespace: `local addonName, ns = ...` at top of every file; export via `ns.<ModuleName>`.
-- No global pollution beyond `CraftCompassDB` (SavedVar) and `CraftCompassResults` (results global from sister addon).
+- No global pollution beyond `SimlyDB` (SavedVar) and `SimlyResults` (results global from sister addon).
 - All event handlers go through `Core/Init.lua`.
 
 **TypeScript:**

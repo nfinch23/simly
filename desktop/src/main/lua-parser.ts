@@ -1,28 +1,28 @@
 import { parse, type Statement, type Expression, type TableConstructorExpression } from 'luaparse';
-import type { CraftCompassDB } from '@craftcompass/shared';
+import type { SimlyDB } from '@simly/shared';
 
 type LuaValue = string | number | boolean | null | LuaValue[] | { [key: string]: LuaValue };
 
 /**
- * Parse a Craft Compass SavedVariables Lua file and extract the
- * `CraftCompassDB` table. We only support a narrow subset of Lua: literal
+ * Parse a Simly SavedVariables Lua file and extract the
+ * `SimlyDB` table. We only support a narrow subset of Lua: literal
  * tables, strings, numbers, booleans, nil. That's all the addon emits, and
  * any drift will throw — which is what we want.
  */
-export function parseSavedVars(source: string): CraftCompassDB {
+export function parseSavedVars(source: string): SimlyDB {
   const ast = parse(source, { comments: false, encodingMode: 'pseudo-latin1' });
 
   for (const stmt of ast.body) {
     const target = topLevelAssignmentTarget(stmt);
-    if (target?.name !== 'CraftCompassDB') continue;
+    if (target?.name !== 'SimlyDB') continue;
     const value = expressionToValue(target.init);
     if (!isPlainObject(value)) {
-      throw new Error('CraftCompassDB is not a table');
+      throw new Error('SimlyDB is not a table');
     }
-    return value as unknown as CraftCompassDB;
+    return value as unknown as SimlyDB;
   }
 
-  throw new Error('CraftCompassDB assignment not found in SavedVariables file');
+  throw new Error('SimlyDB assignment not found in SavedVariables file');
 }
 
 function topLevelAssignmentTarget(
@@ -88,7 +88,7 @@ function tableToValue(table: TableConstructorExpression): LuaValue {
       obj[String(key)] = expressionToValue(field.value);
     } else {
       throw new Error(
-        `Mixed array-like and key-value fields in table — Craft Compass schemas should not produce this`,
+        `Mixed array-like and key-value fields in table — Simly schemas should not produce this`,
       );
     }
   }
