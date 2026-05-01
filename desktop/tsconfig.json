@@ -3,7 +3,7 @@
   "compilerOptions": {
     "jsx": "react-jsx",
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
-    "types": ["node", "electron-vite/node"],
+    "types": ["node", "electron-vite/node", "vitest/globals"],
     "baseUrl": ".",
     "paths": {
       "@craftcompass/shared": ["../shared/src/index.ts"]

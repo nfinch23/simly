@@ -13,7 +13,8 @@ Phase 0 — repo bootstrap. Not usable yet.
 
 ## Repo layout
 
-- `addon/` — WoW addon (Lua).
+- `addon/` — WoW addon (Lua), installs as `Interface/AddOns/CraftCompass/`.
+- `addon-results/` — Sister addon that holds the auto-generated results file the desktop overwrites; installs as `Interface/AddOns/CraftCompassResults/`.
 - `desktop/` — Electron + TypeScript + React companion app.
 - `shared/` — Cross-package TypeScript types and schemas.
 - `data/` — Static data tables (regenerated per WoW patch).
