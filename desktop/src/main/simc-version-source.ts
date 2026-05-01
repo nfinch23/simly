@@ -113,3 +113,65 @@ export class LatestNightlyStrategy implements SimcVersionSource {
     return first;
   }
 }
+
+/**
+ * Compute the most recent Monday at the given UTC hour (default 23:00) at
+ * or before `now`. This is the "lockout boundary" used by
+ * MondayWeeklyStrategy — every nightly published <= this timestamp is
+ * eligible for "this week's pin," and we hold that pin until the next
+ * Monday boundary passes.
+ *
+ * Mirrors Raidbots' weekly cadence: they rebuild Monday night and hold
+ * for the lockout. We don't try to match their exact pick (no public feed
+ * exposes it) — we apply the same selection rule to the same source.
+ */
+export function mostRecentMondayBoundary(now: Date, hourUtc = 23): Date {
+  const d = new Date(now);
+  const day = d.getUTCDay(); // 0=Sun, 1=Mon, ..., 6=Sat
+  // Days back to most recent Monday (Mon=0, Tue=1, ..., Sun=6)
+  let daysSinceMonday = (day + 6) % 7;
+  // If today IS Monday but we're earlier than the boundary hour, the
+  // most recent passed boundary is the previous Monday.
+  if (daysSinceMonday === 0 && d.getUTCHours() < hourUtc) {
+    daysSinceMonday = 7;
+  }
+  d.setUTCDate(d.getUTCDate() - daysSinceMonday);
+  d.setUTCHours(hourUtc, 0, 0, 0);
+  return d;
+}
+
+/**
+ * Picks the most recent nightly published at or before the most recent
+ * Monday 23:00 UTC. Mirrors Raidbots' "weekly" cadence using SimC's own
+ * nightly listing — see SCOPE.md section 6 phase 2 for context.
+ *
+ * Falls back to the oldest available nightly if nothing is older than
+ * the boundary (rare; only happens if the listing was just wiped or the
+ * boundary clock is very wrong). That keeps the app usable instead of
+ * surfacing a strategy error.
+ */
+export class MondayWeeklyStrategy implements SimcVersionSource {
+  constructor(
+    private readonly fetcher: Fetcher = defaultFetcher,
+    private readonly clock: () => Date = () => new Date(),
+    private readonly boundaryHourUtc = 23,
+  ) {}
+
+  async resolveCurrent(): Promise<SimcVersionInfo> {
+    const html = await this.fetcher(NIGHTLY_INDEX_URL);
+    const versions = parseNightlyIndex(html);
+    if (versions.length === 0) {
+      throw new Error(
+        `No Win64 nightly found in ${NIGHTLY_INDEX_URL}. Listing format may have changed.`,
+      );
+    }
+    const boundary = mostRecentMondayBoundary(this.clock(), this.boundaryHourUtc);
+    const eligible = versions.find(
+      (v) => v.publishedAt.getTime() <= boundary.getTime(),
+    );
+    if (eligible) return eligible;
+    // Nothing is older than the boundary — every nightly was published
+    // after our most recent Monday. Fall back to the oldest entry.
+    return versions[versions.length - 1]!;
+  }
+}
