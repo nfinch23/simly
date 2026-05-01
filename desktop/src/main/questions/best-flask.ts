@@ -1,6 +1,11 @@
 import type { BestFlaskResult } from '@simly/shared';
 import type { SimcRunResult } from '../simc-runner';
 
+function roundTo(n: number, decimals: number): number {
+  const factor = 10 ** decimals;
+  return Math.round(n * factor) / factor;
+}
+
 interface FlaskCandidate {
   key: string;
   item_id: number;
@@ -54,7 +59,7 @@ export function parseBestFlask(run: SimcRunResult): BestFlaskResult | undefined 
       item_id: m.candidate.item_id,
       name: m.candidate.name,
       dps: Math.round(m.profileset.mean),
-      delta_pct: ((m.profileset.mean - winnerDps) / winnerDps) * 100,
+      delta_pct: roundTo(((m.profileset.mean - winnerDps) / winnerDps) * 100, 2),
     })),
   };
 }

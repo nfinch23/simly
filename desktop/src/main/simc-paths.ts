@@ -36,7 +36,7 @@ export function resolveSimcPaths(override?: Partial<SimcPaths>): SimcPaths {
   return { binPath, scratchDir, installRoot };
 }
 
-function findLatestSimcBinary(installRoot: string): string {
+export function findLatestSimcBinary(installRoot: string): string {
   if (!existsSync(installRoot)) {
     return join(installRoot, 'current', 'simc.exe');
   }
