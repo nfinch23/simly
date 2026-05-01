@@ -10,9 +10,9 @@ import { buildPlaceholderResults } from './question-suite';
 import { resolveSimcPaths } from './simc-paths';
 import { runSimc } from './simc-runner';
 import {
-  buildFlaskProfilesetLines,
-  parseBestFlask,
-} from './questions/best-flask';
+  buildAllQuestionLines,
+  parseAllQuestions,
+} from './questions/registry';
 import { STATIC_DESTRO_WARLOCK_PROFILE } from './static-profile';
 import { RESULTS_SCHEMA_VERSION, type SimlyResults } from '@simly/shared';
 
@@ -120,7 +120,7 @@ async function runFlaskSim(
   const profileScript = [
     STATIC_DESTRO_WARLOCK_PROFILE,
     '',
-    buildFlaskProfilesetLines(),
+    buildAllQuestionLines(),
   ].join('\n');
 
   console.log(`[sim] starting flask sim for ${characterKey} via ${simcPaths.binPath}`);
@@ -142,21 +142,24 @@ async function runFlaskSim(
     `[sim] simc ${run.simcVersion} (${run.gitRevision.slice(0, 8)}) finished in ${dt}s with ${run.profilesets.length} profileset(s)`,
   );
 
-  const bestFlask = parseBestFlask(run);
-  if (!bestFlask) {
-    console.error('[sim] no matching flask results in SimC output');
+  const questions = parseAllQuestions(run);
+  if (Object.keys(questions).length === 0) {
+    console.error('[sim] no question results in SimC output');
     return;
   }
-  console.log(
-    `[sim] best flask: ${bestFlask.best.name} @ ${bestFlask.best.dps} dps`,
-  );
+  for (const [id, result] of Object.entries(questions)) {
+    const r = result as { best?: { name: string; dps: number } };
+    if (r.best) {
+      console.log(`[sim] ${id}: ${r.best.name} @ ${r.best.dps} dps`);
+    }
+  }
 
   const results: SimlyResults = {
     schema_version: RESULTS_SCHEMA_VERSION,
     generated_at: Math.floor(Date.now() / 1000),
     simc_version: `${run.simcVersion} (${run.gitRevision.slice(0, 8)})`,
     character_key: characterKey,
-    questions: { best_flask: bestFlask },
+    questions,
   };
 
   try {

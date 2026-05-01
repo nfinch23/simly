@@ -1,10 +1,11 @@
 import type { BestFlaskResult } from '@simly/shared';
 import type { SimcRunResult } from '../simc-runner';
-
-function roundTo(n: number, decimals: number): number {
-  const factor = 10 ** decimals;
-  return Math.round(n * factor) / factor;
-}
+import {
+  buildProfilesetLines,
+  matchProfilesetsByPrefix,
+  roundTo,
+  type Question,
+} from './index';
 
 interface FlaskCandidate {
   key: string;
@@ -30,23 +31,25 @@ export const FLASK_CANDIDATES: readonly FlaskCandidate[] = [
   },
 ];
 
+const PREFIX = 'flask';
+
 export function buildFlaskProfilesetLines(): string {
-  return FLASK_CANDIDATES.map(
-    (c) => `profileset."flask_${c.key}"+="flask=${c.simcFlask}"`,
-  ).join('\n');
+  return buildProfilesetLines(
+    PREFIX,
+    FLASK_CANDIDATES.map((c) => ({
+      key: c.key,
+      simcLine: `flask=${c.simcFlask}`,
+    })),
+  );
 }
 
 export function parseBestFlask(run: SimcRunResult): BestFlaskResult | undefined {
-  const byKey = new Map(FLASK_CANDIDATES.map((c) => [`flask_${c.key}`, c]));
-  const matched = run.profilesets
-    .map((p) => ({ profileset: p, candidate: byKey.get(p.name) }))
-    .filter((m): m is { profileset: typeof run.profilesets[number]; candidate: FlaskCandidate } => !!m.candidate);
-
+  const matched = matchProfilesetsByPrefix(run, PREFIX, FLASK_CANDIDATES);
   if (matched.length === 0) return undefined;
 
-  matched.sort((a, b) => b.profileset.mean - a.profileset.mean);
+  matched.sort((a, b) => b.mean - a.mean);
   const winner = matched[0]!;
-  const winnerDps = winner.profileset.mean;
+  const winnerDps = winner.mean;
 
   return {
     label: 'Best flask',
@@ -58,8 +61,15 @@ export function parseBestFlask(run: SimcRunResult): BestFlaskResult | undefined 
     alternatives: matched.slice(1).map((m) => ({
       item_id: m.candidate.item_id,
       name: m.candidate.name,
-      dps: Math.round(m.profileset.mean),
-      delta_pct: roundTo(((m.profileset.mean - winnerDps) / winnerDps) * 100, 2),
+      dps: Math.round(m.mean),
+      delta_pct: roundTo(((m.mean - winnerDps) / winnerDps) * 100, 2),
     })),
   };
 }
+
+export const bestFlaskQuestion: Question<BestFlaskResult> = {
+  id: 'best_flask',
+  profilesetPrefix: PREFIX,
+  buildLines: buildFlaskProfilesetLines,
+  parseResult: parseBestFlask,
+};
