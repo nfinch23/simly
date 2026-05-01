@@ -24,10 +24,10 @@ Current phase: **Phase 0 + Phase 1 complete; Phase 2 (real SimC integration) nex
 
 Update this line as phases complete.
 
-### Phase 1 prep TODOs
+### Phase 2 prep TODOs
 
-- Bump `electron` in `desktop/package.json` from `^31` to a current release (clears 4 npm audit advisories before we add IPC and SimC subprocess spawning).
 - When real IPC lands, switch `BrowserWindow` to `sandbox: true` and route everything through `contextBridge` in the preload.
+- 6 moderate `npm audit` advisories remain, all from one root cause: `esbuild < 0.24.2` dev-server CVE pulled in transitively via `vite`/`vitest`/`electron-vite`. Dev-server-only, doesn't affect built artifacts. Fix requires `vite@6` + `electron-vite@3` (breaking changes) — defer until we have a reason to touch the build setup, or do it as a focused upgrade PR.
 
 ## gstack
 
