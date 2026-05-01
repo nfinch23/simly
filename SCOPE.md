@@ -115,7 +115,7 @@ Do not substitute without updating SCOPE.md.
 **Addon:**
 - Plain Lua, no framework. No Ace3 unless we hit a real need (and update this doc).
 - Use modern `TooltipDataProcessor` API (post-Dragonflight). Do NOT use legacy `GameTooltip:HookScript("OnTooltipSetItem", ...)` — it was deprecated in 10.0.2.
-- Vendor the SimC addon's export module (MIT licensed, source: `https://github.com/simulationcraft/simc-addon`). Do not reimplement export from scratch.
+- **Depend on the SimulationCraft addon** (Unlicense, source: `https://github.com/simulationcraft/simc-addon`) as a hard `## Dependencies:` declaration in `Simly.toc`. Call its public `LibStub("AceAddon-3.0"):GetAddon("Simulationcraft"):GetSimcProfile(...)` API at `PLAYER_LOGOUT` to get the real profile string. Do not vendor — `core.lua` is welded to Ace3 + 6 other libs (~800KB total), and the user community already has the addon installed. Re-evaluate vendoring only if we ever ship Simly to users who don't have SimulationCraft.
 
 **Build / CI:**
 - GitHub Actions for both addon packaging (CurseForge + Wago via existing actions) and desktop installers (electron-builder for Windows NSIS).
@@ -132,7 +132,7 @@ Do not substitute without updating SCOPE.md.
 | Module | Responsibility |
 |---|---|
 | `Core/Init.lua` | Register events: `ADDON_LOADED`, `PLAYER_LOGIN`, `PLAYER_LOGOUT`. Load results on login. Trigger export on logout. |
-| `Core/Export.lua` | Vendored SimC export. Generate the simc-format profile string from current character. |
+| `Core/Export.lua` | Thin wrapper that calls SimulationCraft addon's `GetSimcProfile()` to produce the simc-format profile string. SimulationCraft is a hard dependency in `Simly.toc`. |
 | `Core/SavedVars.lua` | Define `SimlyDB` SavedVariables table. Read/write helpers. |
 | `Core/ResultsLoader.lua` | Read `SimlyResults.lua` file (loaded as a separate addon — see section 5) and expose its data via a Lua module. |
 | `UI/Tooltip.lua` | Register `TooltipDataProcessor.AddTooltipPostCall` for `Item` tooltips. Look up item ID in results table. Append a `Simly:` line. |
@@ -277,7 +277,7 @@ Each phase is a checkpoint with concrete acceptance criteria. Don't move to phas
 ### Phase 2 — Real SimC Integration
 
 **Tasks:**
-- Vendor SimC addon's `Core.lua` export module into `addon/Core/Export.lua`. Wire it to run on `PLAYER_LOGOUT` and write the real export string into `SimlyDB.simc_export`.
+- Add `## Dependencies: Simulationcraft` to `Simly.toc`. Create `addon/Core/Export.lua` that defensively wraps `LibStub("AceAddon-3.0"):GetAddon("Simulationcraft"):GetSimcProfile(false, false, false)` (handles the addon being missing or the call failing). Wire it on `PLAYER_LOGOUT` to write the real export into `SimlyDB.simc_export`.
 - Desktop: `simc-version-source.ts` defines the strategy interface and ships `GitHubNightlyMondayStrategy` as the default — picks the most recent `simulationcraft/simc` nightly published before Monday 23:00 UTC, holds it for the week. Mirrors Raidbots' "weekly" cadence using SimC's own prebuilt nightlies (no scraping, no compile-from-source).
 - Desktop: `simc-installer.ts` consumes a resolved version from the strategy, downloads from GitHub Releases, verifies SHA256, extracts. Keeps previous version on disk for rollback.
 - Desktop: `simc-runner.ts` spawns SimC with the exported profile + a single hardcoded "best flask" sim variant (use SimC `profileset.<name>=flask=...` to run all variants in one invocation). Pass `json2=output.json` for deterministic parsing.

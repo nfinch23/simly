@@ -21,6 +21,6 @@ frame:SetScript("OnEvent", function(self, event)
 			)
 		end
 	elseif event == "PLAYER_LOGOUT" then
-		ns.SavedVars.WritePlaceholder()
+		ns.SavedVars.WriteSnapshot()
 	end
 end)

@@ -123,7 +123,7 @@ async function startRoundTrip(): Promise<WowPaths | undefined> {
       return;
     }
     simInFlight = true;
-    void runFlaskSim(paths, simc, db.character).finally(() => {
+    void runFlaskSim(paths, simc, db).finally(() => {
       simInFlight = false;
     });
   });
@@ -131,17 +131,38 @@ async function startRoundTrip(): Promise<WowPaths | undefined> {
   return paths;
 }
 
+/** Sentinel values the addon writes when it can't produce a real export. */
+const ADDON_FALLBACK_SENTINELS = new Set([
+  'PLACEHOLDER_PROFILE',
+  'NO_PROFILE_AVAILABLE',
+]);
+
 async function runFlaskSim(
   paths: WowPaths,
   simc: BootstrapResult,
-  character: { name: string; realm: string; region: string },
+  db: import('@simly/shared').SimlyDB,
 ): Promise<void> {
+  const character = db.character;
   const characterKey = `${character.name}-${character.realm}-${character.region}`;
-  const profileScript = [
-    STATIC_DESTRO_WARLOCK_PROFILE,
-    '',
-    buildAllQuestionLines(),
-  ].join('\n');
+
+  // Prefer the real character profile written by the SimulationCraft
+  // addon at PLAYER_LOGOUT. Fall back to our hand-written static profile
+  // when the addon couldn't generate one (sentinel) — keeps Phase 1
+  // SavedVars from old logouts working and lets dev iterate without
+  // requiring an in-game logout for every run.
+  const exportTrimmed = (db.simc_export ?? '').trim();
+  const useRealExport =
+    exportTrimmed.length > 0 && !ADDON_FALLBACK_SENTINELS.has(exportTrimmed);
+  const baseProfile = useRealExport ? exportTrimmed : STATIC_DESTRO_WARLOCK_PROFILE;
+  if (!useRealExport) {
+    console.log(
+      `[sim] simc_export is "${exportTrimmed.slice(0, 40)}"; using static fallback profile`,
+    );
+  } else {
+    console.log(`[sim] using real character export (${exportTrimmed.length} bytes)`);
+  }
+
+  const profileScript = [baseProfile, '', buildAllQuestionLines()].join('\n');
 
   console.log(`[sim] starting flask sim for ${characterKey} via ${simc.binPath}`);
   const t0 = Date.now();
