@@ -33,3 +33,4 @@ Thumbs.db
 
 # WoW SavedVariables snapshots used during development
 *.savedvars.lua
+.claude/worktrees/
