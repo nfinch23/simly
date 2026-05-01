@@ -1,12 +1,24 @@
 import { app, BrowserWindow } from 'electron';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { existsSync } from 'node:fs';
+import { mkdir, writeFile } from 'node:fs/promises';
 import { resolveWowPaths, type WowPaths } from './wow-paths';
 import { watchSavedVars, type WatcherHandle } from './watcher';
 import { writeLuaFile } from './lua-writer';
 import { buildPlaceholderResults } from './question-suite';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+
+const RESULTS_TOC = `## Interface: 120005
+## Title: Craft Compass Results
+## Notes: Auto-generated results file for Craft Compass. Do not edit manually.
+## Author: Noah Finch
+## Version: 0.0.0
+## Dependencies: CraftCompass
+
+CraftCompassResults.lua
+`;
 
 let watcher: WatcherHandle | undefined;
 
@@ -44,6 +56,20 @@ async function startRoundTrip(): Promise<WowPaths | undefined> {
   console.log('[main] account:', paths.account);
   console.log('[main] savedVarsPath:', paths.savedVarsPath);
   console.log('[main] resultsLuaPath:', paths.resultsLuaPath);
+
+  // Ensure the sister addon's .toc exists. WoW won't load the addon
+  // without one, so the user would silently see no results in chat. We
+  // never overwrite an existing .toc in case the user has customized it.
+  try {
+    await mkdir(paths.resultsAddonDir, { recursive: true });
+    const tocPath = join(paths.resultsAddonDir, 'CraftCompassResults.toc');
+    if (!existsSync(tocPath)) {
+      await writeFile(tocPath, RESULTS_TOC, 'utf8');
+      console.log('[main] wrote CraftCompassResults.toc (was missing)');
+    }
+  } catch (err) {
+    console.error('[main] failed to ensure results .toc:', err);
+  }
 
   const placeholder = buildPlaceholderResults('placeholder-character');
   try {
