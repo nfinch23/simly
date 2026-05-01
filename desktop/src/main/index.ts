@@ -7,7 +7,7 @@ import { resolveWowPaths, type WowPaths } from './wow-paths';
 import { watchSavedVars, type WatcherHandle } from './watcher';
 import { writeLuaFile } from './lua-writer';
 import { buildPlaceholderResults } from './question-suite';
-import { resolveSimcPaths } from './simc-paths';
+import { bootstrapSimc, type BootstrapResult } from './simc-bootstrap';
 import { runSimc } from './simc-runner';
 import {
   buildAllQuestionLines,
@@ -93,6 +93,26 @@ async function startRoundTrip(): Promise<WowPaths | undefined> {
     console.error('[main] failed to write results file:', err);
   }
 
+  // Bring up SimC: resolve the version we should be on, install if
+  // missing, fall back to whatever's on disk if the network is down.
+  // Done at boot rather than per-sim so we pay the install cost once
+  // and the runner has a stable binPath to reuse for every sim.
+  let simc: BootstrapResult;
+  try {
+    simc = await bootstrapSimc();
+    if (simc.installedVersion) {
+      console.log(
+        `[boot] simc ${simc.installedVersion.tag} ${simc.source} (binPath: ${simc.binPath})`,
+      );
+    } else {
+      console.log(`[boot] simc ${simc.source} (binPath: ${simc.binPath})`);
+    }
+  } catch (err) {
+    console.error('[boot] simc bootstrap failed:', err);
+    console.error('[boot] sim runs disabled until SimC is available.');
+    return paths;
+  }
+
   let simInFlight = false;
   watcher = watchSavedVars(paths.savedVarsPath, (db) => {
     console.log(
@@ -103,7 +123,7 @@ async function startRoundTrip(): Promise<WowPaths | undefined> {
       return;
     }
     simInFlight = true;
-    void runFlaskSim(paths, db.character).finally(() => {
+    void runFlaskSim(paths, simc, db.character).finally(() => {
       simInFlight = false;
     });
   });
@@ -113,22 +133,22 @@ async function startRoundTrip(): Promise<WowPaths | undefined> {
 
 async function runFlaskSim(
   paths: WowPaths,
+  simc: BootstrapResult,
   character: { name: string; realm: string; region: string },
 ): Promise<void> {
   const characterKey = `${character.name}-${character.realm}-${character.region}`;
-  const simcPaths = resolveSimcPaths();
   const profileScript = [
     STATIC_DESTRO_WARLOCK_PROFILE,
     '',
     buildAllQuestionLines(),
   ].join('\n');
 
-  console.log(`[sim] starting flask sim for ${characterKey} via ${simcPaths.binPath}`);
+  console.log(`[sim] starting flask sim for ${characterKey} via ${simc.binPath}`);
   const t0 = Date.now();
   let run;
   try {
     run = await runSimc({
-      paths: simcPaths,
+      paths: { binPath: simc.binPath, scratchDir: simc.scratchDir },
       profileScript,
       iterations: 1000,
       scratchTag: `flask-${Date.now()}`,

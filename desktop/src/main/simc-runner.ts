@@ -5,6 +5,9 @@ import { join } from 'node:path';
 import { cpus } from 'node:os';
 import type { SimcPaths } from './simc-paths';
 
+/** Subset the runner actually needs — `installRoot` is irrelevant once the binary is located. */
+export type RunnerPaths = Pick<SimcPaths, 'binPath' | 'scratchDir'>;
+
 export interface ProfilesetResult {
   name: string;
   mean: number;
@@ -21,7 +24,7 @@ export interface SimcRunResult {
 }
 
 export interface RunSimcOptions {
-  paths: SimcPaths;
+  paths: RunnerPaths;
   profileScript: string;
   iterations?: number;
   threads?: number;
