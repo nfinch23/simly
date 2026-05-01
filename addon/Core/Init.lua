@@ -1,5 +1,34 @@
 local addonName, ns = ...
 
+-- PLAYER_LOGIN fires before WoW has populated spec / talent / equipment
+-- data, so a snapshot taken at that exact moment writes spec=unknown
+-- with no gear. We retry every 0.5s until GetSpecialization() returns a
+-- valid index (1-4), then take the snapshot. If 6 seconds go by and the
+-- spec is still missing (no spec selected on this character — the
+-- SimulationCraft addon will report spec=unknown anyway), we give up
+-- and write whatever the export produces so the desktop at least has
+-- something to fall back on.
+local SNAPSHOT_RETRY_LIMIT = 12
+local SNAPSHOT_RETRY_INTERVAL = 0.5
+
+local function tryWriteSnapshot(retriesLeft)
+	retriesLeft = retriesLeft or SNAPSHOT_RETRY_LIMIT
+	local specIndex = GetSpecialization and GetSpecialization()
+	if specIndex and specIndex > 0 then
+		ns.SavedVars.WriteSnapshot()
+		return
+	end
+	if retriesLeft > 0 then
+		C_Timer.After(SNAPSHOT_RETRY_INTERVAL, function()
+			tryWriteSnapshot(retriesLeft - 1)
+		end)
+	else
+		-- Give up and snapshot what we have. Desktop runner falls back
+		-- to its static profile when simc_export looks broken.
+		ns.SavedVars.WriteSnapshot()
+	end
+end
+
 local frame = CreateFrame("Frame")
 frame:RegisterEvent("PLAYER_LOGIN")
 
@@ -7,15 +36,12 @@ frame:SetScript("OnEvent", function(self, event)
 	if event == "PLAYER_LOGIN" then
 		DEFAULT_CHAT_FRAME:AddMessage("Simly loaded")
 
-		-- Capture the SimC export snapshot at login, when the game
-		-- runtime has fully loaded character state. PLAYER_LOGOUT was
-		-- our first attempt but APIs (GetSpecialization, talent/equipment
-		-- queries) return nil/Unknown during teardown — the resulting
-		-- export had spec=unknown and no gear. /reload re-fires this
-		-- handler so users can refresh the snapshot after a gear or
-		-- talent change. The in-memory SimlyDB is flushed to disk
+		-- Defer the snapshot until spec data is ready (see comment
+		-- above). /reload re-fires this handler, so users can refresh
+		-- the snapshot after a gear or talent change without quitting
+		-- the game. The in-memory SimlyDB is flushed to disk
 		-- automatically on the next /reload or logout.
-		ns.SavedVars.WriteSnapshot()
+		tryWriteSnapshot()
 
 		-- Read results from the sister addon's global and announce the
 		-- best flask to chat. Sister addon is OptionalDeps so absence is
