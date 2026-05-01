@@ -20,7 +20,7 @@ If a task seems to conflict with SCOPE.md (different tech, different file layout
 
 ## Build phase tracking
 
-Current phase: **Phase 0 complete; Phase 1 (round-trip spike) not started** — see SCOPE.md section 6 for acceptance criteria.
+Current phase: **Phase 0 + Phase 1 complete; Phase 2 (real SimC integration) next** — see SCOPE.md section 6 for acceptance criteria.
 
 Update this line as phases complete.
 
