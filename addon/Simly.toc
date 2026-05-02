@@ -11,4 +11,6 @@
 Simly.lua
 Core\Export.lua
 Core\SavedVars.lua
+UI\Panel.lua
+UI\SlashCommand.lua
 Core\Init.lua

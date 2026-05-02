@@ -1,0 +1,159 @@
+local addonName, ns = ...
+
+local Panel = {}
+ns.Panel = Panel
+
+-- Lazily created on first show; prevents the frame existing during
+-- ADDON_LOADED for addons that load before us (cleaner addon list).
+local frame
+
+local function formatAge(unixTime)
+	if not unixTime or unixTime == 0 then return "never" end
+	local age = time() - unixTime
+	if age < 0 then return "just now" end
+	if age < 60 then return string.format("%ds ago", age) end
+	if age < 3600 then return string.format("%dm ago", math.floor(age / 60)) end
+	if age < 86400 then return string.format("%dh ago", math.floor(age / 3600)) end
+	return string.format("%dd ago", math.floor(age / 86400))
+end
+
+local function statusColor(status)
+	if status == "done"    then return "|cff00ff00" end
+	if status == "running" then return "|cffffff00" end
+	if status == "failed"  then return "|cffff0000" end
+	if status == "pending" then return "|cffaaaaaa" end
+	return "|cffaaaaaa"
+end
+
+local function createFrame()
+	local f = CreateFrame("Frame", "SimlyPanelFrame", UIParent, "BackdropTemplate")
+	f:SetSize(420, 480)
+	f:SetPoint("CENTER")
+	f:SetMovable(true)
+	f:EnableMouse(true)
+	f:RegisterForDrag("LeftButton")
+	f:SetScript("OnDragStart", f.StartMoving)
+	f:SetScript("OnDragStop", f.StopMovingOrSizing)
+	f:SetClampedToScreen(true)
+	f:SetFrameStrata("DIALOG")
+	f:SetBackdrop({
+		bgFile   = "Interface\\DialogFrame\\UI-DialogBox-Background",
+		edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
+		edgeSize = 16,
+		insets   = { left = 4, right = 4, top = 4, bottom = 4 },
+	})
+
+	local title = f:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+	title:SetPoint("TOP", 0, -12)
+	title:SetText("Simly")
+
+	local close = CreateFrame("Button", nil, f, "UIPanelCloseButton")
+	close:SetPoint("TOPRIGHT", -2, -2)
+
+	-- Body text (multi-line, left-justified). Phase 5 swaps this for a
+	-- scroll frame with structured rows; the skeleton is plain text so
+	-- we can verify the data flow before investing in widgets.
+	local body = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+	body:SetPoint("TOPLEFT", 18, -40)
+	body:SetPoint("BOTTOMRIGHT", -18, 50)
+	body:SetJustifyH("LEFT")
+	body:SetJustifyV("TOP")
+	body:SetSpacing(2)
+	f.body = body
+
+	local updateBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+	updateBtn:SetSize(140, 26)
+	updateBtn:SetPoint("BOTTOMLEFT", 18, 14)
+	updateBtn:SetText("Update sims")
+	updateBtn:SetScript("OnClick", function()
+		ns.SavedVars.RequestUpdate()
+		DEFAULT_CHAT_FRAME:AddMessage(
+			"|cff00ffffSimly:|r scan requested. /reload to fire it."
+		)
+		Panel.Refresh()
+	end)
+
+	local reloadBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+	reloadBtn:SetSize(80, 26)
+	reloadBtn:SetPoint("BOTTOMRIGHT", -18, 14)
+	reloadBtn:SetText("/reload")
+	reloadBtn:SetScript("OnClick", function() ReloadUI() end)
+
+	-- WoW frames are shown by default at creation; hide so the very
+	-- first /simly call doesn't toggle a just-created visible frame off.
+	f:Hide()
+
+	return f
+end
+
+function Panel.Refresh()
+	if not frame then return end
+
+	local lines = {}
+
+	if SimlyResults and SimlyResults.composed then
+		local c = SimlyResults.composed
+		table.insert(lines, "|cffffd700Best loadout|r" ..
+			(c.label and (" |cffaaaaaa(" .. c.label .. ")|r") or ""))
+		if c.flask then
+			table.insert(lines, "  Flask: " .. c.flask.name)
+		end
+		if c.food then
+			table.insert(lines, "  Food: " .. c.food.name)
+		end
+		if c.potion then
+			table.insert(lines, "  Potion: " .. c.potion.name)
+		end
+		if c.augment_rune then
+			table.insert(lines, "  Augment Rune: " .. c.augment_rune.name)
+		end
+	else
+		table.insert(lines, "|cffaaaaaa(No sim results yet — click \"Update sims\" then /reload.)|r")
+	end
+	table.insert(lines, "")
+
+	table.insert(lines, "|cffffd700Scans|r")
+	if SimlyResults and SimlyResults.scans and next(SimlyResults.scans) then
+		for id, record in pairs(SimlyResults.scans) do
+			local color = statusColor(record.status)
+			local stamp = record.finished_at or record.started_at or 0
+			local age = stamp > 0 and (" (" .. formatAge(stamp) .. ")") or ""
+			table.insert(lines, "  " .. color .. id .. "|r " .. (record.status or "?") .. age)
+		end
+	else
+		table.insert(lines, "  |cffaaaaaa(no scans recorded)|r")
+	end
+	table.insert(lines, "")
+
+	if SimlyResults then
+		table.insert(lines, "|cffaaaaaaSimC|r " .. (SimlyResults.simc_version or "?"))
+		table.insert(lines, "|cffaaaaaaScenario|r " .. (SimlyResults.active_scenario or "?"))
+		table.insert(lines, "|cffaaaaaaResults file written|r " .. formatAge(SimlyResults.generated_at))
+	end
+
+	if SimlyDB and SimlyDB.update_requested_at and SimlyDB.update_requested_at > 0 then
+		table.insert(lines, "|cffaaaaaaLast update requested|r " .. formatAge(SimlyDB.update_requested_at))
+	end
+
+	frame.body:SetText(table.concat(lines, "\n"))
+end
+
+function Panel.Toggle()
+	if not frame then frame = createFrame() end
+	if frame:IsShown() then
+		frame:Hide()
+	else
+		Panel.Refresh()
+		frame:Show()
+	end
+end
+
+function Panel.Show()
+	if not frame then frame = createFrame() end
+	Panel.Refresh()
+	frame:Show()
+end
+
+function Panel.Hide()
+	if frame then frame:Hide() end
+end
