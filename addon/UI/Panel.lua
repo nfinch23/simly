@@ -125,6 +125,36 @@ function Panel.Refresh()
 	end
 	table.insert(lines, "")
 
+	-- Trinket winner block (Phase 4c). Renders the best trinket pair
+	-- the pre-scan picked, with delta to alternatives so the user knows
+	-- whether their current setup is close.
+	if SimlyResults and SimlyResults.scans
+		and SimlyResults.scans.trinket_pre_scan
+		and SimlyResults.scans.trinket_pre_scan.status == "done"
+		and SimlyResults.scans.trinket_pre_scan.data
+	then
+		local data = SimlyResults.scans.trinket_pre_scan.data
+		table.insert(lines, "|cffffd700Best trinkets|r |cffaaaaaa(" .. (data.label or "") .. ")|r")
+		if data.winner then
+			table.insert(lines, string.format(
+				"  %s + %s |cff00ff00%d dps|r",
+				data.winner.trinket1.name, data.winner.trinket2.name, math.floor(data.winner.mean_dps)
+			))
+			-- Show up to 3 next-best alternatives with their delta.
+			local altCount = 0
+			for i = 2, #data.pairs do
+				local p = data.pairs[i]
+				if altCount >= 3 then break end
+				table.insert(lines, string.format(
+					"  %s + %s |cffff8888%.2f%%|r",
+					p.trinket1.name, p.trinket2.name, p.delta_pct
+				))
+				altCount = altCount + 1
+			end
+		end
+		table.insert(lines, "")
+	end
+
 	-- Stat weights block (Phase 4b). Renders the per-stat scale factors
 	-- if the stat_weights scan ran successfully. Reminder to the user
 	-- that these are pruning hints, not gear recommendations.

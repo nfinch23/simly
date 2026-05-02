@@ -9,6 +9,7 @@ import {
   type SimlyDB,
   type SimlyResults,
   type StatWeights,
+  type TrinketPreScanResult,
 } from '@simly/shared';
 import { writeLuaFile } from './lua-writer';
 import { runSimc } from './simc-runner';
@@ -16,7 +17,15 @@ import type { BootstrapResult } from './simc-bootstrap';
 import type { WowPaths } from './wow-paths';
 import { buildAllScanLines, parseAllScanRecords } from './scans/registry';
 import { runStatWeightsScan } from './scans/stat-weights';
-import { parseSimcExport } from './simc-export-parser';
+import {
+  parseTrinketPreScanResult,
+  runTrinketPreScanSim,
+} from './scans/trinket-pre-scan';
+import {
+  getTrinketPool,
+  parseSimcExport,
+  type ParsedExport,
+} from './simc-export-parser';
 import { STATIC_DESTRO_WARLOCK_PROFILE } from './static-profile';
 
 /** Sentinel values the addon writes when it can't produce a real export. */
@@ -121,23 +130,20 @@ export class ScanQueue {
     const baseProfile = useRealExport
       ? exportTrimmed
       : STATIC_DESTRO_WARLOCK_PROFILE;
+    let parsedExport: ParsedExport | undefined;
     if (!useRealExport) {
       console.log(
         `[sim] simc_export is "${exportTrimmed.slice(0, 40)}"; using static fallback profile`,
       );
     } else {
       console.log(`[sim] using real character export (${exportTrimmed.length} bytes)`);
-      // Phase 4a: parse the real export into a structured gear pool so
-      // we can see what's available before the gear ladder lands. Pure
-      // logging right now; nothing reads the result yet. Phase 4d's
-      // pruner consumes this.
       try {
-        const parsed = parseSimcExport(exportTrimmed);
-        const slotCounts = Object.entries(parsed.poolBySlot)
+        parsedExport = parseSimcExport(exportTrimmed);
+        const slotCounts = Object.entries(parsedExport.poolBySlot)
           .map(([slot, items]) => `${slot}:${items.length}`)
           .join(' ');
         console.log(
-          `[sim] gear pool: ${parsed.equipped.length} equipped, ${parsed.bag.length} in bags (${slotCounts})`,
+          `[sim] gear pool: ${parsedExport.equipped.length} equipped, ${parsedExport.bag.length} in bags (${slotCounts})`,
         );
       } catch (err) {
         console.warn('[sim] failed to parse SimC export for gear pool log:', (err as Error).message);
@@ -147,6 +153,7 @@ export class ScanQueue {
     await this.runScan({
       baseProfile,
       useRealExport,
+      parsedExport,
       characterKey,
       scenario: db.active_scenario,
     });
@@ -155,6 +162,7 @@ export class ScanQueue {
   private async runScan(args: {
     baseProfile: string;
     useRealExport: boolean;
+    parsedExport?: ParsedExport;
     characterKey: string;
     scenario: Scenario;
   }): Promise<void> {
@@ -198,6 +206,54 @@ export class ScanQueue {
             finished_at: Math.floor(Date.now() / 1000),
             error: (err as Error).message,
           };
+        }
+      }
+
+      // Stage 1.5: trinket pre-scan. Only when we have a real parsed
+      // export (need actual bag trinkets) AND at least 2 unique trinkets
+      // in the pool (otherwise no pairs to compare). Surfaces the best
+      // trinket pair to the panel and is read by Phase 4d's gear ladder
+      // to lock trinkets in for downstream stages.
+      if (args.useRealExport && args.parsedExport) {
+        const trinkets = getTrinketPool(args.parsedExport);
+        if (trinkets.length >= 2) {
+          const tStarted = Math.floor(Date.now() / 1000);
+          const t0t = Date.now();
+          try {
+            const { run, pairsByName } = await runTrinketPreScanSim({
+              paths: runnerPaths,
+              baseProfile: args.baseProfile,
+              trinkets,
+            });
+            const tFinished = Math.floor(Date.now() / 1000);
+            const data = parseTrinketPreScanResult(run, pairsByName);
+            scans.trinket_pre_scan = {
+              status: 'done',
+              started_at: tStarted,
+              finished_at: tFinished,
+              data,
+            };
+            const dt = ((Date.now() - t0t) / 1000).toFixed(1);
+            const w = data.winner;
+            const winnerStr = w
+              ? `${w.trinket1.name} + ${w.trinket2.name} @ ${Math.round(w.mean_dps)} dps`
+              : '(no winner)';
+            console.log(
+              `[sim] trinket_pre_scan (${dt}s, ${trinkets.length} trinkets, ${data.pairs.length} pairs): ${winnerStr}`,
+            );
+          } catch (err) {
+            console.error('[sim] trinket_pre_scan failed:', (err as Error).message);
+            scans.trinket_pre_scan = {
+              status: 'failed',
+              started_at: tStarted,
+              finished_at: Math.floor(Date.now() / 1000),
+              error: (err as Error).message,
+            };
+          }
+        } else {
+          console.log(
+            `[sim] trinket_pre_scan: only ${trinkets.length} trinket(s) in pool; skipping`,
+          );
         }
       }
 

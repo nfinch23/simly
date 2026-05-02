@@ -44,6 +44,34 @@ export interface BestConsumableResult {
 export type BestFlaskResult = BestConsumableResult;
 export type BestFoodResult = BestConsumableResult;
 
+/** Compact identifier for an item slot, used in scan results that name specific items. */
+export interface ScannedItemRef {
+  item_id: number;
+  name: string;
+  ilvl: number;
+  /** Stable identity hash from the parser; used by the ignore list. */
+  identity: string;
+}
+
+/** One trinket pair tested in the trinket pre-scan. */
+export interface TrinketPairResult {
+  pair_id: string;
+  trinket1: ScannedItemRef;
+  trinket2: ScannedItemRef;
+  mean_dps: number;
+  /** Delta vs the winning pair, in percent. The winner has 0. */
+  delta_pct: number;
+}
+
+/** Output of the trinket pre-scan. */
+export interface TrinketPreScanResult {
+  label: string;
+  /** Sorted descending by mean_dps. */
+  pairs: TrinketPairResult[];
+  /** Same as pairs[0] when populated. */
+  winner?: TrinketPairResult;
+}
+
 /** SimC stat-weight output (per-stat normalized to intellect or strength). */
 export interface StatWeights {
   intellect?: number;
@@ -75,7 +103,7 @@ export interface ComposedLoadout {
 
 export interface ScanCollection {
   stat_weights?: ScanRecord<StatWeights>;
-  trinket_pre_scan?: ScanRecord<unknown>;
+  trinket_pre_scan?: ScanRecord<TrinketPreScanResult>;
   gear_coarse?: ScanRecord<unknown>;
   gear_refined?: ScanRecord<unknown>;
   gear_final?: ScanRecord<unknown>;

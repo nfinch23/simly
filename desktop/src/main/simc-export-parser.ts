@@ -333,3 +333,60 @@ function buildPoolBySlot(
   }
   return out;
 }
+
+/**
+ * Render a parsed item back to a SimC `<slot>=,id=...,bonus_id=...`
+ * line. Used by the trinket pre-scan and gear ladder to inject items
+ * into profileset bodies. `slotOverride` lets callers force a specific
+ * slot (the addon emits both finger1 / finger2 for ring drops, but
+ * for sim purposes either slot accepts the item — caller picks).
+ */
+export function formatItemLine(item: ParsedItem, slotOverride?: SlotName): string {
+  const slot = slotOverride ?? item.slot;
+  const parts: string[] = [`${slot}=,id=${item.item_id}`];
+  if (item.bonus_ids.length > 0) {
+    parts.push(`bonus_id=${item.bonus_ids.join('/')}`);
+  }
+  if (item.crafted_stats?.length) {
+    parts.push(`crafted_stats=${item.crafted_stats.join('/')}`);
+  }
+  if (item.crafting_quality !== undefined) {
+    parts.push(`crafting_quality=${item.crafting_quality}`);
+  }
+  if (item.drop_level !== undefined) {
+    parts.push(`drop_level=${item.drop_level}`);
+  }
+  return parts.join(',');
+}
+
+/**
+ * Pull the unique trinket pool from a parsed export. Both trinket1 and
+ * trinket2 lists are merged and deduped by identity — same trinket may
+ * appear in both lists since the addon emits whatever slot it found
+ * the item in. Different ilvl variants of the same trinket are kept
+ * separate (different bonus_ids = different identity).
+ */
+export function getTrinketPool(parsed: ParsedExport): ParsedItem[] {
+  const all = [
+    ...(parsed.poolBySlot.trinket1 ?? []),
+    ...(parsed.poolBySlot.trinket2 ?? []),
+  ];
+  const byIdentity = new Map<string, ParsedItem>();
+  for (const t of all) {
+    if (!byIdentity.has(t.identity)) byIdentity.set(t.identity, t);
+  }
+  return Array.from(byIdentity.values());
+}
+
+/**
+ * Generate all unordered pairs of items from `arr` (n choose 2). Used
+ * by the trinket and ring pre-scans. Yields tuples in stable order:
+ * (arr[i], arr[j]) where i < j.
+ */
+export function* allUnorderedPairs<T>(arr: readonly T[]): Generator<[T, T]> {
+  for (let i = 0; i < arr.length; i++) {
+    for (let j = i + 1; j < arr.length; j++) {
+      yield [arr[i]!, arr[j]!];
+    }
+  }
+}

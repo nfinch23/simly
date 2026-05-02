@@ -4,6 +4,9 @@ import { join } from 'node:path';
 import {
   parseSimcExport,
   makeItemIdentity,
+  formatItemLine,
+  getTrinketPool,
+  allUnorderedPairs,
   type ParsedExport,
 } from './simc-export-parser';
 
@@ -115,6 +118,64 @@ describe('parseSimcExport — poolBySlot', () => {
     expect(shoulderPool.length).toBeGreaterThan(1);
     expect(shoulderPool.some((i) => i.is_equipped)).toBe(true);
     expect(shoulderPool.some((i) => !i.is_equipped)).toBe(true);
+  });
+});
+
+describe('formatItemLine', () => {
+  it('round-trips a parsed equipped item back to its original SimC line shape', () => {
+    const p = getParsed();
+    const head = p.equipped.find((i) => i.slot === 'head')!;
+    const line = formatItemLine(head);
+    expect(line).toMatch(/^head=,id=250042,bonus_id=6652\/12801\/13534\/13440\/13338\/13575\/3157$/);
+  });
+
+  it('includes crafted_stats and crafting_quality when present', () => {
+    const p = getParsed();
+    const back = p.equipped.find((i) => i.slot === 'back')!;
+    const line = formatItemLine(back);
+    expect(line).toContain('crafted_stats=40/36');
+    expect(line).toContain('crafting_quality=5');
+  });
+
+  it('lets caller override the slot name (ring/trinket pool routing)', () => {
+    const p = getParsed();
+    const head = p.equipped.find((i) => i.slot === 'head')!;
+    const asTrinket = formatItemLine(head, 'trinket1');
+    expect(asTrinket.startsWith('trinket1=,id=')).toBe(true);
+  });
+});
+
+describe('getTrinketPool', () => {
+  it('dedupes by identity but keeps separate ilvl variants of the same item_id', () => {
+    const p = getParsed();
+    const trinkets = getTrinketPool(p);
+    // Felfriend has 2 equipped + several in the bag; identities should
+    // all be unique.
+    const identities = new Set(trinkets.map((t) => t.identity));
+    expect(identities.size).toBe(trinkets.length);
+    // Includes both equipped trinkets
+    expect(trinkets.some((t) => t.name.includes('Gaze of the Alnseer'))).toBe(true);
+    expect(trinkets.some((t) => t.name.includes('Heart of Wind'))).toBe(true);
+  });
+});
+
+describe('allUnorderedPairs', () => {
+  it('yields n*(n-1)/2 pairs in stable index order', () => {
+    const items: number[] = [10, 20, 30, 40];
+    const pairs = Array.from(allUnorderedPairs(items));
+    expect(pairs).toEqual([
+      [10, 20],
+      [10, 30],
+      [10, 40],
+      [20, 30],
+      [20, 40],
+      [30, 40],
+    ]);
+  });
+
+  it('yields nothing for empty or single-element arrays', () => {
+    expect(Array.from(allUnorderedPairs([]))).toEqual([]);
+    expect(Array.from(allUnorderedPairs(['x']))).toEqual([]);
   });
 });
 
