@@ -26,19 +26,16 @@ Simly/
 ├── tsconfig.base.json                 # Shared TS config
 │
 ├── addon/                             # WoW addon (Lua)
-│   ├── Simly.toc                     # Addon manifest
+│   ├── Simly.toc                     # Addon manifest, declares Simulationcraft as dep
 │   ├── Simly.lua                     # Entry point
 │   ├── Core/
-│   │   ├── Init.lua                   # Addon initialization, event registration
-│   │   ├── Export.lua                 # SimC profile export (vendored from SimC addon)
-│   │   ├── ResultsLoader.lua          # Loads results table from disk-written file
-│   │   └── SavedVars.lua              # SavedVariables schema + accessors
+│   │   ├── Init.lua                   # Event registration, snapshot retry, panel open
+│   │   ├── Export.lua                 # Wraps SimulationCraft addon's GetSimcProfile
+│   │   ├── ResultsLoader.lua          # Reads SimlyResults global, exposes scans+composed
+│   │   └── SavedVars.lua              # SimlyDB schema, snapshot writer, request trigger
 │   ├── UI/
-│   │   ├── Tooltip.lua                # GameTooltip post-call hooks
-│   │   ├── SlashCommand.lua           # /cc handler (v1)
-│   │   └── Panel.lua                  # In-game question picker (v1)
-│   ├── Libs/
-│   │   └── (vendored deps if any)
+│   │   ├── SlashCommand.lua           # /simly handler
+│   │   └── Panel.lua                  # In-game scan-status + composed-loadout panel
 │   └── README.md                      # Addon-specific notes
 │
 ├── desktop/                           # Companion app (Electron + TS + React)
@@ -47,26 +44,42 @@ Simly/
 │   ├── electron.vite.config.ts        # electron-vite for build
 │   ├── src/
 │   │   ├── main/                      # Electron main process
-│   │   │   ├── index.ts               # App entry, tray, window mgmt
+│   │   │   ├── index.ts               # App entry, tray, window mgmt, watcher → queue wiring
 │   │   │   ├── watcher.ts             # Watches SavedVariables file
 │   │   │   ├── lua-parser.ts          # Wraps `luaparse` for SavedVars
 │   │   │   ├── lua-writer.ts          # Serializes results table to Lua
-│   │   │   ├── simc-runner.ts         # Spawns SimC subprocess, streams output
-│   │   │   ├── simc-installer.ts      # Downloads SimC from GitHub Releases
-│   │   │   ├── question-suite.ts      # Defines + dispatches the question set
+│   │   │   ├── simc-runner.ts         # Spawns SimC subprocess, parses json2 output
+│   │   │   ├── simc-installer.ts      # Downloads + extracts SimC builds
+│   │   │   ├── simc-bootstrap.ts      # Resolve → install → return binPath
+│   │   │   ├── simc-version-source.ts # Strategy interface + LatestNightly/MondayWeekly
+│   │   │   ├── simc-paths.ts          # Resolve install root + binary location
+│   │   │   ├── scan-queue.ts          # Owns pending scans, runs serially
+│   │   │   ├── scans/                 # One file per scan stage
+│   │   │   │   ├── registry.ts        # Catalog of all scans
+│   │   │   │   ├── stat-weights.ts
+│   │   │   │   ├── trinket-pre-scan.ts
+│   │   │   │   ├── gear-coarse.ts
+│   │   │   │   ├── gear-refined.ts
+│   │   │   │   ├── gear-final.ts
+│   │   │   │   └── consumables.ts     # flask + food + potion + augrune + gems + enchants
+│   │   │   ├── composer.ts            # Combine scan winners into SimlyResults.composed
+│   │   │   ├── item-pruner.ts         # Stat-weight × multiplier filter; max-upgrade rewriter
+│   │   │   ├── ignore-list.ts         # Persistent (char × scenario × item) ignore map
+│   │   │   ├── settings.ts            # All thresholds; backed by electron-store
 │   │   │   ├── wow-paths.ts           # Resolves WoW install + WTF folder
 │   │   │   └── ipc.ts                 # IPC channel definitions for renderer
-│   │   ├── renderer/                  # React UI (deep-dive view)
+│   │   ├── renderer/                  # React UI (Raidbots-style results view)
 │   │   │   ├── index.html
 │   │   │   ├── main.tsx
 │   │   │   ├── App.tsx
 │   │   │   ├── views/
-│   │   │   │   ├── Status.tsx         # Idle / simming / done
-│   │   │   │   ├── Queue.tsx          # Sim queue + history
-│   │   │   │   ├── Results.tsx        # Last results + raw SimC output
-│   │   │   │   └── Settings.tsx       # WoW path, pinned SimC version, etc.
-│   │   │   └── components/            # Shared components
-│   │   ├── preload/                   # Electron preload bridge
+│   │   │   │   ├── Status.tsx         # What's running, ETA, queue depth
+│   │   │   │   ├── Scans.tsx          # Per-scan results + raw SimC input/output
+│   │   │   │   ├── Composed.tsx       # Final assembled loadout
+│   │   │   │   ├── PasteInput.tsx     # Paste-a-SimC-string entry point
+│   │   │   │   └── Settings.tsx       # All thresholds + ignore list editor
+│   │   │   └── components/
+│   │   ├── preload/
 │   │   │   └── index.ts
 │   │   └── shared/                    # Symlink or re-export from /shared
 │   └── README.md
@@ -82,8 +95,9 @@ Simly/
 │   └── tsconfig.json
 │
 ├── data/                              # Static data tables (JSON, regenerated per patch)
-│   ├── currencies.json                # Voidcore + currency drop sources
-│   ├── dungeons.json                  # Dungeon → drops mapping (cribbed from KeystoneLoot)
+│   ├── upgrade-tracks.json            # Map item bonus_id → max upgrade tier (Phase 4)
+│   ├── currencies.json                # Voidcore + crest sources (Phase 7 / v2)
+│   ├── dungeons.json                  # Dungeon → drops mapping (Phase 7 / v2)
 │   └── README.md                      # How to regenerate per patch
 │
 ├── scripts/                           # One-off dev scripts
@@ -131,28 +145,38 @@ Do not substitute without updating SCOPE.md.
 
 | Module | Responsibility |
 |---|---|
-| `Core/Init.lua` | Register events: `ADDON_LOADED`, `PLAYER_LOGIN`, `PLAYER_LOGOUT`. Load results on login. Trigger export on logout. |
-| `Core/Export.lua` | Thin wrapper that calls SimulationCraft addon's `GetSimcProfile()` to produce the simc-format profile string. SimulationCraft is a hard dependency in `Simly.toc`. |
-| `Core/SavedVars.lua` | Define `SimlyDB` SavedVariables table. Read/write helpers. |
-| `Core/ResultsLoader.lua` | Read `SimlyResults.lua` file (loaded as a separate addon — see section 5) and expose its data via a Lua module. |
-| `UI/Tooltip.lua` | Register `TooltipDataProcessor.AddTooltipPostCall` for `Item` tooltips. Look up item ID in results table. Append a `Simly:` line. |
-| `UI/SlashCommand.lua` | `/cc` command. v1 only — opens panel. |
-| `UI/Panel.lua` | Question picker frame. v1 only. |
+| `Core/Init.lua` | Register events: `PLAYER_LOGIN`. Capture export with retry-until-spec-ready, write `SimlyDB`. Open panel on /simly. |
+| `Core/Export.lua` | Defensive wrapper around SimulationCraft addon's `GetSimcProfile()`. Returns `NO_PROFILE_AVAILABLE` sentinel on failure. |
+| `Core/SavedVars.lua` | Define `SimlyDB` schema (section 4). Builds the snapshot at login — character meta + simc_export. The addon's panel writes `update_requested_at` here to trigger sims. |
+| `Core/ResultsLoader.lua` | Read `SimlyResults` global from sister addon. Surface `scans`, `composed`, `gear_hash` to UI modules. Detect "stale" by comparing `gear_hash` to a fresh hash of currently equipped+bag items. |
+| `UI/Panel.lua` | In-game frame opened by `/simly`. Renders scan status list + composed loadout + "Update sims" button. Click → write `update_requested_at = time()` to SimlyDB; user /reloads. |
+| `UI/SlashCommand.lua` | `/simly` opens panel. |
+
+(`UI/Tooltip.lua` remains a Phase 8 stretch — see section 6.)
 
 ### Desktop modules
 
 | Module | Responsibility |
 |---|---|
-| `main/index.ts` | App lifecycle. Tray icon. Renderer window (hidden by default; tray click toggles). |
-| `main/wow-paths.ts` | Locate WoW install. Default to `C:\Program Files (x86)\World of Warcraft\_retail_\`; user-overridable in Settings. |
-| `main/watcher.ts` | Watch `WTF/Account/<acct>/SavedVariables/Simly.lua`. Debounce file events (Lua flush is atomic; no need to wait long, but 200ms debounce avoids partial reads). |
-| `main/lua-parser.ts` | Parse SavedVars file. Extract `SimlyDB` table. Return typed object. |
-| `main/lua-writer.ts` | Serialize a JS object as a Lua source file (top-level `SimlyResults = { ... }`). |
-| `main/simc-version-source.ts` | Pluggable strategy that decides _which_ SimC version to pin to. Returns `{ tag, downloadUrl, sha256?, publishedAt }`. Default impl: `GitHubNightlyMondayStrategy` — picks the most recent `simulationcraft/simc` nightly release published before Monday 23:00 UTC, holds it for the week. Other strategies (manual pin, stable-only, future Raidbots-mirror) are swappable behind this interface. |
-| `main/simc-installer.ts` | Given a resolved version from `simc-version-source`, download from `simulationcraft/simc` GitHub Releases. Verify SHA256 if provided. Extract to app data dir. Cache previous version for rollback. |
-| `main/simc-runner.ts` | Spawn SimC subprocess with profile + APL. Stream stdout for progress. Use `json2=` flag for deterministic output. Parse final JSON for DPS. |
-| `main/question-suite.ts` | Define the question set. Each question = `{ id, label, mutateProfile(profile), parseResult(simcOutput) }`. Loop through enabled questions when a new export arrives. |
-| `main/ipc.ts` | Renderer ↔ main IPC channels: `sim-status`, `sim-progress`, `sim-result`, `settings-update`. |
+| `main/index.ts` | App lifecycle. Tray icon. Boot SimC via `simc-bootstrap`. Wire watcher → scan queue. |
+| `main/wow-paths.ts` | Locate WoW install. Default `C:\Program Files (x86)\World of Warcraft\_retail_\`; user-overridable. |
+| `main/watcher.ts` | Watch `SavedVariables/Simly.lua`. On change, parse via `lua-parser`. If `update_requested_at > last_completed_at`, enqueue scan plan. |
+| `main/lua-parser.ts` / `lua-writer.ts` | Lua ↔ JS conversion for SavedVars (read) and SimlyResults (write). |
+| `main/simc-version-source.ts` | Pluggable strategy for "which SimC build to pin to." Default: `LatestNightlyStrategy`. Alternatives: `MondayWeeklyStrategy`, future `ManualPinStrategy`. |
+| `main/simc-installer.ts` | Given a `SimcVersionInfo`, download + extract under `%LOCALAPPDATA%\Simly\simc\`. Idempotent. |
+| `main/simc-bootstrap.ts` | Resolve current version → install if missing → return `binPath`. Falls back to disk if network is down. |
+| `main/simc-runner.ts` | Spawn SimC with given profile + iteration count. Capture json2 output. |
+| `main/scan-queue.ts` | Owns the queue. Runs scans serially. Updates `SimlyResults.scans` after each completion. Surfaces progress via IPC. |
+| `main/scans/registry.ts` | Catalog of all scans. Each scan = `Scan<TResult>` with `id, buildLines(ctx), parseResult(run), persist(ignoreList, result)`. |
+| `main/scans/stat-weights.ts` | Scan #1: SimC `--scale_factors`. Returns per-stat weight table. |
+| `main/scans/trinket-pre-scan.ts` | Scan #2: all trinket-pair combos, hold else constant. Update ignore list with losers. |
+| `main/scans/gear-coarse.ts` / `gear-refined.ts` / `gear-final.ts` | Scans #3-5: progressive elimination ladder with stat-weight pruning + trinket-from-pre-scan + ignore-list filtering. |
+| `main/scans/consumables.ts` | Scan #6: vary flask × food × potion × augrune × gems × enchants on winning gear. |
+| `main/composer.ts` | Combine winners across all scans into `SimlyResults.composed`. |
+| `main/item-pruner.ts` | Apply stat-weight × `stat_weight_multiplier` filter. Trinkets exempt. Crest-upgrade rewriter (every item promoted to 6/6). |
+| `main/ignore-list.ts` | Persistent `(character_key, scenario, item_identity)` → `{ best_delta_pct, times_simmed, manually_removed }`. Add/remove/query. Backed by `electron-store`. |
+| `main/settings.ts` | All configurable thresholds (section 6 Phase 4). Backed by `electron-store`. Live-editable from renderer. |
+| `main/ipc.ts` | Renderer ↔ main channels: `scan-queue-update`, `scan-result-ready`, `settings-update`, `ignore-list-update`, `paste-simc-profile`. |
 
 ---
 
@@ -164,8 +188,8 @@ File path: `WTF/Account/<acct>/SavedVariables/Simly.lua`
 
 ```lua
 SimlyDB = {
-  schema_version = 1,
-  exported_at = 1714435200,        -- Unix timestamp (UTC)
+  schema_version = 2,
+  exported_at = 1714435200,        -- Unix timestamp (UTC), when the export was captured
   character = {
     name = "Charname",
     realm = "Stormrage",
@@ -174,18 +198,19 @@ SimlyDB = {
     spec = "Arms",
     level = 80,
   },
-  simc_export = "warrior=\"Charname\"\nlevel=80\nrace=human\n...",  -- Raw SimC profile
-  -- Optional: in-game requests for v1
-  requests = {                      -- Empty in MVP. v1: addon writes which question to answer.
-    -- { id = "best_dungeon", queued_at = 1714435200 },
-  },
+  simc_export = "warrior=\"Charname\"\nlevel=80\nrace=human\n...",  -- Raw SimC profile string
+
+  -- Sim trigger fields. The addon writes here when the user clicks
+  -- "Update sims" in the in-game panel; the desktop watcher picks it up.
+  update_requested_at = 0,         -- Unix timestamp; > last completed scan run = re-queue scans
+  active_scenario = "single_target_patchwerk",  -- v1 only this; v2 adds m_plus, aoe_cleave, aoe_funnel
 }
 ```
 
 **Schema rules:**
 - Bump `schema_version` on any breaking change. Desktop must check it and refuse to parse unknown versions.
 - `simc_export` is the verbatim string from `Core/Export.lua` — do not reformat.
-- `requests` is empty in MVP. v1 populates it from in-game UI clicks.
+- `update_requested_at` only triggers a re-queue when newer than the last completed run. Avoids re-running on bare /reload.
 
 ---
 
@@ -210,35 +235,68 @@ Interface/AddOns/SimlyResults/
 SimlyResults.lua
 ```
 
-`SimlyResults.lua` (overwritten by desktop app on every sim completion):
+`SimlyResults.lua` (overwritten by desktop app between scans and on completion):
 ```lua
 SimlyResults = {
-  schema_version = 1,
-  generated_at = 1714435200,
-  simc_version = "1100-01",
-  character_key = "Charname-Stormrage-us",  -- Must match SavedVars character
-  questions = {
-    best_flask = {
-      label = "Best flask",
-      best = { item_id = 212265, name = "Phial of Tepid Versatility", dps = 1234567 },
-      alternatives = {
-        { item_id = 212266, name = "Phial of Elemental Chaos", dps = 1230000, delta_pct = -0.37 },
+  schema_version = 2,
+  generated_at = 1714435200,        -- last write
+  simc_version = "1205-01 (d6f091a)",
+  character_key = "Charname-Stormrage-us",
+  active_scenario = "single_target_patchwerk",
+  gear_hash = "a8b3...",             -- hash of equipped+bag items at sim time; addon flags "stale" if changes
+
+  -- One scan = one stage of the pipeline. Status updated as each completes.
+  scans = {
+    stat_weights = {
+      status = "done",              -- pending | running | done | failed
+      started_at = 1714435100,
+      finished_at = 1714435130,
+      data = { intellect = 1.00, mastery = 0.74, crit = 0.68, haste = 0.62, versatility = 0.55 },
+    },
+    trinket_pre_scan = {
+      status = "done",
+      started_at = ..., finished_at = ...,
+      data = {
+        winner = { trinket1_item_id = 12345, trinket2_item_id = 67890, dps = 234567 },
+        alternatives = {
+          { trinket1_item_id = ..., trinket2_item_id = ..., dps = ..., delta_pct = -0.5 },
+        },
       },
     },
-    best_gems = {
-      label = "Best gems",
-      slots = {
-        { slot = "neck", item_id = 12345, gem_id = 213743, gem_name = "Crystalline Sapphire" },
-      },
+    gear_coarse = { status = "running", started_at = ... },
+    gear_refined = { status = "pending" },
+    gear_final = { status = "pending" },
+    consumables_gems_enchants = { status = "pending" },
+  },
+
+  -- The composed final answer. Addon panel renders this prominently.
+  -- Populated incrementally as scans finish; nil/empty until gear_final completes.
+  composed = {
+    label = "Optimal loadout (single-target Patchwerk)",
+    gear = {
+      head = { item_id = ..., name = "..." },
+      neck = { item_id = ..., name = "..." },
+      -- ... all 16 slots
     },
-    -- Additional questions follow same shape: top-level key = question id.
+    flask = { item_id = ..., name = "Flask of the Magisters" },
+    food = { item_id = ..., name = "Silvermoon Parade" },
+    potion = { item_id = ..., name = "..." },
+    augment_rune = { item_id = ..., name = "..." },
+    gems = { -- per-slot
+      neck = { gem_id = ..., name = "..." },
+    },
+    enchants = { -- per-slot
+      back = { enchant_id = ..., name = "..." },
+    },
+    expected_dps = 234567,
   },
 }
 ```
 
 **Schema rules:**
-- One file, one character. If the user plays multiple characters, write character-keyed sub-tables in a future schema bump.
-- Always write the full file atomically (temp file + rename) to avoid the addon reading a partial write.
+- One file, one character. Multi-character handling stays out of scope per section 8.
+- Always write atomically (temp file + rename) — addon reads must never see a partial write.
+- The desktop writes the file between every scan so the addon panel can show progress (e.g., `gear_coarse: running` updates to `done` mid-suite). Addon picks up the update at next /reload.
 
 ---
 
@@ -290,66 +348,112 @@ Each phase is a checkpoint with concrete acceptance criteria. Don't move to phas
 - Within ~2 minutes (depending on machine), `SimlyResults.lua` updates with a real recommendation.
 - /reload shows the recommendation in chat.
 
-### Phase 3 — Tooltip Hook
+### Phase 3 — In-Game Panel + Scan Queue Plumbing
+
+**Goal:** make the addon's "Update sims" button real, with a panel that displays last-sim status. Results data shape changes here from `questions` to `scans` (see section 5). No real Top Gear yet — the existing `best_flask` / `best_food` questions are wrapped as the first two "scans" so the new pipeline carries data end-to-end before scope grows.
 
 **Tasks:**
-- `addon/UI/Tooltip.lua`: Register `TooltipDataProcessor.AddTooltipPostCall(Enum.TooltipDataType.Item, ...)`. On each item tooltip, look up the item ID in `SimlyResults.questions.best_flask.alternatives` (and `.best`). If matched, append a colored line: `|cff00ff00Simly: best flask (+1.2% DPS)|r` or similar.
-- Verify against TipTac, LeatrixPlus loaded — confirm no conflict.
+- `addon/UI/Panel.lua`: in-game frame opened by `/simly`. Shows: last-sim timestamp per scan, currently-running scan if known, "Update sims" button. Reads from `SimlyResults.scans`. No tooltip integration in this phase.
+- `addon/UI/SlashCommand.lua`: `/simly` opens panel.
+- `addon/Core/SavedVars.lua`: add `update_requested_at` field. "Update sims" button writes the current timestamp into it.
+- Desktop: `main/scan-queue.ts` — owns a queue of scans. `processQueue()` runs scans serially against the shared SimC binary. Status updates fire via IPC and are appended to `SimlyResults.scans` between scans.
+- Desktop: refactor `questions/registry.ts` into `scans/registry.ts` — same Question abstraction renamed `Scan<TResult>`. Existing best_flask / best_food become the first two scans.
+- Desktop: when watcher sees `update_requested_at` newer than the last completed scan run, kicks off the queue.
+- Desktop: separate "Paste SimC string" path in renderer — same queue, different input source.
 
 **Acceptance:**
-- Hovering any flask in inventory shows a Simly line.
-- Best flask shows "(best)"; alternatives show their delta.
-- No errors when other tooltip-modifying addons are loaded.
+- `/simly` opens an in-game frame showing scan list + last-updated timestamps + a button.
+- Clicking the button + /reload kicks off a sim run; panel shows "running" state.
+- Pasting a SimC string into the desktop UI also triggers the queue.
+- Existing flask + food results continue to populate.
 
-### Phase 4 — Question Suite Expansion
+### Phase 4 — Stat Weights Scan + Top Gear Scan (the heavy lift)
 
-**Tasks:**
-- Refactor `simc-runner.ts` and `question-suite.ts` so each "question" is an object with `mutateProfile(profile, candidates)` and `parseResult(output)` methods. Add: `best_flask`, `best_food`, `best_potion`, `best_phial`, `best_weapon_enchant`, `best_gems`.
-- Each runs as a separate SimC invocation (or a single multi-profile invocation if SimC supports it cleanly — check `profileset.` syntax in SimC docs first).
-- Tooltip hook handles all six question types (consumables + gems).
+**Goal:** the actual product. "Given my equipped + bag inventory, find the maximum-DPS gear combo for single-target Patchwerk." Implements the multi-stage scan model with stat-weight pruning and the persistent ignore list.
+
+**v1 assumption — infinite crests:** every item is simmed at its maximum upgrade tier (6/6). Bonus IDs are rewritten on the way into SimC to bump each item to max ilvl. v2 will recommend crest spending; v1 just shows what max-out potential looks like.
+
+**Scans run in order, all written to `SimlyResults.scans`:**
+
+1. **`stat_weights`** — SimC `--scale_factors`. Output: `{ int: 1.00, mastery: 0.74, crit: 0.68, ... }`. ~30s. Recomputed every "Update sims" — they drift as gear changes and are needed for step 3's pruning. Not used as the final answer (stat weights are inaccurate at predicting real DPS); only as a coarse filter.
+2. **`trinket_pre_scan`** — All trinket-pair combos from equipped + bags. Hold everything else constant. 3000 iterations per profileset. Top-K trinkets carried forward. Trinkets that lose by more than `ignore_threshold_pct` (default 3%) twice consistently are added to the ignore list with `slot=trinket` flag. Trinkets are NEVER pruned by stat weight — only by simulated DPS — because passive/on-use effects can dominate.
+3. **`gear_coarse`** — 1000 iterations. For each non-trinket slot, prune candidates: keep items whose stat-weight score × `stat_weight_multiplier` (default 1.5) is at or above the best item's score in that slot. Trinkets are slotted from the pre-scan winners. Cartesian product of survivors across slots. Items that lose by more than `ignore_threshold_pct` are added to the ignore list (per scenario, per item identity).
+4. **`gear_refined`** — 3000 iterations. Top-N survivors from `gear_coarse` (within ~1% of winner). Tighter ignore-list update.
+5. **`gear_final`** — 5000+ iterations. Top-M survivors from `gear_refined` (within 0.5% of winner). Final ranked gear list with sidegrades (anything within 0.1% of the winner counts as tied).
+6. **`consumables_gems_enchants`** — 5000 iterations. Take winning gear from `gear_final`. Vary flask × food × potion × augment rune × gem combos × enchant combos. Single profileset sim.
+
+**Composed final answer** (`SimlyResults.composed`): the top combination across all scans. Addon panel renders this prominently.
+
+**Persistent ignore list:**
+- Stored via `electron-store`, keyed by `(character_key, scenario, item_identity)`.
+- `item_identity = item_id : sorted_bonus_ids : crafted_stats` — crest upgrades naturally produce a new identity.
+- An item enters the list when it's `> ignore_threshold_pct` behind the winner in its slot AND has been simmed `>= ignore_after_n_sims` times (default 2).
+- "Close-but-lost" items (within `keep_threshold_pct`, default 1%) stay eligible — re-simmed every cycle in case context changed.
+- Manually removable from the desktop UI (per-item or "clear all").
+
+**Configurable thresholds (desktop settings, all live-editable):**
+- `stat_weight_multiplier` (default 1.5)
+- `ignore_threshold_pct` (default 3%)
+- `keep_threshold_pct` (default 1%)
+- `ignore_after_n_sims` (default 2)
+- `tie_window_pct` (default 0.1%)
+- `iterations_coarse` / `iterations_refined` / `iterations_final` (defaults 1000 / 3000 / 5000)
 
 **Acceptance:**
-- Single /reload triggers the full six-question suite.
-- All six question types show in tooltips on relevant items.
-- Total sim time is acceptable (target: under 10 minutes on mid-range hardware).
+- "Update sims" runs all six scans in 3-15 minutes against a typical character.
+- Each scan's status visible in the in-game panel (pending / running / done with timestamp).
+- `SimlyResults.composed` shows the top gear loadout the desktop found.
+- Ignore list grows as expected; manually clearing an item in desktop re-includes it next run.
+- Crest upgrades (item identity changes) automatically clear the item from ignore (new identity = fresh sim).
 
-### Phase 5 — Desktop UI (Status + History)
+### Phase 5 — Desktop UI (Raidbots-style results page)
+
+**Goal:** desktop becomes the "deep dive" view — Raidbots-style results page showing every scan with full DPS tables, raw SimC input that produced it, and settings.
 
 **Tasks:**
-- `renderer/views/Status.tsx`: shows "Idle / Simming question N of M / Done at HH:MM".
-- `renderer/views/Queue.tsx`: simulation queue with progress bars per question.
-- `renderer/views/Results.tsx`: last completed results + raw SimC output expandable per question.
-- `renderer/views/Settings.tsx`: WoW path override, pinned SimC version toggle, enabled questions checklist.
-- IPC channels per `main/ipc.ts`.
+- `renderer/views/Status.tsx` — what's running right now, ETA, queue depth.
+- `renderer/views/Scans.tsx` — for each scan: status, timestamp, full ranked results table, expandable raw SimC input, expandable raw SimC stdout.
+- `renderer/views/Composed.tsx` — the assembled "your optimal loadout" view (mirrors what the addon shows).
+- `renderer/views/Settings.tsx` — WoW path, all configurable thresholds (section above), SimC version source toggle, ignore-list editor.
+- `renderer/views/PasteInput.tsx` — paste-a-SimC-string entry point.
+- IPC channels: `scan-queue-update`, `scan-result-ready`, `settings-update`, `ignore-list-update`.
 
 **Acceptance:**
 - Tray click opens the desktop window.
-- Sim progress visible in real time.
-- Settings persisted via `electron-store` across app restarts.
+- Each scan visible with full results.
+- Editing a threshold in settings persists across restarts and applies on the next "Update sims".
+- Manual ignore-list management works.
 
-### Phase 6 — Dungeon + BiS Questions (data-dependent)
-
-**Tasks:**
-- `data/dungeons.json`: seed from KeystoneLoot's data tables (read its addon files; reformat as JSON). One-time port; document the regeneration process in `data/README.md`.
-- `data/currencies.json`: hand-curated voidcore-and-similar mapping for current patch.
-- `question-suite.ts`: add `best_dungeon` (rank dungeons by expected upgrade DPS delta given currency-aware upgrade simulation) and `bis_for_difficulty` (BiS list filtered by item drop difficulty).
-- Settings UI: difficulty filter selector ("Heroic only", "Mythic", "M+ keys up to N", etc.).
-
-**Acceptance:**
-- Picking "Heroic only" in settings produces a heroic-only BiS list within the next sim cycle.
-- Best-dungeon recommendation reflects current currency drops.
-
-### Phase 7 — In-Game Panel (Approach C transition)
+### Phase 6 — Scenario Selector
 
 **Tasks:**
-- `addon/UI/Panel.lua`: in-game frame opened by `/cc`. Shows the question list, last-updated timestamps per question, and click-to-queue (writes to `SimlyDB.requests`).
-- Desktop: when `requests` is non-empty in the SavedVars, prioritize those questions in the next sim cycle.
-- Settings UI in addon (basic): which questions to show in tooltips.
+- Add `scenario` field everywhere: SavedVariables, ignore list keys, `SimlyResults.scans` keyed by scenario.
+- Desktop settings: "active scenario" picker. Initially: `single_target_patchwerk` only (v1). Phase 6 adds `m_plus`, `aoe_cleave`, `aoe_funnel`.
+- Re-running scans for a new scenario produces a new keyed result set. Both sets persist; addon panel shows the active scenario, can switch.
 
 **Acceptance:**
-- `/cc` opens the panel.
-- Queueing a question from the panel and /reloading triggers only that question's sim.
-- The casual user can ignore the desktop entirely; the desktop is now optional UI for power users.
+- Switching scenario in the desktop changes which loadout the addon panel shows on next /reload.
+- Each scenario has its own scan history and ignore list.
+
+### Phase 7 — Content Recommender (v2 territory; placeholder)
+
+**Goal:** "Now that I know my optimal loadout, what content do I run to improve it?" Plus crest spending recommendations.
+
+**Tasks (deferred):**
+- `data/dungeons.json` from KeystoneLoot data tables.
+- `data/currencies.json` (Voidcores etc.) for current patch.
+- New scan: `best_content` — for each loot source, simulate the highest-impact possible upgrade and rank.
+- New scan: `best_crest_spend` — given current crest balance, simulate which item upgrades produce the biggest DPS gain.
+- Settings: "highest content tier I'll do" toggle (Delve +N, M+N, raid difficulty).
+
+**Acceptance:** filled in when v1 phases 3-6 are stable.
+
+### Phase 8 — Stretch goals (no commitment)
+
+- **Tooltips** — hovering items shows the Simly line. Originally Phase 3; demoted because the in-game panel covers the same need without per-tooltip lag risk. Build only if the panel UX leaves something to be desired.
+- **Auto-rescan on gear change** — hash equipped+bags on /reload, requeue if changed. Currently manual button only.
+- **Multi-character roster** — desktop shows all simmed characters with their last loadouts.
+- **Multi-spec per character** — same character, different specs treated as separate keyed result sets.
 
 ---
 
@@ -384,12 +488,18 @@ Each phase is a checkpoint with concrete acceptance criteria. Don't move to phas
 
 - Combat-related features. No DPS overlays, no rotation helpers, no ability suggestions during combat. Stay strictly in gearing/utility territory to remain compliant with Midnight addon rules.
 - Multi-character handling. v1 = one character at a time. The active character on /reload is the one that gets simmed.
+- Multi-spec per character. Same character on a different spec is treated as a new run that overwrites the previous. Multi-spec persistence is Phase 8 stretch.
 - Cloud sync, accounts, telemetry. Local files only.
 - Real-time sim updates. Every result requires /reload to surface in-game. Do not attempt clever workarounds (chat link parsing, screen scraping, memory hooks).
 - Mac / Linux desktop builds for v1. Windows only.
 - Mobile companion app. No.
 - Custom APL editing. Use whatever APL ships with the SimC binary.
-- Talent / build optimization. SimC has this; we are not exposing it in v1. Future scope.
+- Talent / build optimization. SimC has this; we are not exposing it in v1.
+- Crest spending recommendations. v1 assumes infinite crests (every item simmed at max upgrade tier 6/6). Crest spending recommendations are Phase 7 (v2).
+- Content recommender ("what should I run next?"). Phase 7 (v2).
+- Multiple scenarios in v1. Single-target Patchwerk only. M+ / cleave / funnel land in Phase 6.
+- Tooltip integration on bag items. The in-game panel covers the same need; tooltips are Phase 8 stretch.
+- Auto-rescan on gear change. Manual button only in v1; auto-detection is Phase 8 stretch.
 - Auction house integration. Wrong project.
 - Localization. English only for v1.
 - Light/dark theme switching in the desktop UI. Use whatever Electron defaults give.
@@ -400,19 +510,21 @@ Each phase is a checkpoint with concrete acceptance criteria. Don't move to phas
 
 These are recurring chores, not features. Document each as it comes up.
 
-- SimC version is auto-pinned by `simc-version-source.ts` (default: GitHub nightly, Monday-cadence). Manual bump only needed if auto-update is disabled or the chosen nightly is broken.
-- Regenerate `data/dungeons.json` from KeystoneLoot's latest data after each major patch.
-- Update `data/currencies.json` for new patch currencies.
+- SimC version is auto-pinned by `simc-version-source.ts` (default: latest nightly). Manual bump only needed if the active strategy is "manual pin" or the chosen nightly is broken.
+- Regenerate `data/upgrade-tracks.json` for any new item upgrade tracks each major patch (Phase 4 dependency).
+- Regenerate `data/dungeons.json` and `data/currencies.json` for the content recommender (Phase 7 / v2).
 - Bump addon `## Interface:` version in `.toc` for each WoW patch.
 
 ---
 
 ## 10. Open Questions for Future Phases
 
-These don't block v1 but should be answered before v2:
+These don't block v1 but should be answered before the relevant phase lands:
 
-- How to surface "your sim is stale; gear changed since last run" to the user.
-- Whether to support partial sim reruns (only re-sim affected questions when one item changes).
-- Whether to show in-game progress for in-flight sims (likely needs a chat-frame timer hack since IPC is /reload-bound).
-- Multi-character roster view in the desktop UI.
-- Sharing recommendations between guild members (would require leaving the local-only premise).
+- **Phase 4:** how do we accurately rewrite an item's bonus_ids to "max upgraded" for SimC? Each item type has a different upgrade-track encoding; we may need a lookup table per slot/track. Likely sourced from SimC's own data files or `data/`.
+- **Phase 4:** progressive elimination ladder needs concrete cull thresholds at each stage. Defaults are listed but real numbers come from observing actual sim behavior on a typical character.
+- **Phase 4:** when the trinket pre-scan picks the top trinkets, how many do we carry forward? Top 1 pair is too aggressive (might miss synergies with full gear); top 3 pairs grows the cartesian unnecessarily. Pick a number after observing real data.
+- **Phase 5:** in-flight scan progress to the addon needs `SimlyResults.lua` to be re-written between scans. Confirm WoW handles addon-loaded files updating mid-session (the sister-addon load happens at /reload, but reading the global from disk is theoretically possible via custom file IO — needs research).
+- **Phase 6:** how should the in-game panel let the user switch active scenario without relying on the desktop being open?
+- **Phase 7:** sourcing dungeon loot tables (KeystoneLoot vs first-party SimC data vs Wowhead scrape). Pick after Phase 6.
+- **Phase 8:** if/when tooltips ship, performance — registering on every Item tooltip post-call adds ~50µs per hover. Acceptable, but verify no regressions with TipTac/LeatrixPlus.
