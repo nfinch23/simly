@@ -125,6 +125,28 @@ function Panel.Refresh()
 	end
 	table.insert(lines, "")
 
+	-- Stat weights block (Phase 4b). Renders the per-stat scale factors
+	-- if the stat_weights scan ran successfully. Reminder to the user
+	-- that these are pruning hints, not gear recommendations.
+	if SimlyResults and SimlyResults.scans
+		and SimlyResults.scans.stat_weights
+		and SimlyResults.scans.stat_weights.status == "done"
+		and SimlyResults.scans.stat_weights.data
+	then
+		table.insert(lines, "|cffffd700Stat weights|r |cffaaaaaa(used to prune obviously-bad gear)|r")
+		local weights = SimlyResults.scans.stat_weights.data
+		-- Sort by value descending so the most important stat is first.
+		local pairs_arr = {}
+		for stat, value in pairs(weights) do
+			table.insert(pairs_arr, { stat = stat, value = value })
+		end
+		table.sort(pairs_arr, function(a, b) return a.value > b.value end)
+		for _, p in ipairs(pairs_arr) do
+			table.insert(lines, string.format("  %s: %.2f", p.stat, p.value))
+		end
+		table.insert(lines, "")
+	end
+
 	if SimlyResults then
 		table.insert(lines, "|cffaaaaaaSimC|r " .. (SimlyResults.simc_version or "?"))
 		table.insert(lines, "|cffaaaaaaScenario|r " .. (SimlyResults.active_scenario or "?"))

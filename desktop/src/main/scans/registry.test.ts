@@ -14,6 +14,7 @@ function fakeRun(profilesets: Array<{ name: string; mean: number }>): SimcRunRes
       iterations: 1,
     })),
     rawJsonPath: '/tmp/x.json',
+    rawJson: {},
   };
 }
 

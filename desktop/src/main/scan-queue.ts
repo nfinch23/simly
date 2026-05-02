@@ -4,15 +4,18 @@ import {
   type BestFoodResult,
   type ComposedLoadout,
   type ScanCollection,
+  type ScanRecord,
   type Scenario,
   type SimlyDB,
   type SimlyResults,
+  type StatWeights,
 } from '@simly/shared';
 import { writeLuaFile } from './lua-writer';
 import { runSimc } from './simc-runner';
 import type { BootstrapResult } from './simc-bootstrap';
 import type { WowPaths } from './wow-paths';
 import { buildAllScanLines, parseAllScanRecords } from './scans/registry';
+import { runStatWeightsScan } from './scans/stat-weights';
 import { parseSimcExport } from './simc-export-parser';
 import { STATIC_DESTRO_WARLOCK_PROFILE } from './static-profile';
 
@@ -98,8 +101,12 @@ export class ScanQueue {
       return;
     }
     console.log(`[queue] paste-input run for ${source.characterKey}`);
+    // Paste input is treated as a real character profile — caller has
+    // already pasted real `warlock="..." level=... ...` lines. The
+    // queue runs the same stages as a SavedVars-triggered run.
     await this.runScan({
-      profileScript: source.profileScript,
+      baseProfile: source.profileScript,
+      useRealExport: true,
       characterKey: source.characterKey,
       scenario: source.scenario,
     });
@@ -137,47 +144,89 @@ export class ScanQueue {
       }
     }
 
-    const profileScript = [baseProfile, '', buildAllScanLines()].join('\n');
     await this.runScan({
-      profileScript,
+      baseProfile,
+      useRealExport,
       characterKey,
       scenario: db.active_scenario,
     });
   }
 
   private async runScan(args: {
-    profileScript: string;
+    baseProfile: string;
+    useRealExport: boolean;
     characterKey: string;
     scenario: Scenario;
   }): Promise<void> {
     this.inFlight = true;
     try {
+      const runnerPaths = {
+        binPath: this.opts.simc.binPath,
+        scratchDir: this.opts.simc.scratchDir,
+      };
+      const scans: ScanCollection = {};
+
+      // Stage 1: stat weights (only on a real character export — the
+      // static fallback profile has no gear/talents and produces
+      // garbage weights). Failure is non-fatal; we still run consumables.
+      if (args.useRealExport) {
+        const swStarted = Math.floor(Date.now() / 1000);
+        try {
+          const sw = await runStatWeightsScan({
+            paths: runnerPaths,
+            baseProfile: args.baseProfile,
+          });
+          const swFinished = Math.floor(Date.now() / 1000);
+          const swRecord: ScanRecord<StatWeights> = {
+            status: 'done',
+            started_at: swStarted,
+            finished_at: swFinished,
+            data: sw.weights,
+          };
+          scans.stat_weights = swRecord;
+          const summary = Object.entries(sw.weights)
+            .map(([k, v]) => `${k}=${v?.toFixed(2)}`)
+            .join(' ');
+          console.log(
+            `[sim] stat_weights (${(sw.durationMs / 1000).toFixed(1)}s): ${summary}`,
+          );
+        } catch (err) {
+          console.error('[sim] stat_weights run failed:', (err as Error).message);
+          scans.stat_weights = {
+            status: 'failed',
+            started_at: swStarted,
+            finished_at: Math.floor(Date.now() / 1000),
+            error: (err as Error).message,
+          };
+        }
+      }
+
+      // Stage 2: consumables (flask + food) via profileset sim.
       const startedAt = Math.floor(Date.now() / 1000);
       const t0 = Date.now();
       let run;
       try {
         run = await runSimc({
-          paths: {
-            binPath: this.opts.simc.binPath,
-            scratchDir: this.opts.simc.scratchDir,
-          },
-          profileScript: args.profileScript,
+          paths: runnerPaths,
+          profileScript: [args.baseProfile, '', buildAllScanLines()].join('\n'),
           iterations: 1000,
           scratchTag: `consumables-${Date.now()}`,
         });
       } catch (err) {
-        console.error('[sim] simc run failed:', err);
+        console.error('[sim] consumables sim failed:', err);
         return;
       }
       const finishedAt = Math.floor(Date.now() / 1000);
       const dt = ((Date.now() - t0) / 1000).toFixed(1);
       console.log(
-        `[sim] simc ${run.simcVersion} (${run.gitRevision.slice(0, 8)}) finished in ${dt}s with ${run.profilesets.length} profileset(s)`,
+        `[sim] consumables (${dt}s, simc ${run.simcVersion} ${run.gitRevision.slice(0, 8)}): ${run.profilesets.length} profileset(s)`,
       );
 
-      const scans = parseAllScanRecords(run, startedAt, finishedAt);
+      const consumableScans = parseAllScanRecords(run, startedAt, finishedAt);
+      Object.assign(scans, consumableScans);
+
       if (Object.keys(scans).length === 0) {
-        console.error('[sim] no scan results in SimC output');
+        console.error('[sim] no scan results produced');
         return;
       }
       for (const [id, record] of Object.entries(scans)) {

@@ -21,6 +21,13 @@ export interface SimcRunResult {
   buildDate: string;
   profilesets: ProfilesetResult[];
   rawJsonPath: string;
+  /**
+   * Full parsed json2 output. Typed loosely (`unknown`) so each scan
+   * casts to its own narrowed view — profileset scans use this.profilesets,
+   * stat-weights scans dig into `sim.players[0].scale_factors`, future
+   * scans can read whatever they need without us extending this type.
+   */
+  rawJson: unknown;
 }
 
 export interface RunSimcOptions {
@@ -113,5 +120,6 @@ export async function runSimc(opts: RunSimcOptions): Promise<SimcRunResult> {
       iterations: r.iterations,
     })),
     rawJsonPath: outputPath,
+    rawJson: json,
   };
 }
