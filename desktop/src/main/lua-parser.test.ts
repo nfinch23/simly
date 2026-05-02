@@ -26,26 +26,24 @@ SimlyDB = {
     expect(db.character.region).toBe('us');
     expect(db.character.level).toBe(80);
     expect(db.simc_export).toContain('level=80');
-    expect(db.requests).toEqual([]);
+    expect(db.update_requested_at).toBe(0);
+    expect(db.active_scenario).toBe('single_target_patchwerk');
   });
 
-  it('handles a populated requests array', () => {
+  it('parses update_requested_at and active_scenario from a v2 snapshot', () => {
     const source = `
 SimlyDB = {
-  schema_version = 1,
+  schema_version = 2,
   exported_at = 100,
   character = { name = "X", realm = "Y", region = "us", class = "MAGE", spec = "Fire", level = 1 },
   simc_export = "",
-  requests = {
-    { id = "best_dungeon", queued_at = 200 },
-    { id = "best_flask", queued_at = 201 },
-  },
+  update_requested_at = 1714435200,
+  active_scenario = "single_target_patchwerk",
 }
 `;
     const db = parseSavedVars(source);
-    expect(db.requests).toHaveLength(2);
-    expect(db.requests[0]?.id).toBe('best_dungeon');
-    expect(db.requests[1]?.queued_at).toBe(201);
+    expect(db.update_requested_at).toBe(1714435200);
+    expect(db.active_scenario).toBe('single_target_patchwerk');
   });
 
   it('throws when the global is missing', () => {

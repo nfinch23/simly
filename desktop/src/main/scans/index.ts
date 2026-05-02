@@ -1,16 +1,18 @@
 import type { SimcRunResult } from '../simc-runner';
 
 /**
- * A Question is one row of "thing we want SimC to answer for the player."
- * Each question knows how to extend a SimC profile with the variants it
- * needs (`buildLines`) and how to read the resulting profileset DPS back
- * out into a typed result (`parseResult`).
+ * A Scan is one stage in the multi-stage sim pipeline. Each scan knows
+ * how to extend a SimC profile with the variants it needs (`buildLines`)
+ * and how to read the resulting profileset DPS back out into a typed
+ * result (`parseResult`).
  *
- * Multiple questions can run in a single SimC invocation by concatenating
- * their `buildLines()`; the `profilesetPrefix` keeps each question's
- * profileset names in a private namespace.
+ * Multiple scans can be merged into a single SimC invocation by
+ * concatenating their `buildLines()`; the `profilesetPrefix` keeps each
+ * scan's profileset names in a private namespace. v1's flask + food
+ * scans share one invocation; Phase 4 splits the gear ladder into
+ * separate runs so iterations can ramp.
  */
-export interface Question<TResult> {
+export interface Scan<TResult> {
   id: string;
   /** Namespace prefix for this question's profileset names. */
   profilesetPrefix: string;
@@ -51,7 +53,7 @@ export interface MatchedProfileset<C> {
  * Match SimC's profileset results back to typed candidate objects by name.
  * Profilesets whose names don't start with `<prefix>_` or whose suffix
  * isn't a known candidate key are skipped — callers can run multiple
- * questions in one sim and each will only see its own results.
+ * scans in one sim and each will only see its own results.
  */
 export function matchProfilesetsByPrefix<C extends { key: string }>(
   run: SimcRunResult,

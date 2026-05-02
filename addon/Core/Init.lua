@@ -43,17 +43,21 @@ frame:SetScript("OnEvent", function(self, event)
 		-- automatically on the next /reload or logout.
 		tryWriteSnapshot()
 
-		-- Read results from the sister addon's global and announce the
-		-- best flask to chat. Sister addon is OptionalDeps so absence is
-		-- fine on first launch (the desktop hasn't run yet).
-		if SimlyResults
-			and SimlyResults.questions
-			and SimlyResults.questions.best_flask
-			and SimlyResults.questions.best_flask.best
-		then
-			DEFAULT_CHAT_FRAME:AddMessage(
-				"Simly: best flask = " .. SimlyResults.questions.best_flask.best.name
-			)
+		-- Read the composed loadout from the sister addon's global and
+		-- announce the best flask + food to chat. Sister addon is
+		-- OptionalDeps so absence is fine on first launch (the desktop
+		-- hasn't run yet). Schema v2: read `composed`, not `questions`.
+		if SimlyResults and SimlyResults.composed then
+			if SimlyResults.composed.flask then
+				DEFAULT_CHAT_FRAME:AddMessage(
+					"Simly: best flask = " .. SimlyResults.composed.flask.name
+				)
+			end
+			if SimlyResults.composed.food then
+				DEFAULT_CHAT_FRAME:AddMessage(
+					"Simly: best food = " .. SimlyResults.composed.food.name
+				)
+			end
 		end
 	end
 end)

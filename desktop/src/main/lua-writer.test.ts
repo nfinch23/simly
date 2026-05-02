@@ -23,7 +23,7 @@ describe('serializeLua', () => {
 
   it('round-trips through the parser as SimlyDB-shaped data', () => {
     const original = {
-      schema_version: 1,
+      schema_version: 2,
       exported_at: 1714435200,
       character: {
         name: 'Charname',
@@ -34,7 +34,8 @@ describe('serializeLua', () => {
         level: 80,
       },
       simc_export: 'warrior="Charname"\nlevel=80\n',
-      requests: [{ id: 'best_flask', queued_at: 1 }],
+      update_requested_at: 1714435100,
+      active_scenario: 'single_target_patchwerk',
     };
     const lua = serializeLua('SimlyDB', original);
     expect(parseSavedVars(lua)).toEqual(original);

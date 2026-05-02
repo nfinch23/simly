@@ -6,15 +6,21 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { resolveWowPaths, type WowPaths } from './wow-paths';
 import { watchSavedVars, type WatcherHandle } from './watcher';
 import { writeLuaFile } from './lua-writer';
-import { buildPlaceholderResults } from './question-suite';
 import { bootstrapSimc, type BootstrapResult } from './simc-bootstrap';
 import { runSimc } from './simc-runner';
 import {
-  buildAllQuestionLines,
-  parseAllQuestions,
-} from './questions/registry';
+  buildAllScanLines,
+  parseAllScanRecords,
+} from './scans/registry';
 import { STATIC_DESTRO_WARLOCK_PROFILE } from './static-profile';
-import { RESULTS_SCHEMA_VERSION, type SimlyResults } from '@simly/shared';
+import {
+  RESULTS_SCHEMA_VERSION,
+  type BestFlaskResult,
+  type BestFoodResult,
+  type ComposedLoadout,
+  type ScanCollection,
+  type SimlyResults,
+} from '@simly/shared';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -81,7 +87,14 @@ async function startRoundTrip(): Promise<WowPaths | undefined> {
 
   // Seed a placeholder file so the addon loads cleanly on first /reload
   // before any sim has run. Replaced as soon as a real sim completes.
-  const placeholder = buildPlaceholderResults('placeholder-character');
+  const placeholder: SimlyResults = {
+    schema_version: RESULTS_SCHEMA_VERSION,
+    generated_at: Math.floor(Date.now() / 1000),
+    simc_version: 'placeholder',
+    character_key: 'placeholder-character',
+    active_scenario: 'single_target_patchwerk',
+    scans: {},
+  };
   try {
     await writeLuaFile(
       paths.resultsLuaPath,
@@ -162,9 +175,10 @@ async function runFlaskSim(
     console.log(`[sim] using real character export (${exportTrimmed.length} bytes)`);
   }
 
-  const profileScript = [baseProfile, '', buildAllQuestionLines()].join('\n');
+  const profileScript = [baseProfile, '', buildAllScanLines()].join('\n');
 
-  console.log(`[sim] starting flask sim for ${characterKey} via ${simc.binPath}`);
+  console.log(`[sim] starting consumables sim for ${characterKey} via ${simc.binPath}`);
+  const startedAt = Math.floor(Date.now() / 1000);
   const t0 = Date.now();
   let run;
   try {
@@ -172,35 +186,40 @@ async function runFlaskSim(
       paths: { binPath: simc.binPath, scratchDir: simc.scratchDir },
       profileScript,
       iterations: 1000,
-      scratchTag: `flask-${Date.now()}`,
+      scratchTag: `consumables-${Date.now()}`,
     });
   } catch (err) {
     console.error('[sim] simc run failed:', err);
     return;
   }
+  const finishedAt = Math.floor(Date.now() / 1000);
   const dt = ((Date.now() - t0) / 1000).toFixed(1);
   console.log(
     `[sim] simc ${run.simcVersion} (${run.gitRevision.slice(0, 8)}) finished in ${dt}s with ${run.profilesets.length} profileset(s)`,
   );
 
-  const questions = parseAllQuestions(run);
-  if (Object.keys(questions).length === 0) {
-    console.error('[sim] no question results in SimC output');
+  const scans = parseAllScanRecords(run, startedAt, finishedAt);
+  if (Object.keys(scans).length === 0) {
+    console.error('[sim] no scan results in SimC output');
     return;
   }
-  for (const [id, result] of Object.entries(questions)) {
-    const r = result as { best?: { name: string; dps: number } };
-    if (r.best) {
-      console.log(`[sim] ${id}: ${r.best.name} @ ${r.best.dps} dps`);
+  for (const [id, record] of Object.entries(scans)) {
+    const data = record?.data as { best?: { name: string; dps: number } } | undefined;
+    if (data?.best) {
+      console.log(`[sim] ${id}: ${data.best.name} @ ${data.best.dps} dps`);
     }
   }
 
+  const composed = composeFromConsumableScans(scans);
+
   const results: SimlyResults = {
     schema_version: RESULTS_SCHEMA_VERSION,
-    generated_at: Math.floor(Date.now() / 1000),
+    generated_at: finishedAt,
     simc_version: `${run.simcVersion} (${run.gitRevision.slice(0, 8)})`,
     character_key: characterKey,
-    questions,
+    active_scenario: 'single_target_patchwerk',
+    scans,
+    composed,
   };
 
   try {
@@ -213,6 +232,22 @@ async function runFlaskSim(
   } catch (err) {
     console.error('[sim] failed to write SimlyResults.lua:', err);
   }
+}
+
+/**
+ * Phase 3 v1-shim composer: assemble the addon-facing `composed` view
+ * from the two consumable scans we actually run today. Phase 4 replaces
+ * this with `composer.ts` that combines results from the full gear ladder.
+ */
+function composeFromConsumableScans(scans: ScanCollection): ComposedLoadout | undefined {
+  const flask = scans.best_flask?.data as BestFlaskResult | undefined;
+  const food = scans.best_food?.data as BestFoodResult | undefined;
+  if (!flask && !food) return undefined;
+  return {
+    label: 'Best consumables (single-target Patchwerk)',
+    flask: flask?.best ? { item_id: flask.best.item_id, name: flask.best.name } : undefined,
+    food: food?.best ? { item_id: food.best.item_id, name: food.best.name } : undefined,
+  };
 }
 
 app.whenReady().then(async () => {

@@ -19,10 +19,28 @@ export function parseSavedVars(source: string): SimlyDB {
     if (!isPlainObject(value)) {
       throw new Error('SimlyDB is not a table');
     }
-    return value as unknown as SimlyDB;
+    return applyDefaults(value as unknown as SimlyDB);
   }
 
   throw new Error('SimlyDB assignment not found in SavedVariables file');
+}
+
+/**
+ * Fill in v2-required fields for SavedVariables files that may pre-date
+ * the schema bump. v1 files lack `update_requested_at` and
+ * `active_scenario`; we default both rather than crash so the dev cycle
+ * survives the transition (the addon's WriteSnapshot will write proper
+ * v2 values on the next /reload). Phase-out: drop this once v1 files
+ * are rare in the wild.
+ */
+function applyDefaults(db: SimlyDB): SimlyDB {
+  if (typeof db.update_requested_at !== 'number') {
+    db.update_requested_at = 0;
+  }
+  if (typeof db.active_scenario !== 'string') {
+    db.active_scenario = 'single_target_patchwerk';
+  }
+  return db;
 }
 
 function topLevelAssignmentTarget(

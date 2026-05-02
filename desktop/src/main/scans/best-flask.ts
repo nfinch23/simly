@@ -4,7 +4,7 @@ import {
   buildProfilesetLines,
   matchProfilesetsByPrefix,
   roundTo,
-  type Question,
+  type Scan,
 } from './index';
 
 interface FlaskCandidate {
@@ -76,7 +76,7 @@ export function parseBestFlask(run: SimcRunResult): BestFlaskResult | undefined 
   };
 }
 
-export const bestFlaskQuestion: Question<BestFlaskResult> = {
+export const bestFlaskScan: Scan<BestFlaskResult> = {
   id: 'best_flask',
   profilesetPrefix: PREFIX,
   buildLines: buildFlaskProfilesetLines,

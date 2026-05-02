@@ -4,7 +4,7 @@ import {
   buildProfilesetLines,
   matchProfilesetsByPrefix,
   roundTo,
-  type Question,
+  type Scan,
 } from './index';
 
 interface FoodCandidate {
@@ -87,7 +87,7 @@ export function parseBestFood(run: SimcRunResult): BestFoodResult | undefined {
   };
 }
 
-export const bestFoodQuestion: Question<BestFoodResult> = {
+export const bestFoodScan: Scan<BestFoodResult> = {
   id: 'best_food',
   profilesetPrefix: PREFIX,
   buildLines: buildFoodProfilesetLines,
