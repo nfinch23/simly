@@ -20,21 +20,13 @@ If a task seems to conflict with SCOPE.md (different tech, different file layout
 
 ## Build phase tracking
 
-Current phase: **Phases 0/1/2 complete; Phase 3 in progress (3a + 3b shipped, 3c started)** — see SCOPE.md section 6 for acceptance criteria.
+Current phase: **Phases 0/1/2/3 complete; Phase 4 (Top Gear scan + stat-weight pruning) next** — see SCOPE.md section 6 for acceptance criteria.
 
-### Phase 3 sub-status
+### Phase 3 sub-status (all done)
 
-- **3a (schemas v2 + scans rename) — DONE** — committed at `a274b91`
-- **3b (scan-queue + update_requested_at gate) — DONE** — committed at `ef6c6e4`. Confirmed live: `[queue] no new request ... idle` on /reload without a button click.
-- **3c (in-game /simly panel) — IN PROGRESS, NOT COMMITTED.** Two files exist as untracked in the worktree:
-  - `addon/UI/Panel.lua` — frame skeleton with Best loadout / Scans / SimC version blocks + "Update sims" + "/reload" buttons
-  - `addon/UI/SlashCommand.lua` — `/simly [show|hide|toggle]` handler
-  - **Still TODO before 3c can ship:**
-    1. Add both files to `addon/Simly.toc` load list (Panel.lua before SlashCommand.lua)
-    2. Sync into main checkout (`cp` from worktree per the usual git-in-worktree workflow)
-    3. Smoke test in WoW: `/simly` opens panel; "Update sims" button bumps `update_requested_at`; `/reload` triggers a sim
-    4. Commit the three changes (toc + 2 new Lua files) as Phase 3c
-    5. Mark Phase 3 complete + Phase 4 next in this tracker
+- **3a (schemas v2 + scans rename)** — `a274b91`
+- **3b (scan-queue + update_requested_at gate)** — `ef6c6e4`
+- **3c (in-game /simly panel)** — `c93da75`. Verified live: panel renders, "Update sims" button bumps the gate, /reload triggers a real sim, refreshed loadout appears in the panel.
 
 Update this line as phases complete.
 
