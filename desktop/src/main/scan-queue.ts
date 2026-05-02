@@ -1,3 +1,4 @@
+import { Notification } from 'electron';
 import {
   RESULTS_SCHEMA_VERSION,
   type BestFlaskResult,
@@ -310,6 +311,7 @@ export class ScanQueue {
           results as unknown as Parameters<typeof writeLuaFile>[2],
         );
         console.log('[sim] wrote SimlyResults.lua — /reload in WoW to see it');
+        showScanCompleteNotification(scans, args.characterKey);
       } catch (err) {
         console.error('[sim] failed to write SimlyResults.lua:', err);
       }
@@ -318,6 +320,40 @@ export class ScanQueue {
     } finally {
       this.inFlight = false;
     }
+  }
+}
+
+/**
+ * Pop a native Windows toast when a scan cycle completes successfully
+ * so the user knows it's time to /reload. The desktop log is otherwise
+ * invisible during normal use (Phase 5's UI fixes that). The toast
+ * shows the character key + a summary of which scans landed.
+ *
+ * Wrapped in try/catch — failure is non-fatal (e.g., user has
+ * notifications disabled in Windows Focus Assist). Notification.isSupported
+ * also returns false in some headless envs.
+ */
+export function showScanCompleteNotification(
+  scans: ScanCollection,
+  characterKey: string,
+): void {
+  if (!Notification.isSupported()) return;
+  try {
+    const completed: string[] = [];
+    for (const [id, record] of Object.entries(scans)) {
+      if (record?.status === 'done') completed.push(id);
+    }
+    const summary = completed.length === 0
+      ? 'No scans completed'
+      : `${completed.length} scan${completed.length === 1 ? '' : 's'}: ${completed.join(', ')}`;
+    const n = new Notification({
+      title: 'Simly: scan complete',
+      body: `${characterKey}\n${summary}\n/reload in WoW to see results.`,
+      silent: false,
+    });
+    n.show();
+  } catch (err) {
+    console.warn('[notify] failed to show notification:', (err as Error).message);
   }
 }
 

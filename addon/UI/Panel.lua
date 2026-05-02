@@ -68,7 +68,7 @@ local function createFrame()
 	updateBtn:SetScript("OnClick", function()
 		ns.SavedVars.RequestUpdate()
 		DEFAULT_CHAT_FRAME:AddMessage(
-			"|cff00ffffSimly:|r scan requested. /reload to fire it."
+			"|cff00ffffSimly:|r scan requested. /reload now to start the run; wait for the desktop notification, then /reload again to see results."
 		)
 		Panel.Refresh()
 	end)
@@ -86,10 +86,32 @@ local function createFrame()
 	return f
 end
 
+-- Format the live "is a scan running?" indicator. Compares the
+-- panel-button request stamp (SimlyDB.update_requested_at) to the
+-- desktop's last completed scan timestamp (SimlyResults.generated_at).
+-- If a request is newer than the last completion, the desktop is
+-- either currently running or about to run — the user should wait
+-- for the Windows toast notification before /reload'ing.
+local function statusBlock()
+	local req = (SimlyDB and SimlyDB.update_requested_at) or 0
+	local gen = (SimlyResults and SimlyResults.generated_at) or 0
+	if req == 0 and gen == 0 then
+		return "|cffaaaaaaStatus:|r |cffaaaaaaIdle (no sims have run)|r"
+	end
+	if req > gen then
+		local age = formatAge(req)
+		return "|cffaaaaaaStatus:|r |cffffff00\226\151\143 Scan in progress|r |cffaaaaaa(requested " .. age .. " — wait for desktop notification, then /reload)|r"
+	end
+	return "|cffaaaaaaStatus:|r |cff00ff00\226\151\143 Up to date|r |cffaaaaaa(results " .. formatAge(gen) .. ")|r"
+end
+
 function Panel.Refresh()
 	if not frame then return end
 
 	local lines = {}
+
+	table.insert(lines, statusBlock())
+	table.insert(lines, "")
 
 	if SimlyResults and SimlyResults.composed then
 		local c = SimlyResults.composed
