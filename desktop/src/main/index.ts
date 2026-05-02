@@ -7,20 +7,8 @@ import { resolveWowPaths, type WowPaths } from './wow-paths';
 import { watchSavedVars, type WatcherHandle } from './watcher';
 import { writeLuaFile } from './lua-writer';
 import { bootstrapSimc, type BootstrapResult } from './simc-bootstrap';
-import { runSimc } from './simc-runner';
-import {
-  buildAllScanLines,
-  parseAllScanRecords,
-} from './scans/registry';
-import { STATIC_DESTRO_WARLOCK_PROFILE } from './static-profile';
-import {
-  RESULTS_SCHEMA_VERSION,
-  type BestFlaskResult,
-  type BestFoodResult,
-  type ComposedLoadout,
-  type ScanCollection,
-  type SimlyResults,
-} from '@simly/shared';
+import { ScanQueue } from './scan-queue';
+import { RESULTS_SCHEMA_VERSION, type SimlyResults } from '@simly/shared';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -126,128 +114,18 @@ async function startRoundTrip(): Promise<WowPaths | undefined> {
     return paths;
   }
 
-  let simInFlight = false;
+  const queue = new ScanQueue({ paths, simc });
   watcher = watchSavedVars(paths.savedVarsPath, (db) => {
     console.log(
       `[main] SavedVars updated: ${db.character.name}-${db.character.realm} (${db.character.class} ${db.character.spec})`,
     );
-    if (simInFlight) {
-      console.log('[main] sim already in flight; skipping until current run finishes');
-      return;
-    }
-    simInFlight = true;
-    void runFlaskSim(paths, simc, db).finally(() => {
-      simInFlight = false;
-    });
+    queue.maybeRunForSavedVars(db);
   });
   console.log('[main] watching SavedVariables...');
-  return paths;
-}
-
-/** Sentinel values the addon writes when it can't produce a real export. */
-const ADDON_FALLBACK_SENTINELS = new Set([
-  'PLACEHOLDER_PROFILE',
-  'NO_PROFILE_AVAILABLE',
-]);
-
-async function runFlaskSim(
-  paths: WowPaths,
-  simc: BootstrapResult,
-  db: import('@simly/shared').SimlyDB,
-): Promise<void> {
-  const character = db.character;
-  const characterKey = `${character.name}-${character.realm}-${character.region}`;
-
-  // Prefer the real character profile written by the SimulationCraft
-  // addon at PLAYER_LOGOUT. Fall back to our hand-written static profile
-  // when the addon couldn't generate one (sentinel) — keeps Phase 1
-  // SavedVars from old logouts working and lets dev iterate without
-  // requiring an in-game logout for every run.
-  const exportTrimmed = (db.simc_export ?? '').trim();
-  const useRealExport =
-    exportTrimmed.length > 0 && !ADDON_FALLBACK_SENTINELS.has(exportTrimmed);
-  const baseProfile = useRealExport ? exportTrimmed : STATIC_DESTRO_WARLOCK_PROFILE;
-  if (!useRealExport) {
-    console.log(
-      `[sim] simc_export is "${exportTrimmed.slice(0, 40)}"; using static fallback profile`,
-    );
-  } else {
-    console.log(`[sim] using real character export (${exportTrimmed.length} bytes)`);
-  }
-
-  const profileScript = [baseProfile, '', buildAllScanLines()].join('\n');
-
-  console.log(`[sim] starting consumables sim for ${characterKey} via ${simc.binPath}`);
-  const startedAt = Math.floor(Date.now() / 1000);
-  const t0 = Date.now();
-  let run;
-  try {
-    run = await runSimc({
-      paths: { binPath: simc.binPath, scratchDir: simc.scratchDir },
-      profileScript,
-      iterations: 1000,
-      scratchTag: `consumables-${Date.now()}`,
-    });
-  } catch (err) {
-    console.error('[sim] simc run failed:', err);
-    return;
-  }
-  const finishedAt = Math.floor(Date.now() / 1000);
-  const dt = ((Date.now() - t0) / 1000).toFixed(1);
   console.log(
-    `[sim] simc ${run.simcVersion} (${run.gitRevision.slice(0, 8)}) finished in ${dt}s with ${run.profilesets.length} profileset(s)`,
+    '[main] click "Update sims" in the in-game panel and /reload to trigger a run.',
   );
-
-  const scans = parseAllScanRecords(run, startedAt, finishedAt);
-  if (Object.keys(scans).length === 0) {
-    console.error('[sim] no scan results in SimC output');
-    return;
-  }
-  for (const [id, record] of Object.entries(scans)) {
-    const data = record?.data as { best?: { name: string; dps: number } } | undefined;
-    if (data?.best) {
-      console.log(`[sim] ${id}: ${data.best.name} @ ${data.best.dps} dps`);
-    }
-  }
-
-  const composed = composeFromConsumableScans(scans);
-
-  const results: SimlyResults = {
-    schema_version: RESULTS_SCHEMA_VERSION,
-    generated_at: finishedAt,
-    simc_version: `${run.simcVersion} (${run.gitRevision.slice(0, 8)})`,
-    character_key: characterKey,
-    active_scenario: 'single_target_patchwerk',
-    scans,
-    composed,
-  };
-
-  try {
-    await writeLuaFile(
-      paths.resultsLuaPath,
-      'SimlyResults',
-      results as unknown as Parameters<typeof writeLuaFile>[2],
-    );
-    console.log('[sim] wrote SimlyResults.lua — /reload in WoW to see it');
-  } catch (err) {
-    console.error('[sim] failed to write SimlyResults.lua:', err);
-  }
-}
-
-/**
- * Phase 3 v1-shim composer: assemble the addon-facing `composed` view
- * from the two consumable scans we actually run today. Phase 4 replaces
- * this with `composer.ts` that combines results from the full gear ladder.
- */
-function composeFromConsumableScans(scans: ScanCollection): ComposedLoadout | undefined {
-  const flask = scans.best_flask?.data as BestFlaskResult | undefined;
-  const food = scans.best_food?.data as BestFoodResult | undefined;
-  if (!flask && !food) return undefined;
-  return {
-    label: 'Best consumables (single-target Patchwerk)',
-    flask: flask?.best ? { item_id: flask.best.item_id, name: flask.best.name } : undefined,
-    food: food?.best ? { item_id: food.best.item_id, name: food.best.name } : undefined,
-  };
+  return paths;
 }
 
 app.whenReady().then(async () => {
