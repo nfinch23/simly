@@ -1,0 +1,124 @@
+# Felfriend - Demonology - 2026-05-02 12:57 - US/Zul'jin
+# SimC Addon 12.0.5-01
+# WoW 12.0.5.67314, TOC 120005
+# Requires SimulationCraft 1000-01 or newer
+
+warlock="Felfriend"
+level=90
+race=nightborne
+region=us
+server=zuljin
+role=spell
+professions=leatherworking=52/inscription=105
+spec=demonology
+# loot_spec=demonology
+
+talents=CoQAMrNP5kak+EBqLfUa3dMm+yMjZGNLmxiZGzyAAAAAAAAGzYYDGYb0CNsYMzYZ2mZmxMAwMjxYmZAGzMmZDAAYmZmZmZw2MGwA
+
+# Saved Loadout: Raid
+# talents=CoQAMrNP5kak+EBqLfUa3dMm+amhZGmNzYbmZMLDAAAAAAAYMjhFYgthFMsYwMLz2MzMmBAmhZmZmZAGzYmZDAAMzMzMGGzyMGwA
+# Saved Loadout: m+
+# talents=CoQAMrNP5kak+EBqLfUa3dMm+yMjZGmFzYxMjZZAAAAAAAAjZMsBDsNsghFDGLjZmZmZAgZMzYmZGgxMjZ2AAAzMzMzMzgtZGgB
+# Saved Loadout: m+2
+# talents=CoQAMrNP5kak+EBqLfUa3dMm+yMjZGmFzYxMjZZAAAAAAAAjZMsBDsNsghFjZGLz2MzMmBAmZMGzMDwYmxMbAAAzMzMzMD2mxAGA
+
+# Abyssal Immolator's Smoldering Flames (272)
+head=,id=250042,bonus_id=6652/12801/13534/13440/13338/13575/3157
+# Amani Heartstring Pendant (259)
+neck=,id=265739,bonus_id=6652/13668/12789
+# Mantle of Dark Devotion (276)
+shoulder=,id=251085,bonus_id=13440/6652/13577/12699/12802
+# Adherent's Silken Shroud (285)
+back=,id=239656,bonus_id=12214/13667/12497/12066/8960/12384/8795/13622,crafted_stats=40/36,crafting_quality=5
+# Wraps of Umbral Descent (276)
+chest=,id=251120,bonus_id=13440/41/13577/12699/12798
+# Martyr's Bindings (285)
+wrist=,id=239648,bonus_id=12214/13667/12497/12066/8960/12384/8791/13622/12667,crafted_stats=40/32,crafting_quality=5
+# Preyseeker's Refined Gloves (263)
+hands=,id=259919,bonus_id=41/13577/12790
+# Hara'ti Defender's Sash (263)
+waist=,id=263265,bonus_id=13577/12667/12790
+# Abyssal Immolator's Pillars (276)
+legs=,id=250041,bonus_id=40/13440/13339/13575/12802
+# Sprawling Rootpads (263)
+feet=,id=249630,bonus_id=6652/13577/12790
+# Blooming Leafcoil (263)
+finger1=,id=249623,bonus_id=6652/13668/12790
+# Preyseeker's Circle (263)
+finger2=,id=259914,bonus_id=6652/13668/12790
+# Gaze of the Alnseer (250)
+trinket1=,id=249343,bonus_id=6652/13332/12782
+# Heart of Wind (272)
+trinket2=,id=250256,bonus_id=12801/13440/6652/12699
+# Blooming Thornblade (263)
+main_hand=,id=250452,bonus_id=43/13333/12790
+# Rukhran's Solar Reliquary (263)
+off_hand=,id=258472,bonus_id=12794/13440/6652/12699
+
+### Gear from Bags
+#
+# Lightbinder Shoulderguards (272)
+# shoulder=,id=258578,bonus_id=12801/13440/6652/13577/12699
+#
+# Lightbinder Shoulderguards (276)
+# shoulder=,id=258578,bonus_id=13440/6652/13577/12699/12798
+#
+# Abyssal Immolator's Dreadrobe (237)
+# chest=,id=250045,bonus_id=12778/13332/13336/6652/13575
+#
+# Renowned Guild Tabard (1)
+# tabard=,id=69210
+#
+# Bracers of Blazing Light (272)
+# wrist=,id=258580,bonus_id=12801/13440/6652/12667/13577/12699
+#
+# Bracers of Blazing Light (266)
+# wrist=,id=258580,bonus_id=12795/13440/6652/12667/13577/12699
+#
+# Sprawling Wristroots (250)
+# wrist=,id=249636,bonus_id=12786/6652/12667/13577
+#
+# Threadbare Mitts (201)
+# hands=,id=258859,bonus_id=13611,drop_level=90
+#
+# Commander's Faded Breeches (276)
+# legs=,id=251090,bonus_id=13440/6652/13577/12699/12798
+#
+# Sprawling Rootstockings (276)
+# legs=,id=249633,bonus_id=6652/13577/12798
+#
+# Encroaching Shadow Signet (263)
+# finger1=,id=250460,bonus_id=6652/13668/13333/12790
+#
+# Preyseeker's Signet (263)
+# finger1=,id=259912,bonus_id=6652/13668/12790
+#
+# Crucible of Erratic Energies (259)
+# trinket1=,id=264507,bonus_id=12789
+#
+# Vaelgor's Final Stare (250)
+# trinket1=,id=249346,bonus_id=42/13332/12782
+#
+# Ever-Collapsing Void Fissure (250)
+# trinket1=,id=251786,bonus_id=12786/6652
+#
+# Nevermelting Ice Crystal (259)
+# trinket1=,id=50259,bonus_id=12793/13440/6652/12699
+#
+# Drum of Renewed Bonds (259)
+# trinket1=,id=248583,bonus_id=13183/6652/12793
+#
+# Elderoot Spire (250)
+# main_hand=,id=249670,bonus_id=12786/6652
+
+### Additional Character Info
+#
+# catalyst_currencies=3269:8/3378:3/2813:8/3116:8
+#
+# upgrade_currencies=c:3347:61/c:3383:37/c:3341:60/c:3343:10/c:1792:1/c:3345:102/i:232875:4
+#
+# slot_high_watermarks=0:272:276/1:259:285/2:276:289/3:276:276/4:263:289/5:276:289/6:263:289/7:285:285/8:263:276/9:263:276/10:259:266/11:285:285/12:250:285/13:263:285/14:0:250/15:0:250/16:263:285
+#
+# upgrade_achievements=19577/19578/19579/40107/40115/42767/42768/61809
+
+# Checksum: 75e3bcaa

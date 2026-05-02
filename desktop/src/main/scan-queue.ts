@@ -13,6 +13,7 @@ import { runSimc } from './simc-runner';
 import type { BootstrapResult } from './simc-bootstrap';
 import type { WowPaths } from './wow-paths';
 import { buildAllScanLines, parseAllScanRecords } from './scans/registry';
+import { parseSimcExport } from './simc-export-parser';
 import { STATIC_DESTRO_WARLOCK_PROFILE } from './static-profile';
 
 /** Sentinel values the addon writes when it can't produce a real export. */
@@ -119,6 +120,21 @@ export class ScanQueue {
       );
     } else {
       console.log(`[sim] using real character export (${exportTrimmed.length} bytes)`);
+      // Phase 4a: parse the real export into a structured gear pool so
+      // we can see what's available before the gear ladder lands. Pure
+      // logging right now; nothing reads the result yet. Phase 4d's
+      // pruner consumes this.
+      try {
+        const parsed = parseSimcExport(exportTrimmed);
+        const slotCounts = Object.entries(parsed.poolBySlot)
+          .map(([slot, items]) => `${slot}:${items.length}`)
+          .join(' ');
+        console.log(
+          `[sim] gear pool: ${parsed.equipped.length} equipped, ${parsed.bag.length} in bags (${slotCounts})`,
+        );
+      } catch (err) {
+        console.warn('[sim] failed to parse SimC export for gear pool log:', (err as Error).message);
+      }
     }
 
     const profileScript = [baseProfile, '', buildAllScanLines()].join('\n');
