@@ -1,4 +1,5 @@
-import { Notification, BrowserWindow } from 'electron';
+import { BrowserWindow } from 'electron';
+import notifier from 'node-notifier';
 import {
   RESULTS_SCHEMA_VERSION,
   type BestFlaskResult,
@@ -354,26 +355,31 @@ export function showScanCompleteNotification(
 
   console.log(`[notify] scan complete: ${summary} (for ${characterKey})`);
 
-  // Layer 1: native toast.
+  // Layer 1: native toast via node-notifier (uses bundled SnoreToast on
+  // Windows). Electron's built-in Notification API silently drops toasts
+  // in dev mode because it requires a Start Menu shortcut with the
+  // AUMID baked in — node-notifier sidesteps that by shipping its own
+  // toast helper that handles AUMID registration internally. Works in
+  // dev electron without any setup.
   try {
-    const isSupported = Notification.isSupported();
-    console.log(`[notify] Notification.isSupported() = ${isSupported}`);
-    if (isSupported) {
-      const n = new Notification({
-        title: 'Simly: scan complete',
-        body,
-        silent: false,
-        urgency: 'normal',
-      });
-      n.on('show', () => console.log('[notify] toast shown'));
-      n.on('failed', (_event, error) =>
-        console.warn('[notify] toast failed event:', error),
-      );
-      n.show();
-      console.log('[notify] called n.show()');
-    }
+    // appID + sound are Windows-only options on WindowsToaster; the
+    // cross-platform Notification type doesn't expose them, so we
+    // assemble the options object loosely and pass via cast.
+    const opts = {
+      title: 'Simly: scan complete',
+      message: body,
+      appID: 'com.simly.desktop',
+      sound: true,
+      wait: false,
+      timeout: 10,
+    } as Parameters<typeof notifier.notify>[0];
+    notifier.notify(opts, (err, response) => {
+      if (err) console.warn('[notify] node-notifier err:', err.message);
+      else console.log('[notify] node-notifier response:', response);
+    });
+    console.log('[notify] called notifier.notify()');
   } catch (err) {
-    console.warn('[notify] toast threw:', (err as Error).message);
+    console.warn('[notify] notifier threw:', (err as Error).message);
   }
 
   // Layer 2: flash the taskbar icon. Survives Focus Assist + dev-mode
