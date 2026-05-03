@@ -66,14 +66,21 @@ function SavedVars.MarkSeen(generatedAt)
 	SimlyDB.last_seen_generated_at = generatedAt or time()
 end
 
--- Called by the in-game panel's "Update sims" button. Stamps the current
--- time into update_requested_at so the desktop watcher kicks off the
--- scan queue at the next /reload (when SavedVars get flushed to disk).
+-- Called by the in-game panel's "Update sims" button. Re-snapshots
+-- the player's profile (so the SimulationCraft export reflects current
+-- bag + equipped state, not the stale snapshot from PLAYER_LOGIN), then
+-- stamps update_requested_at so the desktop watcher kicks off the scan
+-- queue at the next /reload (when SavedVars get flushed to disk).
+--
+-- Why we re-snapshot here: the SimulationCraft addon's GetSimcProfile()
+-- captures live game state at call time. The user's typical flow is
+-- "open bank → put gear in bag → click Update sims". Without a fresh
+-- snapshot at click time, the disk write at /reload's PLAYER_LOGOUT
+-- step would persist the previous PLAYER_LOGIN's snapshot — which
+-- predates the bag changes — and the desktop's quick-sim would see
+-- "pool unchanged" and short-circuit.
 function SavedVars.RequestUpdate()
-	if not SimlyDB then
-		-- Snapshot hasn't been taken yet; build one now then stamp.
-		SavedVars.WriteSnapshot()
-	end
+	SavedVars.WriteSnapshot()
 	SimlyDB.update_requested_at = time()
 end
 
