@@ -37,4 +37,11 @@ export interface SimlyDB {
   update_requested_at: number;
   /** Scenario the user has selected. v1 only single_target_patchwerk. */
   active_scenario: Scenario;
+  /**
+   * Last `SimlyResults.generated_at` value the addon has surfaced to
+   * the user. Used to decide whether a /reload reveals a NEW set of
+   * results the user hasn't seen before, so the addon can pop a
+   * prominent "fresh results available" message at login.
+   */
+  last_seen_generated_at?: number;
 }

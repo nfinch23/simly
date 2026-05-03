@@ -169,6 +169,7 @@ export class ScanQueue {
     scenario: Scenario;
   }): Promise<void> {
     this.inFlight = true;
+    setWindowTitle(`Simly — Scan running for ${args.characterKey}…`);
     try {
       const runnerPaths = {
         binPath: this.opts.simc.binPath,
@@ -318,6 +319,7 @@ export class ScanQueue {
       }
 
       this.lastCompletedAt = finishedAt;
+      setWindowTitle(`Simly — Up to date (${args.characterKey})`);
     } finally {
       this.inFlight = false;
     }
@@ -395,6 +397,21 @@ export function showScanCompleteNotification(
     }
   } catch (err) {
     console.warn('[notify] flashFrame threw:', (err as Error).message);
+  }
+}
+
+/**
+ * Update the Simly window's title bar (and therefore taskbar text)
+ * with current state. Catches edge cases (window destroyed, no
+ * window yet) so the queue isn't tied to UI lifecycle.
+ */
+function setWindowTitle(title: string): void {
+  try {
+    const wins = BrowserWindow.getAllWindows();
+    if (wins.length === 0) return;
+    wins[0]!.setTitle(title);
+  } catch (err) {
+    console.warn('[notify] setWindowTitle threw:', (err as Error).message);
   }
 }
 

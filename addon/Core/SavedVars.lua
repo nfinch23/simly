@@ -38,6 +38,7 @@ function SavedVars.WriteSnapshot()
 	-- Carry user-controlled fields forward across snapshots.
 	local prevUpdateRequestedAt = (SimlyDB and SimlyDB.update_requested_at) or 0
 	local prevScenario = (SimlyDB and SimlyDB.active_scenario) or DEFAULT_SCENARIO
+	local prevLastSeen = (SimlyDB and SimlyDB.last_seen_generated_at) or 0
 
 	SimlyDB = {
 		schema_version = SCHEMA_VERSION,
@@ -53,7 +54,16 @@ function SavedVars.WriteSnapshot()
 		simc_export = profile,
 		update_requested_at = prevUpdateRequestedAt,
 		active_scenario = prevScenario,
+		last_seen_generated_at = prevLastSeen,
 	}
+end
+
+-- Record that the user has now seen results with the given timestamp.
+-- Called by Init.lua after surfacing the "new results" popup so we
+-- don't pop it again on subsequent /reloads with the same results.
+function SavedVars.MarkSeen(generatedAt)
+	if not SimlyDB then SavedVars.WriteSnapshot() end
+	SimlyDB.last_seen_generated_at = generatedAt or time()
 end
 
 -- Called by the in-game panel's "Update sims" button. Stamps the current

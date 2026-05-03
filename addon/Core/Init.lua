@@ -43,11 +43,30 @@ frame:SetScript("OnEvent", function(self, event)
 		-- automatically on the next /reload or logout.
 		tryWriteSnapshot()
 
+		-- "Fresh results" popup. If SimlyResults.generated_at is newer
+		-- than the last value we recorded as "seen" (via MarkSeen),
+		-- announce it loudly so the user knows their /reload revealed
+		-- new data. Otherwise stay quiet — the user is probably just
+		-- /reloading for an unrelated reason and doesn't want spam.
+		local genAt = (SimlyResults and SimlyResults.generated_at) or 0
+		local lastSeen = (SimlyDB and SimlyDB.last_seen_generated_at) or 0
+		local hasNewResults = genAt > lastSeen and genAt > 0
+
 		-- Read the composed loadout from the sister addon's global and
 		-- announce the best flask + food to chat. Sister addon is
 		-- OptionalDeps so absence is fine on first launch (the desktop
 		-- hasn't run yet). Schema v2: read `composed`, not `questions`.
 		if SimlyResults and SimlyResults.composed then
+			if hasNewResults then
+				DEFAULT_CHAT_FRAME:AddMessage(
+					"|cff00ffff*** Simly: fresh sim results ***|r |cffaaaaaa(/simly to view)|r"
+				)
+				if PlaySound then
+					-- 67275 = "ReadyCheck"; loud-ish but not annoying.
+					-- Falls through silently if id changes per patch.
+					pcall(PlaySound, 67275, "Master")
+				end
+			end
 			if SimlyResults.composed.flask then
 				DEFAULT_CHAT_FRAME:AddMessage(
 					"Simly: best flask = " .. SimlyResults.composed.flask.name
@@ -58,6 +77,12 @@ frame:SetScript("OnEvent", function(self, event)
 					"Simly: best food = " .. SimlyResults.composed.food.name
 				)
 			end
+		end
+
+		if hasNewResults then
+			-- Record that we've shown the popup for this generated_at,
+			-- so a future /reload with the same results stays quiet.
+			ns.SavedVars.MarkSeen(genAt)
 		end
 	end
 end)
