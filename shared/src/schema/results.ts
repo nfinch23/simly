@@ -101,12 +101,42 @@ export interface ComposedLoadout {
   expected_dps?: number;
 }
 
+/** One slot's item in a `GearComboResult`. Slot is the SimC slot name (head, finger1, etc). */
+export interface GearComboItemRef {
+  slot: string;
+  item: ScannedItemRef;
+}
+
+/** One simulated cartesian combination from a gear ladder scan. */
+export interface GearComboResult {
+  combo_id: string;
+  items: GearComboItemRef[];
+  mean_dps: number;
+  /** Delta vs the winning combo, in percent. Winner is 0. */
+  delta_pct: number;
+}
+
+/**
+ * Output of one stage of the gear ladder (`gear_coarse` / `gear_refined`
+ * / `gear_final`). Combos are sorted descending by mean DPS; `winner`
+ * mirrors `combos[0]` for fast lookup.
+ */
+export interface GearScanResult {
+  label: string;
+  combos: GearComboResult[];
+  winner?: GearComboResult;
+  /** Iteration count used for this stage's profileset sim. */
+  iterations: number;
+  /** Total candidate count fed into SimC (== combos.length when sim succeeded). */
+  total_combos: number;
+}
+
 export interface ScanCollection {
   stat_weights?: ScanRecord<StatWeights>;
   trinket_pre_scan?: ScanRecord<TrinketPreScanResult>;
-  gear_coarse?: ScanRecord<unknown>;
-  gear_refined?: ScanRecord<unknown>;
-  gear_final?: ScanRecord<unknown>;
+  gear_coarse?: ScanRecord<GearScanResult>;
+  gear_refined?: ScanRecord<GearScanResult>;
+  gear_final?: ScanRecord<GearScanResult>;
   /**
    * v1-shim scans carried forward from Phase 2 — the consumables suite
    * lives behind `best_flask` / `best_food` for now and will fold into

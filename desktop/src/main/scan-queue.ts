@@ -5,6 +5,7 @@ import {
   type BestFlaskResult,
   type BestFoodResult,
   type ComposedLoadout,
+  type GearScanResult,
   type ScanCollection,
   type ScanRecord,
   type Scenario,
@@ -23,6 +24,9 @@ import {
   parseTrinketPreScanResult,
   runTrinketPreScanSim,
 } from './scans/trinket-pre-scan';
+import { runGearCoarseScan } from './scans/gear-coarse';
+import type { TrinketLock } from './scans/gear-pruner';
+import { computeItemObservations, IgnoreListStore } from './ignore-list';
 import {
   getTrinketPool,
   parseSimcExport,
@@ -45,6 +49,11 @@ export interface ScanQueueOptions {
    * stamped before this session started.
    */
   initialLastCompletedAt?: number;
+  /**
+   * Optional ignore-list store. Defaults to a real electron-store-backed
+   * instance; tests inject a temp-cwd one to avoid touching userData.
+   */
+  ignoreList?: IgnoreListStore;
 }
 
 export interface PastedProfileSource {
@@ -71,10 +80,17 @@ export interface PastedProfileSource {
 export class ScanQueue {
   private lastCompletedAt: number;
   private inFlight = false;
+  private readonly ignoreList: IgnoreListStore | undefined;
 
   constructor(private readonly opts: ScanQueueOptions) {
     this.lastCompletedAt =
       opts.initialLastCompletedAt ?? Math.floor(Date.now() / 1000);
+    // electron-store needs an electron app context to default its cwd.
+    // Constructing it here lazily — if Electron isn't available (rare;
+    // really only happens when an environment misconfigures), we log
+    // and fall through. The store is optional from the queue's POV;
+    // gear-coarse still runs without ignore-list persistence.
+    this.ignoreList = opts.ignoreList ?? tryCreateIgnoreList();
   }
 
   /**
@@ -212,6 +228,7 @@ export class ScanQueue {
         }
       }
 
+      let trinketLock: TrinketLock | undefined;
       // Stage 1.5: trinket pre-scan. Only when we have a real parsed
       // export (need actual bag trinkets) AND at least 2 unique trinkets
       // in the pool (otherwise no pairs to compare). Surfaces the best
@@ -236,6 +253,13 @@ export class ScanQueue {
               finished_at: tFinished,
               data,
             };
+            // Lock the winning pair for the gear ladder. ParsedItems
+            // (not just ScannedItemRefs) are required so formatItemLine
+            // can render the SimC line with bonus_ids etc.
+            if (data.winner) {
+              const meta = pairsByName.get(data.winner.pair_id);
+              if (meta) trinketLock = { trinket1: meta.t1, trinket2: meta.t2 };
+            }
             const dt = ((Date.now() - t0t) / 1000).toFixed(1);
             const w = data.winner;
             const winnerStr = w
@@ -258,6 +282,80 @@ export class ScanQueue {
             `[sim] trinket_pre_scan: only ${trinkets.length} trinket(s) in pool; skipping`,
           );
         }
+      }
+
+      // Stage 1.75: gear ladder coarse stage (1000 iter cartesian).
+      // Skips when we have no parsed export (static fallback) or no
+      // trinket lock (pre-scan didn't run / failed). Stat weights are
+      // forwarded if they ran; the v1 ilvl-based scorer doesn't use
+      // them, but a future scorer will.
+      if (
+        args.useRealExport &&
+        args.parsedExport &&
+        trinketLock &&
+        scans.trinket_pre_scan?.status === 'done'
+      ) {
+        const gcStarted = Math.floor(Date.now() / 1000);
+        const gc0 = Date.now();
+        const weights = (scans.stat_weights?.data as StatWeights | undefined) ?? {};
+        try {
+          const { result, combosByName: _combos } = await runGearCoarseScan({
+            paths: runnerPaths,
+            baseProfile: args.baseProfile,
+            parsed: args.parsedExport,
+            weights,
+            trinketLock,
+          });
+          const gcFinished = Math.floor(Date.now() / 1000);
+          const gcRecord: ScanRecord<GearScanResult> = {
+            status: 'done',
+            started_at: gcStarted,
+            finished_at: gcFinished,
+            data: result,
+          };
+          scans.gear_coarse = gcRecord;
+          const dt = ((Date.now() - gc0) / 1000).toFixed(1);
+          const w = result.winner;
+          const winnerStr = w
+            ? `winner ${w.combo_id} @ ${Math.round(w.mean_dps)} dps (${result.combos.length} combos)`
+            : `(no combos)`;
+          console.log(`[sim] gear_coarse (${dt}s, 1000 iter): ${winnerStr}`);
+
+          // Write losers to the ignore list. 4d-ii is write-only —
+          // the pruner doesn't read this yet. 4d-iii wires the read
+          // path. Trinkets are excluded inside computeItemObservations.
+          if (this.ignoreList) {
+            try {
+              const observations = computeItemObservations(result.combos);
+              this.ignoreList.recordObservations(
+                observations.map((o) => ({
+                  character_key: args.characterKey,
+                  scenario: args.scenario,
+                  item_identity: o.item_identity,
+                  item_id: o.item_id,
+                  name: o.name,
+                  slot: o.slot,
+                  delta_pct: o.delta_pct,
+                })),
+              );
+            } catch (err) {
+              console.warn('[sim] ignore-list write failed:', (err as Error).message);
+            }
+          }
+        } catch (err) {
+          console.error('[sim] gear_coarse failed:', (err as Error).message);
+          scans.gear_coarse = {
+            status: 'failed',
+            started_at: gcStarted,
+            finished_at: Math.floor(Date.now() / 1000),
+            error: (err as Error).message,
+          };
+        }
+      } else if (args.useRealExport && args.parsedExport) {
+        const why = !trinketLock
+          ? 'no trinket pre-scan winner'
+          : 'unknown gating';
+        console.log(`[sim] gear_coarse: skipped (${why})`);
       }
 
       // Stage 2: consumables (flask + food) via profileset sim.
@@ -412,6 +510,21 @@ function setWindowTitle(title: string): void {
     wins[0]!.setTitle(title);
   } catch (err) {
     console.warn('[notify] setWindowTitle threw:', (err as Error).message);
+  }
+}
+
+/**
+ * Lazy electron-store init. The default `userData` lookup needs an
+ * `app` context; if we're running in tests or a stripped harness, we
+ * log and return undefined so the queue skips ignore-list writes
+ * rather than crashing the run.
+ */
+function tryCreateIgnoreList(): IgnoreListStore | undefined {
+  try {
+    return new IgnoreListStore();
+  } catch (err) {
+    console.warn('[ignore-list] could not initialize store:', (err as Error).message);
+    return undefined;
   }
 }
 
