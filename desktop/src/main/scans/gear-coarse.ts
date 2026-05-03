@@ -34,6 +34,19 @@ export interface RunGearCoarseOptions {
   ignoreSet?: ReadonlySet<string>;
   /** Hard cap on emitted combos. Default 5000 (gear-pruner default). */
   maxCombos?: number;
+  /** Streamed progress lines from SimC stdout/stderr. */
+  onProgress?: Parameters<typeof runSimc>[0]['onProgress'];
+  /**
+   * Optional pre-sim hook — called once with the cartesian shape after
+   * pruning but before SimC spawns. The queue uses this to log the
+   * combo count and the per-slot survivor breakdown so the user knows
+   * what's about to run.
+   */
+  onPlanReady?: (plan: {
+    comboCount: number;
+    perSlotSurvivors: Record<string, number>;
+    ringPairs: number;
+  }) => void;
 }
 
 export interface GearCoarseRunResult {
@@ -56,12 +69,25 @@ export async function runGearCoarseScan(
   });
   const build = buildGearProfileset(prune, { maxCombos: opts.maxCombos });
 
+  if (opts.onPlanReady) {
+    const perSlotSurvivors: Record<string, number> = {};
+    for (const [slot, list] of Object.entries(prune.perSlot)) {
+      if (list) perSlotSurvivors[slot] = list.length;
+    }
+    opts.onPlanReady({
+      comboCount: build.comboCount,
+      perSlotSurvivors,
+      ringPairs: prune.ringPairs.length,
+    });
+  }
+
   const profileScript = [opts.baseProfile.trim(), '', build.script].join('\n');
   const run = await runSimc({
     paths: opts.paths,
     profileScript,
     iterations,
     scratchTag: `gear-coarse-${Date.now()}`,
+    onProgress: opts.onProgress,
   });
 
   const result = parseGearCoarseResult(run, build.combosByName, iterations);

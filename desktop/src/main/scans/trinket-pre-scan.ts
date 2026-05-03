@@ -42,6 +42,8 @@ export interface RunTrinketPreScanOptions {
   trinkets: readonly ParsedItem[];
   /** Per-profileset iterations. Default 3000 per SCOPE 4c. */
   iterations?: number;
+  /** Streamed progress lines from SimC stdout/stderr. */
+  onProgress?: Parameters<typeof runSimc>[0]['onProgress'];
 }
 
 /** Spawn the SimC subprocess for the trinket pre-scan. */
@@ -56,6 +58,7 @@ export async function runTrinketPreScanSim(
     profileScript,
     iterations,
     scratchTag: `trinket-pre-${Date.now()}`,
+    onProgress: opts.onProgress,
   });
   return { run, pairsByName };
 }
