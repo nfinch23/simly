@@ -198,13 +198,27 @@ export class ScanQueue {
       }
     }
 
-    await this.runScan({
-      baseProfile,
-      useRealExport,
-      parsedExport,
-      characterKey,
-      scenario: db.active_scenario,
-    });
+    try {
+      await this.runScan({
+        baseProfile,
+        useRealExport,
+        parsedExport,
+        characterKey,
+        scenario: db.active_scenario,
+      });
+    } catch (err) {
+      console.error('[queue] runScan threw — sim attempt aborted:', (err as Error).message);
+    } finally {
+      // Mark this request as ATTEMPTED — successful or not — so a
+      // subsequent /reload (which rewrites SavedVariables but doesn't
+      // change update_requested_at) doesn't retrigger the same
+      // failing sim every time. Success paths inside runScan also
+      // bump lastCompletedAt; this finally block is the safety net
+      // for the failure case.
+      if (db.update_requested_at > this.lastCompletedAt) {
+        this.lastCompletedAt = db.update_requested_at;
+      }
+    }
   }
 
   /**

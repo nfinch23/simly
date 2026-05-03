@@ -124,7 +124,7 @@ export class IgnoreListStore {
     if (input.delta_pct > -threshold) return;
 
     const key = makeIgnoreKey(input.character_key, input.scenario, input.item_identity);
-    const entries = this.store.get('entries');
+    const entries = this.store.get('entries') ?? {};
     const existing = entries[key];
     const now = Math.floor(Date.now() / 1000);
     const next: IgnoreEntry = existing
@@ -160,7 +160,7 @@ export class IgnoreListStore {
   /** List entries, optionally filtered. Useful for the renderer's settings view (Phase 5). */
   list(filter?: { character_key?: string; scenario?: string }): IgnoreEntry[] {
     const out: IgnoreEntry[] = [];
-    for (const entry of Object.values(this.store.get('entries'))) {
+    for (const entry of Object.values(this.store.get('entries') ?? {})) {
       if (filter?.character_key && entry.character_key !== filter.character_key) continue;
       if (filter?.scenario && entry.scenario !== filter.scenario) continue;
       out.push(entry);
@@ -171,7 +171,7 @@ export class IgnoreListStore {
   /** Single-row lookup — 4d-iii uses this to short-circuit the pruner. */
   get(character_key: string, scenario: string, item_identity: string): IgnoreEntry | undefined {
     const key = makeIgnoreKey(character_key, scenario, item_identity);
-    return this.store.get('entries')[key];
+    return (this.store.get('entries') ?? {})[key];
   }
 
   /** Wipe all rows. Used by tests; renderer settings will expose this in Phase 5. */
@@ -182,7 +182,7 @@ export class IgnoreListStore {
   /** Mark a row as manually removed; pruner ignores it on read in 4d-iii. */
   markManuallyRemoved(character_key: string, scenario: string, item_identity: string): void {
     const key = makeIgnoreKey(character_key, scenario, item_identity);
-    const entries = this.store.get('entries');
+    const entries = this.store.get('entries') ?? {};
     const existing = entries[key];
     if (!existing) return;
     this.store.set(`entries.${key}`, { ...existing, manually_removed: true });
