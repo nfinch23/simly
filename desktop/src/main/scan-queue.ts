@@ -421,6 +421,27 @@ export class ScanQueue {
       return 'no_upgrades';
     }
 
+    // Gear upgrade detected → the cascade will re-run the full pipeline.
+    // Invalidate the trinket cache so trinket_pre_scan does a fresh
+    // sim with the new gear context — previous cached pairs were sim'd
+    // against the old gear and their relative rankings may have
+    // shifted. Stat weights, gear_coarse, and consumables all
+    // re-evaluate naturally; trinkets are the only stage that
+    // would otherwise hit a cache.
+    if (this.trinketCache) {
+      try {
+        this.trinketCache.invalidate(args.characterKey, args.scenario);
+        console.log(
+          `[sim] trinket cache invalidated (gear context changed)`,
+        );
+      } catch (err) {
+        console.warn(
+          '[sim] trinket cache invalidate failed:',
+          (err as Error).message,
+        );
+      }
+    }
+
     console.log(
       `[sim] swap test found ${result.results.filter((r) => r.is_upgrade).length} upgrade(s); ` +
         `falling through to full pipeline`,

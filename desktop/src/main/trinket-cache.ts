@@ -96,6 +96,21 @@ export class TrinketCacheStore {
   clear(): void {
     this.store.set('entries', {});
   }
+
+  /**
+   * Invalidate one (character, scenario)'s cache. Called by the
+   * scan queue when a gear upgrade is detected — the cached trinket
+   * pairs were sim'd with the prior gear context, so even though the
+   * trinket POOL is unchanged, the relative rankings may have
+   * shifted. Removing the entry forces the next trinket_pre_scan to
+   * do a fresh full sim with the new context.
+   */
+  invalidate(character_key: string, scenario: string): void {
+    const entries = this.store.get('entries') ?? {};
+    const next = { ...entries };
+    delete next[makeCacheKey(character_key, scenario)];
+    this.store.set('entries', next);
+  }
 }
 
 /**
