@@ -61,13 +61,38 @@ function formatValue(value: Serializable, indent: number): string {
 }
 
 function formatString(value: string): string {
+  // 1) Escape Lua-meaningful chars (backslash, quote, common whitespace).
+  // 2) Escape every remaining non-printable-ASCII char (control chars
+  //    + everything U+0080 and above) as \ddd byte sequences. The byte
+  //    representation comes from UTF-8 encoding the original char and
+  //    emitting one \ddd per byte. This keeps the .lua source pure
+  //    ASCII so luaparse's pseudo-latin1 mode never trips on a
+  //    multi-byte codepoint (e.g., U+2014 em dash → \226\128\148),
+  //    while still round-tripping cleanly: WoW's Lua 5.1 parses \ddd
+  //    as the original byte value and the displayed string renders as
+  //    UTF-8 by default.
   const escaped = value
     .replace(/\\/g, '\\\\')
     .replace(/"/g, '\\"')
     .replace(/\n/g, '\\n')
     .replace(/\r/g, '\\r')
-    .replace(/\t/g, '\\t');
+    .replace(/\t/g, '\\t')
+    .replace(/[^\x20-\x7e]/g, escapeCharAsBytes);
   return `"${escaped}"`;
+}
+
+function escapeCharAsBytes(ch: string): string {
+  // Buffer.from handles surrogate pairs correctly: even though we're
+  // iterating UTF-16 code units via String.replace, JS replace passes
+  // the matched substring verbatim, and Buffer.from(str, 'utf8') will
+  // emit the right multi-byte sequence for valid surrogate-pair chars.
+  // Lone surrogates (invalid input) become U+FFFD.
+  const bytes = Buffer.from(ch, 'utf8');
+  let out = '';
+  for (const b of bytes) {
+    out += '\\' + b.toString().padStart(3, '0');
+  }
+  return out;
 }
 
 function formatArray(value: Serializable[], indent: number): string {
