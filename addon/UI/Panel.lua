@@ -27,7 +27,7 @@ end
 
 local function createFrame()
 	local f = CreateFrame("Frame", "SimlyPanelFrame", UIParent, "BackdropTemplate")
-	f:SetSize(420, 480)
+	f:SetSize(440, 560)
 	f:SetPoint("CENTER")
 	f:SetMovable(true)
 	f:EnableMouse(true)
@@ -50,16 +50,28 @@ local function createFrame()
 	local close = CreateFrame("Button", nil, f, "UIPanelCloseButton")
 	close:SetPoint("TOPRIGHT", -2, -2)
 
-	-- Body text (multi-line, left-justified). Phase 5 swaps this for a
-	-- scroll frame with structured rows; the skeleton is plain text so
-	-- we can verify the data flow before investing in widgets.
-	local body = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-	body:SetPoint("TOPLEFT", 18, -40)
-	body:SetPoint("BOTTOMRIGHT", -18, 50)
+	-- Body content lives inside a scroll frame so the catalog (which
+	-- grows as more items are simmed) doesn't get clipped at the
+	-- bottom of the panel. Right-edge offset of -32 leaves room for
+	-- the scrollbar widget. Mouse wheel is enabled on the scroll
+	-- frame so users don't have to drag the bar.
+	local scroll = CreateFrame("ScrollFrame", "SimlyPanelScroll", f, "UIPanelScrollFrameTemplate")
+	scroll:SetPoint("TOPLEFT", 18, -40)
+	scroll:SetPoint("BOTTOMRIGHT", -32, 50)
+
+	local content = CreateFrame("Frame", nil, scroll)
+	content:SetSize(scroll:GetWidth(), 1) -- height set per-Refresh from text height
+	scroll:SetScrollChild(content)
+
+	local body = content:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+	body:SetPoint("TOPLEFT")
+	body:SetPoint("TOPRIGHT")
 	body:SetJustifyH("LEFT")
 	body:SetJustifyV("TOP")
 	body:SetSpacing(2)
 	f.body = body
+	f.scrollContent = content
+	f.scroll = scroll
 
 	-- "Update sims" needs to call ReloadUI(), which is protected in
 	-- modern WoW — calling it from a plain OnClick handler trips
@@ -281,6 +293,13 @@ function Panel.Refresh()
 	end
 
 	frame.body:SetText(table.concat(lines, "\n"))
+	-- Resize the scroll content to fit the rendered text so the
+	-- scrollbar's range matches what's actually drawn. GetStringHeight
+	-- returns the wrapped text's pixel height; the +12 padding gives
+	-- a little breathing room at the bottom.
+	if frame.scrollContent and frame.body:GetStringHeight() then
+		frame.scrollContent:SetHeight(frame.body:GetStringHeight() + 12)
+	end
 end
 
 function Panel.Toggle()
