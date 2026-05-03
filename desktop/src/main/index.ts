@@ -74,24 +74,31 @@ async function startRoundTrip(): Promise<WowPaths | undefined> {
   }
 
   // Seed a placeholder file so the addon loads cleanly on first /reload
-  // before any sim has run. Replaced as soon as a real sim completes.
-  const placeholder: SimlyResults = {
-    schema_version: RESULTS_SCHEMA_VERSION,
-    generated_at: Math.floor(Date.now() / 1000),
-    simc_version: 'placeholder',
-    character_key: 'placeholder-character',
-    active_scenario: 'single_target_patchwerk',
-    scans: {},
-  };
-  try {
-    await writeLuaFile(
-      paths.resultsLuaPath,
-      'SimlyResults',
-      placeholder as unknown as Parameters<typeof writeLuaFile>[2],
-    );
-    console.log('[main] wrote placeholder SimlyResults.lua (will be replaced by first sim)');
-  } catch (err) {
-    console.error('[main] failed to write results file:', err);
+  // before any sim has run. ONLY write when no results file exists —
+  // overwriting on every boot would clobber a real sim's rich data
+  // (scan tables, flask/food names, gear list) and reduce the addon
+  // panel to the minimal "Up to date" view until the next full sim.
+  if (!existsSync(paths.resultsLuaPath)) {
+    const placeholder: SimlyResults = {
+      schema_version: RESULTS_SCHEMA_VERSION,
+      generated_at: Math.floor(Date.now() / 1000),
+      simc_version: 'placeholder',
+      character_key: 'placeholder-character',
+      active_scenario: 'single_target_patchwerk',
+      scans: {},
+    };
+    try {
+      await writeLuaFile(
+        paths.resultsLuaPath,
+        'SimlyResults',
+        placeholder as unknown as Parameters<typeof writeLuaFile>[2],
+      );
+      console.log('[main] wrote placeholder SimlyResults.lua (no prior file found)');
+    } catch (err) {
+      console.error('[main] failed to write results file:', err);
+    }
+  } else {
+    console.log('[main] preserving existing SimlyResults.lua from prior session');
   }
 
   // Bring up SimC: resolve the version we should be on, install if
