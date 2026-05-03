@@ -35,6 +35,18 @@ export function parseSavedVars(source: string): SimlyDB {
  * up_to_date or no_upgrades, we want to bump generated_at on the
  * existing results file so the addon's "fresh results" detection
  * fires without redoing the actual sim work.
+ *
+ * Encoding round-trip: lua-writer escapes non-ASCII chars as `\ddd`
+ * UTF-8 byte sequences. luaparse's pseudo-latin1 mode reads `\ddd` as
+ * 1-byte latin1 chars, which corrupts UTF-8-encoded strings (e.g.,
+ * an em dash's 3 bytes 0xE2 0x80 0x94 become 3 separate latin1 code
+ * points). To prevent every refresh cycle from doubling the byte
+ * count (latin1 → re-encoded as UTF-8 → escaped as \ddd → next
+ * cycle decodes those latin1 bytes again, etc.), this function walks
+ * every parsed string and reinterprets its latin1 code units as
+ * UTF-8 bytes. Result: ASCII strings round-trip cleanly, multi-byte
+ * sequences round-trip back to their original codepoint, and refresh
+ * cycles are idempotent.
  */
 export function parseResultsFile(source: string): SimlyResults | undefined {
   const ast = parse(source, { comments: false, encodingMode: 'pseudo-latin1' });
@@ -43,9 +55,43 @@ export function parseResultsFile(source: string): SimlyResults | undefined {
     if (target?.name !== 'SimlyResults') continue;
     const value = expressionToValue(target.init);
     if (!isPlainObject(value)) return undefined;
-    return value as unknown as SimlyResults;
+    return reinterpretLatin1AsUtf8(value) as unknown as SimlyResults;
   }
   return undefined;
+}
+
+/**
+ * Walk a parsed Lua value and reinterpret every string's char codes
+ * (which luaparse delivers as latin1, range 0x00-0xFF) as a sequence
+ * of bytes that together form a UTF-8-encoded string. ASCII is a
+ * subset of UTF-8 so pure-ASCII strings are unchanged. A 3-byte UTF-8
+ * sequence like the em dash (0xE2 0x80 0x94) gets reassembled into
+ * the single codepoint U+2014.
+ */
+function reinterpretLatin1AsUtf8(value: LuaValue): LuaValue {
+  if (typeof value === 'string') {
+    if (value.length === 0) return value;
+    let allAscii = true;
+    for (let i = 0; i < value.length; i++) {
+      if (value.charCodeAt(i) > 0x7f) {
+        allAscii = false;
+        break;
+      }
+    }
+    if (allAscii) return value;
+    const bytes = Buffer.alloc(value.length);
+    for (let i = 0; i < value.length; i++) bytes[i] = value.charCodeAt(i) & 0xff;
+    return bytes.toString('utf8');
+  }
+  if (Array.isArray(value)) return value.map(reinterpretLatin1AsUtf8);
+  if (typeof value === 'object' && value !== null) {
+    const out: { [key: string]: LuaValue } = {};
+    for (const k of Object.keys(value)) {
+      out[k] = reinterpretLatin1AsUtf8((value as { [key: string]: LuaValue })[k] as LuaValue);
+    }
+    return out;
+  }
+  return value;
 }
 
 /**
