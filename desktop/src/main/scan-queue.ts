@@ -1,4 +1,4 @@
-import { Notification } from 'electron';
+import { Notification, BrowserWindow } from 'electron';
 import {
   RESULTS_SCHEMA_VERSION,
   type BestFlaskResult,
@@ -324,36 +324,71 @@ export class ScanQueue {
 }
 
 /**
- * Pop a native Windows toast when a scan cycle completes successfully
- * so the user knows it's time to /reload. The desktop log is otherwise
- * invisible during normal use (Phase 5's UI fixes that). The toast
- * shows the character key + a summary of which scans landed.
+ * Tell the user the scan finished. Three layers of signal so the user
+ * gets at least one of them no matter what the OS / Focus Assist /
+ * dev-mode-electron suppresses:
  *
- * Wrapped in try/catch — failure is non-fatal (e.g., user has
- * notifications disabled in Windows Focus Assist). Notification.isSupported
- * also returns false in some headless envs.
+ *   1. Native Windows toast via Electron's Notification API. Often
+ *      suppressed in dev mode because the dev electron.exe isn't
+ *      registered as a known app even with setAppUserModelId().
+ *   2. Taskbar flash on the Simly window — works reliably regardless
+ *      of OS notification settings; user sees an orange-blinking
+ *      icon in their taskbar until they click it.
+ *   3. Console log — visible in the dev terminal at minimum.
+ *
+ * Each layer is wrapped in its own try so a failure in one doesn't
+ * prevent the others from firing.
  */
 export function showScanCompleteNotification(
   scans: ScanCollection,
   characterKey: string,
 ): void {
-  if (!Notification.isSupported()) return;
+  const completed: string[] = [];
+  for (const [id, record] of Object.entries(scans)) {
+    if (record?.status === 'done') completed.push(id);
+  }
+  const summary = completed.length === 0
+    ? 'No scans completed'
+    : `${completed.length} scan${completed.length === 1 ? '' : 's'}: ${completed.join(', ')}`;
+  const body = `${characterKey}\n${summary}\n/reload in WoW to see results.`;
+
+  console.log(`[notify] scan complete: ${summary} (for ${characterKey})`);
+
+  // Layer 1: native toast.
   try {
-    const completed: string[] = [];
-    for (const [id, record] of Object.entries(scans)) {
-      if (record?.status === 'done') completed.push(id);
+    const isSupported = Notification.isSupported();
+    console.log(`[notify] Notification.isSupported() = ${isSupported}`);
+    if (isSupported) {
+      const n = new Notification({
+        title: 'Simly: scan complete',
+        body,
+        silent: false,
+        urgency: 'normal',
+      });
+      n.on('show', () => console.log('[notify] toast shown'));
+      n.on('failed', (_event, error) =>
+        console.warn('[notify] toast failed event:', error),
+      );
+      n.show();
+      console.log('[notify] called n.show()');
     }
-    const summary = completed.length === 0
-      ? 'No scans completed'
-      : `${completed.length} scan${completed.length === 1 ? '' : 's'}: ${completed.join(', ')}`;
-    const n = new Notification({
-      title: 'Simly: scan complete',
-      body: `${characterKey}\n${summary}\n/reload in WoW to see results.`,
-      silent: false,
-    });
-    n.show();
   } catch (err) {
-    console.warn('[notify] failed to show notification:', (err as Error).message);
+    console.warn('[notify] toast threw:', (err as Error).message);
+  }
+
+  // Layer 2: flash the taskbar icon. Survives Focus Assist + dev-mode
+  // electron quirks. The flash stops when the user focuses the window.
+  try {
+    const wins = BrowserWindow.getAllWindows();
+    if (wins.length > 0) {
+      wins[0]!.flashFrame(true);
+      wins[0]!.setOverlayIcon(null, 'Scan complete');
+      console.log(`[notify] flashed taskbar on ${wins.length} window(s)`);
+    } else {
+      console.warn('[notify] no BrowserWindow to flash');
+    }
+  } catch (err) {
+    console.warn('[notify] flashFrame threw:', (err as Error).message);
   }
 }
 
