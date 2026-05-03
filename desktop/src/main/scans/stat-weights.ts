@@ -41,6 +41,8 @@ export interface RunStatWeightsOptions {
   baseProfile: string;
   /** Iterations for the scale-factor sim. Stat weights converge fast — 300 is plenty for v1. */
   iterations?: number;
+  /** Streamed progress lines from SimC stdout/stderr. */
+  onProgress?: Parameters<typeof runSimc>[0]['onProgress'];
 }
 
 export interface StatWeightsRunResult {
@@ -75,6 +77,7 @@ export async function runStatWeightsScan(
     profileScript,
     iterations,
     scratchTag: `stat-weights-${Date.now()}`,
+    onProgress: opts.onProgress,
   });
 
   return {

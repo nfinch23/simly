@@ -198,10 +198,12 @@ export class ScanQueue {
       // garbage weights). Failure is non-fatal; we still run consumables.
       if (args.useRealExport) {
         const swStarted = Math.floor(Date.now() / 1000);
+        const swProgress = makeStageProgressLogger('stat_weights', args.characterKey);
         try {
           const sw = await runStatWeightsScan({
             paths: runnerPaths,
             baseProfile: args.baseProfile,
+            onProgress: swProgress.onProgress,
           });
           const swFinished = Math.floor(Date.now() / 1000);
           const swRecord: ScanRecord<StatWeights> = {
@@ -217,7 +219,9 @@ export class ScanQueue {
           console.log(
             `[sim] stat_weights (${(sw.durationMs / 1000).toFixed(1)}s): ${summary}`,
           );
+          swProgress.stop();
         } catch (err) {
+          swProgress.stop();
           console.error('[sim] stat_weights run failed:', (err as Error).message);
           scans.stat_weights = {
             status: 'failed',
@@ -239,11 +243,20 @@ export class ScanQueue {
         if (trinkets.length >= 2) {
           const tStarted = Math.floor(Date.now() / 1000);
           const t0t = Date.now();
+          const tPairs = (trinkets.length * (trinkets.length - 1)) / 2;
+          console.log(
+            `[sim] trinket_pre_scan: starting (${trinkets.length} trinkets, ${tPairs} pairs, 3000 iter each)`,
+          );
+          const tProgress = makeStageProgressLogger(
+            `trinket_pre_scan (${tPairs} pairs)`,
+            args.characterKey,
+          );
           try {
             const { run, pairsByName } = await runTrinketPreScanSim({
               paths: runnerPaths,
               baseProfile: args.baseProfile,
               trinkets,
+              onProgress: tProgress.onProgress,
             });
             const tFinished = Math.floor(Date.now() / 1000);
             const data = parseTrinketPreScanResult(run, pairsByName);
@@ -268,7 +281,9 @@ export class ScanQueue {
             console.log(
               `[sim] trinket_pre_scan (${dt}s, ${trinkets.length} trinkets, ${data.pairs.length} pairs): ${winnerStr}`,
             );
+            tProgress.stop();
           } catch (err) {
+            tProgress.stop();
             console.error('[sim] trinket_pre_scan failed:', (err as Error).message);
             scans.trinket_pre_scan = {
               status: 'failed',
@@ -298,6 +313,9 @@ export class ScanQueue {
         const gcStarted = Math.floor(Date.now() / 1000);
         const gc0 = Date.now();
         const weights = (scans.stat_weights?.data as StatWeights | undefined) ?? {};
+        // Stage label gets updated once the cartesian size is known —
+        // makeStageProgressLogger swaps the title in onPlanReady below.
+        const gcProgress = makeStageProgressLogger('gear_coarse', args.characterKey);
         try {
           const { result, combosByName: _combos } = await runGearCoarseScan({
             paths: runnerPaths,
@@ -305,6 +323,18 @@ export class ScanQueue {
             parsed: args.parsedExport,
             weights,
             trinketLock,
+            onProgress: gcProgress.onProgress,
+            onPlanReady: (plan) => {
+              const slotSummary = Object.entries(plan.perSlotSurvivors)
+                .map(([s, n]) => `${s}:${n}`)
+                .join(' ');
+              console.log(
+                `[sim] gear_coarse: starting (${plan.comboCount} combos × 1000 iter, ` +
+                  `${plan.ringPairs} ring-pair${plan.ringPairs === 1 ? '' : 's'}; ` +
+                  `survivors per slot: ${slotSummary})`,
+              );
+              gcProgress.setLabel(`gear_coarse (${plan.comboCount} combos)`);
+            },
           });
           const gcFinished = Math.floor(Date.now() / 1000);
           const gcRecord: ScanRecord<GearScanResult> = {
@@ -314,6 +344,7 @@ export class ScanQueue {
             data: result,
           };
           scans.gear_coarse = gcRecord;
+          gcProgress.stop();
           const dt = ((Date.now() - gc0) / 1000).toFixed(1);
           const w = result.winner;
           const winnerStr = w
@@ -343,6 +374,7 @@ export class ScanQueue {
             }
           }
         } catch (err) {
+          gcProgress.stop();
           console.error('[sim] gear_coarse failed:', (err as Error).message);
           scans.gear_coarse = {
             status: 'failed',
@@ -361,6 +393,7 @@ export class ScanQueue {
       // Stage 2: consumables (flask + food) via profileset sim.
       const startedAt = Math.floor(Date.now() / 1000);
       const t0 = Date.now();
+      const consProgress = makeStageProgressLogger('consumables', args.characterKey);
       let run;
       try {
         run = await runSimc({
@@ -368,8 +401,11 @@ export class ScanQueue {
           profileScript: [args.baseProfile, '', buildAllScanLines()].join('\n'),
           iterations: 1000,
           scratchTag: `consumables-${Date.now()}`,
+          onProgress: consProgress.onProgress,
         });
+        consProgress.stop();
       } catch (err) {
+        consProgress.stop();
         console.error('[sim] consumables sim failed:', err);
         return;
       }
@@ -511,6 +547,94 @@ function setWindowTitle(title: string): void {
   } catch (err) {
     console.warn('[notify] setWindowTitle threw:', (err as Error).message);
   }
+}
+
+/**
+ * Per-stage progress + heartbeat logger. Threads through to the SimC
+ * runner's `onProgress` so we get every stdout/stderr line as it's
+ * emitted; in parallel runs a 30s timer that emits a "[heartbeat]"
+ * line so the user sees something even when SimC is silent. Also
+ * keeps the window title fresh with the current stage label and
+ * elapsed seconds.
+ *
+ * Returns:
+ *   - `onProgress`: pass to runSimc — logs interesting lines, swallows
+ *     noise, and resets the heartbeat clock.
+ *   - `setLabel(label)`: update the stage label mid-flight (used by
+ *     gear_coarse once the cartesian size is known).
+ *   - `stop()`: clear the heartbeat timer. Always called from a
+ *     finally / catch so a thrown error doesn't leak the timer.
+ */
+function makeStageProgressLogger(initialLabel: string, characterKey: string): {
+  onProgress: (event: { stream: 'stdout' | 'stderr' | 'meta'; line: string }) => void;
+  setLabel: (label: string) => void;
+  stop: () => void;
+} {
+  let label = initialLabel;
+  const startedAt = Date.now();
+  let lastSeenAt = Date.now();
+  const updateTitle = (suffix?: string): void => {
+    const elapsed = ((Date.now() - startedAt) / 1000).toFixed(0);
+    const tail = suffix ? ` — ${suffix}` : '';
+    setWindowTitle(`Simly — ${label} (${elapsed}s${tail}) [${characterKey}]`);
+  };
+  updateTitle();
+
+  // Heartbeat: every 30s, if SimC has been quiet, log so the user
+  // knows the process is alive. SimC tends to print rate-limited
+  // progress on profileset runs but can go silent for minutes during
+  // initial APL parsing on big cartesians.
+  const heartbeat = setInterval(() => {
+    const sinceLastLine = ((Date.now() - lastSeenAt) / 1000).toFixed(0);
+    const elapsed = ((Date.now() - startedAt) / 1000).toFixed(0);
+    console.log(
+      `[heartbeat] ${label}: ${elapsed}s elapsed, ${sinceLastLine}s since last simc output`,
+    );
+    updateTitle(`silent ${sinceLastLine}s`);
+  }, 30_000);
+
+  // SimC output filters: keep lines that signal real progress; drop
+  // banner / debug noise. Patterns chosen by inspecting actual SimC
+  // output — adjust here if SimC output changes.
+  const interestingPatterns = [
+    /Generating Baseline/i,
+    /Generating Profile Set/i,
+    /Profileset.*\d+\s*\/\s*\d+/i,
+    /Iteration/i,
+    /Generating reports/i,
+    /^\s*\[\s*\d+(?:\.\d+)?%\s*\]/, // "[ 42% ]" style
+    /seconds?$/i, // SimC prints "X seconds" on timing lines
+    /^Done/i,
+    /Error|warning/i,
+  ];
+
+  const onProgress = (event: { stream: 'stdout' | 'stderr' | 'meta'; line: string }): void => {
+    lastSeenAt = Date.now();
+    const { line, stream } = event;
+    if (stream === 'stderr') {
+      // stderr is usually meaningful (warnings / errors).
+      console.log(`[simc:err] ${line}`);
+      updateTitle();
+      return;
+    }
+    if (interestingPatterns.some((p) => p.test(line))) {
+      console.log(`[simc] ${line}`);
+      // Pull a short tail for the title — the line itself can be long.
+      const short = line.length > 60 ? `${line.slice(0, 57)}…` : line;
+      updateTitle(short);
+    }
+  };
+
+  return {
+    onProgress,
+    setLabel(next: string) {
+      label = next;
+      updateTitle();
+    },
+    stop() {
+      clearInterval(heartbeat);
+    },
+  };
 }
 
 /**

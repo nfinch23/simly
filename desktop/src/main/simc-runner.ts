@@ -36,6 +36,15 @@ export interface RunSimcOptions {
   iterations?: number;
   threads?: number;
   scratchTag?: string;
+  /**
+   * Optional progress callback. Receives every non-empty line SimC
+   * prints to stdout/stderr while running, plus a synthetic
+   * `__exit__` line on close. Lets the queue update the window title
+   * and log progress without waiting for the subprocess to finish.
+   * Lines are pre-trimmed; use the `stream` field to filter (`stdout`
+   * / `stderr` / `meta`) when relevant.
+   */
+  onProgress?: (event: { stream: 'stdout' | 'stderr' | 'meta'; line: string }) => void;
 }
 
 interface SimcJson2 {
@@ -86,12 +95,46 @@ export async function runSimc(opts: RunSimcOptions): Promise<SimcRunResult> {
 
   const stderr: string[] = [];
   const stdout: string[] = [];
+  const onProgress = opts.onProgress;
   const exitCode = await new Promise<number>((resolve, reject) => {
     const child = spawn(paths.binPath, [inputPath], { windowsHide: true });
-    child.stdout.on('data', (chunk: Buffer) => stdout.push(chunk.toString()));
-    child.stderr.on('data', (chunk: Buffer) => stderr.push(chunk.toString()));
+
+    // Buffer line fragments per stream — SimC chunks output mid-line, so
+    // we only emit a progress line when we see a newline. Anything left
+    // in the buffer at close gets flushed.
+    let stdoutBuf = '';
+    let stderrBuf = '';
+    const emitLines = (
+      stream: 'stdout' | 'stderr',
+      buf: string,
+      forceFlush: boolean,
+    ): string => {
+      const parts = buf.split(/\r?\n/);
+      const remainder = forceFlush ? '' : parts.pop() ?? '';
+      for (const raw of parts) {
+        const line = raw.trim();
+        if (line.length === 0) continue;
+        if (onProgress) onProgress({ stream, line });
+      }
+      return remainder;
+    };
+
+    child.stdout.on('data', (chunk: Buffer) => {
+      const s = chunk.toString();
+      stdout.push(s);
+      stdoutBuf = emitLines('stdout', stdoutBuf + s, false);
+    });
+    child.stderr.on('data', (chunk: Buffer) => {
+      const s = chunk.toString();
+      stderr.push(s);
+      stderrBuf = emitLines('stderr', stderrBuf + s, false);
+    });
     child.on('error', reject);
-    child.on('close', (code) => resolve(code ?? -1));
+    child.on('close', (code) => {
+      if (stdoutBuf.length > 0) emitLines('stdout', stdoutBuf, true);
+      if (stderrBuf.length > 0) emitLines('stderr', stderrBuf, true);
+      resolve(code ?? -1);
+    });
   });
 
   if (exitCode !== 0) {
