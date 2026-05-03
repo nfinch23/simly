@@ -92,16 +92,33 @@ describe('serializeLua', () => {
       const lua = serializeLua('SimlyResults', original);
       const parsed = parseResultsFile(lua);
       expect(parsed).toBeDefined();
-      // The parser sees the \ddd-escaped bytes as latin1 chars; for
-      // round-trip *correctness* the caller (e.g. the queue's refresh
-      // path) just needs the parse to SUCCEED so the rich data isn't
-      // dropped to the synthesize fallback. Verify generated_at and
-      // structure landed; string contents are byte-equivalent to the
-      // original UTF-8.
+      // Strings round-trip to their original UTF-8 codepoints
+      // (parser reinterprets latin1 char codes back to UTF-8 bytes).
       expect(parsed?.generated_at).toBe(1714435200);
       expect(parsed?.character_key).toBe('Felfriend-Zul\'jin-us');
-      expect(parsed?.composed?.label).toBeDefined();
+      expect(parsed?.composed?.label).toBe('Cached best loadout — Felfriend');
+      expect(
+        (parsed?.scans.trinket_pre_scan?.data as { label: string })?.label,
+      ).toBe('Best trinket pair (single-target Patchwerk) — cached');
       expect(parsed?.scans.trinket_pre_scan?.status).toBe('done');
+    });
+
+    it('refresh cycle is idempotent: write→parse→write produces identical bytes', () => {
+      // Regression for the bug that displayed "Ä¤A¤" instead of "—" in
+      // the addon panel: each refresh cycle was decoding the previous
+      // \ddd escapes as latin1 chars then re-encoding them as UTF-8
+      // (doubling byte count: 3 → 6 → 12). Idempotent round-trip is
+      // the invariant that prevents this drift.
+      const original = {
+        composed: { label: 'Foo — Bar' },
+      };
+      const lua1 = serializeLua('SimlyResults', original);
+      const parsed1 = parseResultsFile(lua1);
+      const lua2 = serializeLua('SimlyResults', parsed1 as unknown as Parameters<typeof serializeLua>[1]);
+      const parsed2 = parseResultsFile(lua2);
+      const lua3 = serializeLua('SimlyResults', parsed2 as unknown as Parameters<typeof serializeLua>[1]);
+      expect(lua2).toBe(lua1);
+      expect(lua3).toBe(lua1);
     });
   });
 });
