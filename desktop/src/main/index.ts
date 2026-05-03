@@ -23,6 +23,10 @@ SimlyResults.lua
 `;
 
 let watcher: WatcherHandle | undefined;
+// Set during the before-quit handler so the close-to-hide intercept
+// knows to actually let the window go when the app is genuinely quitting
+// (Ctrl+C, Task Manager kill, etc.) vs. just the user clicking X.
+let isQuitting = false;
 
 function createWindow(): void {
   const win = new BrowserWindow({
@@ -33,6 +37,20 @@ function createWindow(): void {
       preload: join(__dirname, '../preload/index.js'),
       sandbox: false,
     },
+  });
+
+  // Hide instead of destroy when the user clicks the X. The
+  // SavedVariables watcher + scan queue keep running in the background;
+  // closing the window is treated as "I don't need this debug view
+  // right now." Re-opening: launch `npm run dev` again — the
+  // single-instance handler below intercepts the second launch and
+  // brings the existing window back. This stops every accidental
+  // window-close from killing an in-flight sim.
+  win.on('close', (event) => {
+    if (!isQuitting) {
+      event.preventDefault();
+      win.hide();
+    }
   });
 
   if (process.env['ELECTRON_RENDERER_URL']) {
@@ -144,13 +162,38 @@ if (process.platform === 'win32') {
   app.setAppUserModelId('com.simly.desktop');
 }
 
+// Single-instance lock: a second `npm run dev` (or any other Simly
+// launch) will hand off to the already-running instance. The existing
+// instance receives `second-instance` and re-shows its (hidden) window.
+// Without this, accidentally closing the Simly window would lock the
+// user out of the dev view until they killed the npm process.
+const gotInstanceLock = app.requestSingleInstanceLock();
+if (!gotInstanceLock) {
+  app.quit();
+} else {
+  app.on('second-instance', () => {
+    const wins = BrowserWindow.getAllWindows();
+    if (wins.length > 0) {
+      const win = wins[0]!;
+      if (win.isMinimized()) win.restore();
+      win.show();
+      win.focus();
+    } else {
+      createWindow();
+    }
+  });
+}
+
 app.whenReady().then(async () => {
   await startRoundTrip();
   createWindow();
 });
 
 app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') app.quit();
+  // Don't quit on window close — see the close-to-hide intercept in
+  // createWindow(). The watcher + scan queue stay alive so a sim
+  // already in progress (or a future "Update sims" click) still
+  // completes without the user reopening the desktop window.
 });
 
 app.on('activate', () => {
@@ -158,5 +201,6 @@ app.on('activate', () => {
 });
 
 app.on('before-quit', async () => {
+  isQuitting = true;
   if (watcher) await watcher.close();
 });
