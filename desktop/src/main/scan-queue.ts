@@ -15,6 +15,9 @@ import {
   type TrinketPreScanResult,
 } from '@simly/shared';
 import { writeLuaFile } from './lua-writer';
+import { parseResultsFile } from './lua-parser';
+import { readFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 import { runSimc } from './simc-runner';
 import type { BootstrapResult } from './simc-bootstrap';
 import type { WowPaths } from './wow-paths';
@@ -205,6 +208,81 @@ export class ScanQueue {
   }
 
   /**
+   * On a quick-sim short-circuit (up_to_date or no_upgrades), the
+   * addon side still needs to see a fresh results file — otherwise
+   * the panel keeps showing the previous sim's timestamps and the
+   * fresh-results popup doesn't fire on /reload.
+   *
+   * Strategy:
+   *   1. Read the existing results file (set up at boot by
+   *      index.ts → startRoundTrip + every full sim).
+   *   2. Bump generated_at to now and mark every scan record as
+   *      'done' at the new timestamp so the panel shows everything
+   *      as current.
+   *   3. Write back atomically.
+   *   4. If reading/parsing fails, synthesize a minimal results
+   *      record from the gear catalog. Better than leaving stale.
+   *
+   * Failures are logged but never thrown — the caller has already
+   * decided to short-circuit, and a results-file write failure
+   * shouldn't crash the queue.
+   */
+  private async refreshResultsAfterShortCircuit(args: {
+    characterKey: string;
+    scenario: Scenario;
+    finishedAt: number;
+    earlyExitKind: 'up_to_date' | 'no_upgrades';
+  }): Promise<void> {
+    const path = this.opts.paths.resultsLuaPath;
+    let next: SimlyResults | undefined;
+
+    if (existsSync(path)) {
+      try {
+        const source = await readFile(path, 'utf8');
+        const parsed = parseResultsFile(source);
+        if (parsed) {
+          next = {
+            ...parsed,
+            generated_at: args.finishedAt,
+            character_key: args.characterKey,
+            active_scenario: args.scenario,
+            scans: refreshScanTimestamps(parsed.scans, args.finishedAt),
+          };
+        }
+      } catch (err) {
+        console.warn('[quick-sim] failed to read existing results file:', (err as Error).message);
+      }
+    }
+
+    if (!next) {
+      // Synthesize from catalog — covers first-run edge cases and
+      // unparseable files. Composed loadout is the catalog's
+      // best_loadout converted to the addon's shape.
+      const catalog = this.gearCatalog?.get(args.characterKey, args.scenario);
+      next = synthesizeResultsFromCatalog({
+        catalog,
+        characterKey: args.characterKey,
+        scenario: args.scenario,
+        simcVersion: this.opts.simc.installedVersion?.tag ?? 'cached',
+        finishedAt: args.finishedAt,
+      });
+    }
+
+    try {
+      await writeLuaFile(
+        path,
+        'SimlyResults',
+        next as unknown as Parameters<typeof writeLuaFile>[2],
+      );
+      console.log(
+        `[quick-sim] wrote refreshed results (${args.earlyExitKind}) — /reload in WoW`,
+      );
+    } catch (err) {
+      console.warn('[quick-sim] failed to write refreshed results:', (err as Error).message);
+    }
+  }
+
+  /**
    * Run the quick-sim gate. Returns:
    *   - 'up_to_date'   → caller should short-circuit (no further sim).
    *   - 'no_upgrades'  → swap-test ran, no new item is an upgrade,
@@ -351,9 +429,31 @@ export class ScanQueue {
       // pipeline otherwise. See quick-sim.ts for the planner logic.
       const earlyExit = await this.maybeQuickSim(args, runnerPaths);
       if (earlyExit === 'up_to_date' || earlyExit === 'no_upgrades') {
-        this.lastCompletedAt = Math.floor(Date.now() / 1000);
+        const finishedAt = Math.floor(Date.now() / 1000);
+        // Refresh the results file so the addon picks up "complete"
+        // state on /reload — without this, the addon panel keeps
+        // showing the previous sim's stale timestamps and the
+        // "fresh results" popup never fires. We re-emit the existing
+        // file with bumped generated_at; if the file is missing or
+        // unparseable we synthesize a minimal results record from
+        // the catalog.
+        await this.refreshResultsAfterShortCircuit({
+          characterKey: args.characterKey,
+          scenario: args.scenario,
+          finishedAt,
+          earlyExitKind: earlyExit,
+        });
+        this.lastCompletedAt = finishedAt;
         setWindowTitle(`Simly — Up to date (${args.characterKey})`);
-        showScanCompleteNotification({}, args.characterKey);
+        // Use a synthesized scans summary in the notification so the
+        // node-notifier toast says something useful instead of "no
+        // scans completed".
+        const noteScans: ScanCollection = {
+          stat_weights: { status: 'done', finished_at: finishedAt },
+          trinket_pre_scan: { status: 'done', finished_at: finishedAt },
+          gear_coarse: { status: 'done', finished_at: finishedAt },
+        };
+        showScanCompleteNotification(noteScans, args.characterKey);
         return;
       }
 
@@ -923,6 +1023,70 @@ function tryCreateTrinketCache(): TrinketCacheStore | undefined {
     console.warn('[trinket-cache] could not initialize store:', (err as Error).message);
     return undefined;
   }
+}
+
+/**
+ * Mark every scan record in a collection as 'done' at the new
+ * timestamp. Preserves data fields verbatim — only status and
+ * finished_at change. Pending scans become done (the short-circuit
+ * means we believe everything is current); failed scans stay failed
+ * since that's a real signal worth preserving.
+ */
+function refreshScanTimestamps(
+  scans: ScanCollection,
+  finishedAt: number,
+): ScanCollection {
+  const out: ScanCollection = {};
+  for (const [id, record] of Object.entries(scans)) {
+    if (!record) continue;
+    if (record.status === 'failed') {
+      out[id] = record;
+      continue;
+    }
+    out[id] = {
+      ...record,
+      status: 'done',
+      finished_at: finishedAt,
+    };
+  }
+  return out;
+}
+
+/**
+ * Build a minimal SimlyResults from the catalog when the existing
+ * results file is missing or unparseable. Composed loadout comes
+ * from best_loadout; scans are stubbed as 'done' at finishedAt with
+ * no data (the panel still shows the timestamp, just no per-scan
+ * detail). This is a fallback — the happy path is reading +
+ * refreshing the existing file.
+ */
+function synthesizeResultsFromCatalog(opts: {
+  catalog: GearCatalogEntry | undefined;
+  characterKey: string;
+  scenario: Scenario;
+  simcVersion: string;
+  finishedAt: number;
+}): SimlyResults {
+  const composed: ComposedLoadout | undefined = opts.catalog
+    ? {
+        label: 'Cached best loadout',
+        expected_dps: opts.catalog.best_loadout_dps,
+      }
+    : undefined;
+
+  return {
+    schema_version: RESULTS_SCHEMA_VERSION,
+    generated_at: opts.finishedAt,
+    simc_version: opts.simcVersion,
+    character_key: opts.characterKey,
+    active_scenario: opts.scenario,
+    scans: {
+      stat_weights: { status: 'done', finished_at: opts.finishedAt },
+      trinket_pre_scan: { status: 'done', finished_at: opts.finishedAt },
+      gear_coarse: { status: 'done', finished_at: opts.finishedAt },
+    },
+    composed,
+  };
 }
 
 /** "5 min ago" / "2 hours ago" / "(unknown)" formatter for log lines. */
