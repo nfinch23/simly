@@ -131,6 +131,35 @@ export interface GearScanResult {
   total_combos: number;
 }
 
+/**
+ * Compact view of one item the gear catalog has seen, for rendering
+ * in the addon panel. Mirrors the desktop-side CatalogItemRecord but
+ * trimmed: just identity / display fields / classification / delta.
+ */
+export interface CatalogSummaryItem {
+  identity: string;
+  item_id: number;
+  name: string;
+  slot: string;
+  ilvl: number;
+  status: 'best' | 'good' | 'sidegrade' | 'trash' | 'unknown';
+  /** Most-favorable delta_pct ever observed (0 = won, -3 = lost by 3%). */
+  best_delta_pct: number;
+  times_simmed: number;
+}
+
+/**
+ * Snapshot of the gear catalog at the time SimlyResults.lua was
+ * written. Lets the addon panel show what's been classified as
+ * trash/good/sidegrade without having to re-derive it from scan
+ * results. Items with status='best' are excluded — they're already
+ * displayed via composed.gear (and would just duplicate noise).
+ */
+export interface CatalogSummary {
+  total_seen: number;
+  items: CatalogSummaryItem[];
+}
+
 export interface ScanCollection {
   stat_weights?: ScanRecord<StatWeights>;
   trinket_pre_scan?: ScanRecord<TrinketPreScanResult>;
@@ -159,4 +188,12 @@ export interface SimlyResults {
   gear_hash?: string;
   scans: ScanCollection;
   composed?: ComposedLoadout;
+  /**
+   * Snapshot of the gear catalog's seen_items map (excluding the
+   * currently-best items, which are already shown via composed.gear).
+   * Lets the in-game panel render a "what we know is bad" list so
+   * the user can see what's being rejected without having to read
+   * the dev log.
+   */
+  catalog_summary?: CatalogSummary;
 }

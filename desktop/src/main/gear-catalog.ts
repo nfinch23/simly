@@ -339,6 +339,41 @@ export function updateCatalogFromSwapTest(opts: {
 }
 
 /**
+ * Build a CatalogSummary from a catalog entry for embedding in
+ * SimlyResults.lua. Excludes status='best' (already in composed.gear)
+ * and status='unknown' (transient pre-sim state). Sorts by status
+ * priority — trash first (most actionable), then good, then sidegrade
+ * — and within each status by least-negative delta_pct (closer to
+ * winner = more interesting first).
+ */
+export function buildCatalogSummary(
+  catalog: GearCatalogEntry | undefined,
+): import('@simly/shared').CatalogSummary {
+  if (!catalog) return { total_seen: 0, items: [] };
+  const all = Object.values(catalog.seen_items);
+  const visible = all.filter((r) => r.status !== 'best' && r.status !== 'unknown');
+  const order: Record<string, number> = { trash: 0, good: 1, sidegrade: 2 };
+  visible.sort((a, b) => {
+    const so = (order[a.status] ?? 9) - (order[b.status] ?? 9);
+    if (so !== 0) return so;
+    return b.best_delta_pct - a.best_delta_pct; // less negative first
+  });
+  return {
+    total_seen: all.length,
+    items: visible.map((r) => ({
+      identity: r.identity,
+      item_id: r.item_id,
+      name: r.name,
+      slot: r.slot,
+      ilvl: r.ilvl,
+      status: r.status,
+      best_delta_pct: r.best_delta_pct,
+      times_simmed: r.times_simmed,
+    })),
+  };
+}
+
+/**
  * Items that should be excluded from any future cartesian (the gear
  * pruner consults this in 4d-iii). 'trash' classification + not
  * manually-cleared. v1 doesn't have manual-clear in the UI yet, so

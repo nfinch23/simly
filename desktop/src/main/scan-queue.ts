@@ -41,6 +41,7 @@ import {
   TrinketCacheStore,
 } from './trinket-cache';
 import {
+  buildCatalogSummary,
   fullPoolSignature,
   GearCatalogStore,
   updateCatalogFromGearScan,
@@ -261,6 +262,12 @@ export class ScanQueue {
             character_key: args.characterKey,
             active_scenario: args.scenario,
             scans: refreshScanTimestamps(parsed.scans, args.finishedAt),
+            // Catalog state may have changed since the last full sim
+            // (the swap-test path adds entries) — re-derive from the
+            // current catalog rather than preserving the stale snapshot.
+            catalog_summary: buildCatalogSummary(
+              this.gearCatalog?.get(args.characterKey, args.scenario),
+            ),
           };
         }
       } catch (err) {
@@ -816,6 +823,9 @@ export class ScanQueue {
         active_scenario: args.scenario,
         scans,
         composed,
+        catalog_summary: buildCatalogSummary(
+          this.gearCatalog?.get(args.characterKey, args.scenario),
+        ),
       };
 
       try {
@@ -1100,6 +1110,7 @@ function synthesizeResultsFromCatalog(opts: {
       gear_coarse: { status: 'done', finished_at: opts.finishedAt },
     },
     composed,
+    catalog_summary: buildCatalogSummary(opts.catalog),
   };
 }
 
