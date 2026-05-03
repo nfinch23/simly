@@ -1,5 +1,5 @@
 import { parse, type Statement, type Expression, type TableConstructorExpression } from 'luaparse';
-import type { SimlyDB } from '@simly/shared';
+import type { SimlyDB, SimlyResults } from '@simly/shared';
 
 type LuaValue = string | number | boolean | null | LuaValue[] | { [key: string]: LuaValue };
 
@@ -23,6 +23,29 @@ export function parseSavedVars(source: string): SimlyDB {
   }
 
   throw new Error('SimlyDB assignment not found in SavedVariables file');
+}
+
+/**
+ * Parse a Simly results Lua file and extract the `SimlyResults` table.
+ * Returns undefined if the file doesn't contain a SimlyResults
+ * assignment (placeholder file, partial write, etc.) — callers should
+ * fall back to synthesizing a results object from other sources.
+ *
+ * Used by the quick-sim short-circuit: when "Update sims" returns
+ * up_to_date or no_upgrades, we want to bump generated_at on the
+ * existing results file so the addon's "fresh results" detection
+ * fires without redoing the actual sim work.
+ */
+export function parseResultsFile(source: string): SimlyResults | undefined {
+  const ast = parse(source, { comments: false, encodingMode: 'pseudo-latin1' });
+  for (const stmt of ast.body) {
+    const target = topLevelAssignmentTarget(stmt);
+    if (target?.name !== 'SimlyResults') continue;
+    const value = expressionToValue(target.init);
+    if (!isPlainObject(value)) return undefined;
+    return value as unknown as SimlyResults;
+  }
+  return undefined;
 }
 
 /**
