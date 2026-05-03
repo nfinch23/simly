@@ -218,6 +218,58 @@ function Panel.Refresh()
 		table.insert(lines, "")
 	end
 
+	-- Catalog summary block: items the desktop has simmed and decided
+	-- aren't current best. Trash (lost by >3%) listed first since
+	-- those are the most actionable for "should I delete this from my
+	-- bags?". Sidegrade and good follow. Items with status='best'
+	-- aren't shown here — they're already in the loadout block above.
+	-- Gray-quality items don't appear at all because the addon's
+	-- StripJunkBagItems filter drops them at the source before any
+	-- sim sees them.
+	if SimlyResults and SimlyResults.catalog_summary
+		and SimlyResults.catalog_summary.items
+		and #SimlyResults.catalog_summary.items > 0
+	then
+		local summary = SimlyResults.catalog_summary
+		table.insert(lines, "|cffffd700Catalog|r |cffaaaaaa(" ..
+			(summary.total_seen or 0) .. " item" ..
+			((summary.total_seen == 1) and "" or "s") .. " simmed; gray junk filtered before sim)|r")
+
+		-- Group by status with the desktop's sort order preserved.
+		-- Status colors: trash=red, sidegrade=blue-white, good=yellow.
+		local statusColors = {
+			trash = "|cffff5555",
+			sidegrade = "|cffaaaaff",
+			good = "|cffffff66",
+			best = "|cff00ff00",
+		}
+		local statusLabels = {
+			trash = "trash",
+			sidegrade = "sidegrade",
+			good = "good",
+			best = "best",
+		}
+
+		local lastStatus = nil
+		for _, item in ipairs(summary.items) do
+			if item.status ~= lastStatus then
+				local label = statusLabels[item.status] or item.status
+				local count = 0
+				for _, it in ipairs(summary.items) do
+					if it.status == item.status then count = count + 1 end
+				end
+				table.insert(lines, "  |cffaaaaaa" .. label .. " (" .. count .. "):|r")
+				lastStatus = item.status
+			end
+			local color = statusColors[item.status] or "|cffffffff"
+			table.insert(lines, string.format(
+				"    %s%s|r |cffaaaaaa(%s)|r %.2f%%",
+				color, item.name, item.slot, item.best_delta_pct
+			))
+		end
+		table.insert(lines, "")
+	end
+
 	if SimlyResults then
 		table.insert(lines, "|cffaaaaaaSimC|r " .. (SimlyResults.simc_version or "?"))
 		table.insert(lines, "|cffaaaaaaScenario|r " .. (SimlyResults.active_scenario or "?"))
