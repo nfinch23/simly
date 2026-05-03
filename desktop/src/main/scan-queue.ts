@@ -21,12 +21,22 @@ import type { WowPaths } from './wow-paths';
 import { buildAllScanLines, parseAllScanRecords } from './scans/registry';
 import { runStatWeightsScan } from './scans/stat-weights';
 import {
+  finalizeTrinketResult,
   parseTrinketPreScanResult,
+  profilesetsToPairResults,
+  runTrinketPairsSim,
   runTrinketPreScanSim,
 } from './scans/trinket-pre-scan';
 import { runGearCoarseScan } from './scans/gear-coarse';
 import type { TrinketLock } from './scans/gear-pruner';
 import { computeItemObservations, IgnoreListStore } from './ignore-list';
+import {
+  mergePairResults,
+  planTrinketScan,
+  poolSignature,
+  selectTopTrinkets,
+  TrinketCacheStore,
+} from './trinket-cache';
 import {
   getTrinketPool,
   parseSimcExport,
@@ -54,6 +64,8 @@ export interface ScanQueueOptions {
    * instance; tests inject a temp-cwd one to avoid touching userData.
    */
   ignoreList?: IgnoreListStore;
+  /** Optional trinket cache store. Same pattern as ignoreList. */
+  trinketCache?: TrinketCacheStore;
 }
 
 export interface PastedProfileSource {
@@ -81,6 +93,7 @@ export class ScanQueue {
   private lastCompletedAt: number;
   private inFlight = false;
   private readonly ignoreList: IgnoreListStore | undefined;
+  private readonly trinketCache: TrinketCacheStore | undefined;
 
   constructor(private readonly opts: ScanQueueOptions) {
     this.lastCompletedAt =
@@ -91,6 +104,7 @@ export class ScanQueue {
     // and fall through. The store is optional from the queue's POV;
     // gear-coarse still runs without ignore-list persistence.
     this.ignoreList = opts.ignoreList ?? tryCreateIgnoreList();
+    this.trinketCache = opts.trinketCache ?? tryCreateTrinketCache();
   }
 
   /**
@@ -235,62 +249,138 @@ export class ScanQueue {
       let trinketLock: TrinketLock | undefined;
       // Stage 1.5: trinket pre-scan. Only when we have a real parsed
       // export (need actual bag trinkets) AND at least 2 unique trinkets
-      // in the pool (otherwise no pairs to compare). Surfaces the best
-      // trinket pair to the panel and is read by Phase 4d's gear ladder
-      // to lock trinkets in for downstream stages.
+      // in the pool. Now cache-aware: pool unchanged ⇒ skip sim entirely
+      // (reuse cached winner); new trinket(s) ⇒ sim only the pairs that
+      // involve a new trinket, merge with cached pairs.
       if (args.useRealExport && args.parsedExport) {
         const trinkets = getTrinketPool(args.parsedExport);
         if (trinkets.length >= 2) {
           const tStarted = Math.floor(Date.now() / 1000);
           const t0t = Date.now();
-          const tPairs = (trinkets.length * (trinkets.length - 1)) / 2;
-          console.log(
-            `[sim] trinket_pre_scan: starting (${trinkets.length} trinkets, ${tPairs} pairs, 3000 iter each)`,
-          );
-          const tProgress = makeStageProgressLogger(
-            `trinket_pre_scan (${tPairs} pairs)`,
-            args.characterKey,
-          );
-          try {
-            const { run, pairsByName } = await runTrinketPreScanSim({
-              paths: runnerPaths,
-              baseProfile: args.baseProfile,
-              trinkets,
-              onProgress: tProgress.onProgress,
-            });
+          const plan = this.trinketCache
+            ? planTrinketScan({
+                trinkets,
+                cache: this.trinketCache,
+                character_key: args.characterKey,
+                scenario: args.scenario,
+              })
+            : { kind: 'full' as const, trinkets, reason: 'no cache available' };
+
+          if (plan.kind === 'reuse') {
+            console.log(
+              `[sim] trinket_pre_scan: cache hit (pool unchanged) — reusing ${plan.result.pairs.length} cached pairs`,
+            );
             const tFinished = Math.floor(Date.now() / 1000);
-            const data = parseTrinketPreScanResult(run, pairsByName);
             scans.trinket_pre_scan = {
               status: 'done',
               started_at: tStarted,
               finished_at: tFinished,
-              data,
+              data: plan.result,
             };
-            // Lock the winning pair for the gear ladder. ParsedItems
-            // (not just ScannedItemRefs) are required so formatItemLine
-            // can render the SimC line with bonus_ids etc.
-            if (data.winner) {
-              const meta = pairsByName.get(data.winner.pair_id);
-              if (meta) trinketLock = { trinket1: meta.t1, trinket2: meta.t2 };
+            if (plan.result.winner) {
+              const winningPair = plan.result.winner;
+              const t1Match = trinkets.find((t) => t.identity === winningPair.trinket1.identity);
+              const t2Match = trinkets.find((t) => t.identity === winningPair.trinket2.identity);
+              if (t1Match && t2Match) trinketLock = { trinket1: t1Match, trinket2: t2Match };
             }
-            const dt = ((Date.now() - t0t) / 1000).toFixed(1);
-            const w = data.winner;
-            const winnerStr = w
-              ? `${w.trinket1.name} + ${w.trinket2.name} @ ${Math.round(w.mean_dps)} dps`
-              : '(no winner)';
+          } else {
+            const tPairs =
+              plan.kind === 'incremental'
+                ? plan.pairsToSim.length
+                : (plan.trinkets.length * (plan.trinkets.length - 1)) / 2;
+            const planLabel =
+              plan.kind === 'incremental'
+                ? `incremental: ${plan.newTrinkets.length} new trinket(s) vs ${plan.cachedTop.length} cached top`
+                : `full: ${plan.reason}`;
             console.log(
-              `[sim] trinket_pre_scan (${dt}s, ${trinkets.length} trinkets, ${data.pairs.length} pairs): ${winnerStr}`,
+              `[sim] trinket_pre_scan: ${planLabel} — ${tPairs} pair(s), 3000 iter each`,
             );
-            tProgress.stop();
-          } catch (err) {
-            tProgress.stop();
-            console.error('[sim] trinket_pre_scan failed:', (err as Error).message);
-            scans.trinket_pre_scan = {
-              status: 'failed',
-              started_at: tStarted,
-              finished_at: Math.floor(Date.now() / 1000),
-              error: (err as Error).message,
-            };
+            const tProgress = makeStageProgressLogger(
+              `trinket_pre_scan (${tPairs} pairs)`,
+              args.characterKey,
+            );
+            try {
+              let pairs;
+              let pairsByName;
+              if (plan.kind === 'incremental') {
+                const r = await runTrinketPairsSim({
+                  paths: runnerPaths,
+                  baseProfile: args.baseProfile,
+                  pairs: plan.pairsToSim,
+                  onProgress: tProgress.onProgress,
+                });
+                pairsByName = r.pairsByName;
+                const fresh = profilesetsToPairResults(r.run, pairsByName);
+                const currentIdentities = new Set(trinkets.map((t) => t.identity));
+                pairs = mergePairResults(plan.cached.pairs, fresh, currentIdentities);
+              } else {
+                const r = await runTrinketPreScanSim({
+                  paths: runnerPaths,
+                  baseProfile: args.baseProfile,
+                  trinkets: plan.trinkets,
+                  onProgress: tProgress.onProgress,
+                });
+                pairsByName = r.pairsByName;
+                pairs = parseTrinketPreScanResult(r.run, pairsByName).pairs;
+              }
+              const data = finalizeTrinketResult(pairs);
+              const tFinished = Math.floor(Date.now() / 1000);
+              scans.trinket_pre_scan = {
+                status: 'done',
+                started_at: tStarted,
+                finished_at: tFinished,
+                data,
+              };
+              // Lock the winning pair for the gear ladder. ParsedItems
+              // (not just ScannedItemRefs) are required so formatItemLine
+              // can render the SimC line with bonus_ids etc. For
+              // incremental runs the winner may be a cached pair whose
+              // ParsedItems aren't in pairsByName — fall back to looking
+              // up by identity in the current pool.
+              if (data.winner) {
+                const w = data.winner;
+                const meta = pairsByName.get(w.pair_id);
+                if (meta) {
+                  trinketLock = { trinket1: meta.t1, trinket2: meta.t2 };
+                } else {
+                  const t1Match = trinkets.find((t) => t.identity === w.trinket1.identity);
+                  const t2Match = trinkets.find((t) => t.identity === w.trinket2.identity);
+                  if (t1Match && t2Match) trinketLock = { trinket1: t1Match, trinket2: t2Match };
+                }
+              }
+              // Update cache with the merged result + refreshed top trinkets.
+              if (this.trinketCache) {
+                try {
+                  this.trinketCache.put({
+                    character_key: args.characterKey,
+                    scenario: args.scenario,
+                    pool_signature: poolSignature(trinkets),
+                    pairs: data.pairs,
+                    top_trinket_identities: selectTopTrinkets(data.pairs),
+                    last_simmed_at: tFinished,
+                  });
+                } catch (err) {
+                  console.warn('[sim] trinket cache write failed:', (err as Error).message);
+                }
+              }
+              const dt = ((Date.now() - t0t) / 1000).toFixed(1);
+              const winnerStr = data.winner
+                ? `${data.winner.trinket1.name} + ${data.winner.trinket2.name} @ ${Math.round(data.winner.mean_dps)} dps`
+                : '(no winner)';
+              console.log(
+                `[sim] trinket_pre_scan (${dt}s, ${data.pairs.length} pair(s) total): ${winnerStr}`,
+              );
+              tProgress.stop();
+            } catch (err) {
+              tProgress.stop();
+              console.error('[sim] trinket_pre_scan failed:', (err as Error).message);
+              scans.trinket_pre_scan = {
+                status: 'failed',
+                started_at: tStarted,
+                finished_at: Math.floor(Date.now() / 1000),
+                error: (err as Error).message,
+              };
+            }
           }
         } else {
           console.log(
@@ -648,6 +738,15 @@ function tryCreateIgnoreList(): IgnoreListStore | undefined {
     return new IgnoreListStore();
   } catch (err) {
     console.warn('[ignore-list] could not initialize store:', (err as Error).message);
+    return undefined;
+  }
+}
+
+function tryCreateTrinketCache(): TrinketCacheStore | undefined {
+  try {
+    return new TrinketCacheStore();
+  } catch (err) {
+    console.warn('[trinket-cache] could not initialize store:', (err as Error).message);
     return undefined;
   }
 }

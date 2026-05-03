@@ -68,13 +68,25 @@ describe('ilvlScorer', () => {
 });
 
 describe('pruneGearPool — single slot, default ilvl scorer', () => {
-  it('keeps all items within 1/multiplier of leader', () => {
+  it('keeps all items within 1/multiplier of leader (multiplier=1.5)', () => {
     // Leader is 300; multiplier 1.5 → keep score >= 200.
     const parsed = exportWith([
       fakeItem({ slot: 'head', item_id: 1, ilvl: 300 }),
       fakeItem({ slot: 'head', item_id: 2, ilvl: 250 }),
       fakeItem({ slot: 'head', item_id: 3, ilvl: 200 }),
       fakeItem({ slot: 'head', item_id: 4, ilvl: 199 }), // dropped
+    ]);
+    const prune = pruneGearPool({ parsed, weights: NO_WEIGHTS, multiplier: 1.5 });
+    expect(prune.perSlot.head?.map((i) => i.item_id)).toEqual([1, 2, 3]);
+  });
+
+  it('default multiplier (1.2) is tighter than 1.5', () => {
+    // Leader 300; default mult 1.2 → keep score * 1.2 >= 300, score >= 250.
+    const parsed = exportWith([
+      fakeItem({ slot: 'head', item_id: 1, ilvl: 300 }),
+      fakeItem({ slot: 'head', item_id: 2, ilvl: 280 }),
+      fakeItem({ slot: 'head', item_id: 3, ilvl: 250 }),
+      fakeItem({ slot: 'head', item_id: 4, ilvl: 200 }), // dropped at default
     ]);
     const prune = pruneGearPool({ parsed, weights: NO_WEIGHTS });
     expect(prune.perSlot.head?.map((i) => i.item_id)).toEqual([1, 2, 3]);
@@ -122,6 +134,7 @@ describe('pruneGearPool — ignore set', () => {
     const prune = pruneGearPool({
       parsed,
       weights: NO_WEIGHTS,
+      multiplier: 1.5,
       ignoreSet: new Set([a.identity]),
     });
     expect(prune.perSlot.head?.map((i) => i.item_id).sort()).toEqual([2, 3]);
@@ -162,7 +175,7 @@ describe('pruneGearPool — rings', () => {
       fakeItem({ slot: 'finger2', item_id: 103, ilvl: 150 }),
     ];
     const parsed = exportWith(rings);
-    const prune = pruneGearPool({ parsed, weights: NO_WEIGHTS });
+    const prune = pruneGearPool({ parsed, weights: NO_WEIGHTS, multiplier: 1.5 });
     expect(prune.ringPairs).toHaveLength(3);
     const allIds = new Set(prune.ringPairs.flatMap((p) => p.map((it) => it.item_id)));
     expect(allIds.has(103)).toBe(false);
@@ -259,6 +272,7 @@ describe('pruneGearPool — pluggable scorer', () => {
       parsed,
       weights: { mastery: 1.0 },
       scorer: customScorer,
+      multiplier: 1.5,
     });
     // Survivors: 9 (leader), 7 (7*1.5=10.5 >= 9). Dropped: 3.
     const ids = prune.perSlot.head?.map((i) => i.item_id).sort();
