@@ -61,26 +61,38 @@ local function createFrame()
 	body:SetSpacing(2)
 	f.body = body
 
-	local updateBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+	-- "Update sims" needs to call ReloadUI(), which is protected in
+	-- modern WoW — calling it from a plain OnClick handler trips
+	-- ADDON_ACTION_BLOCKED. The supported pattern is a
+	-- SecureActionButton with `type=macro` + macrotext "/reload";
+	-- the secure macro action invokes the slash command without
+	-- tainting our addon. PreClick (unsecure) runs first to bump the
+	-- request stamp before the reload flushes SimlyDB to disk.
+	local updateBtn = CreateFrame("Button", nil, f, "SecureActionButtonTemplate,UIPanelButtonTemplate")
 	updateBtn:SetSize(140, 26)
 	updateBtn:SetPoint("BOTTOMLEFT", 18, 14)
 	updateBtn:SetText("Update sims")
-	updateBtn:SetScript("OnClick", function()
+	updateBtn:RegisterForClicks("AnyUp", "AnyDown")
+	updateBtn:SetAttribute("type1", "macro")
+	updateBtn:SetAttribute("macrotext1", "/reload")
+	updateBtn:SetScript("PreClick", function()
 		ns.SavedVars.RequestUpdate()
 		DEFAULT_CHAT_FRAME:AddMessage(
 			"|cff00ffffSimly:|r reloading to start scan. Wait for the desktop notification, then /reload again to see results."
 		)
-		-- Auto-reload so the user doesn't have to click /reload as a
-		-- second step. /reload flushes SimlyDB to disk so the desktop
-		-- watcher sees the new update_requested_at and kicks the queue.
-		C_Timer.After(0.1, function() ReloadUI() end)
 	end)
 
-	local reloadBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+	-- The plain "/reload" button has the same protected-function
+	-- problem, so it also needs the SecureActionButton path. No
+	-- PreClick on this one — it's purely a manual reload after the
+	-- desktop notification fires.
+	local reloadBtn = CreateFrame("Button", nil, f, "SecureActionButtonTemplate,UIPanelButtonTemplate")
 	reloadBtn:SetSize(80, 26)
 	reloadBtn:SetPoint("BOTTOMRIGHT", -18, 14)
 	reloadBtn:SetText("/reload")
-	reloadBtn:SetScript("OnClick", function() ReloadUI() end)
+	reloadBtn:RegisterForClicks("AnyUp", "AnyDown")
+	reloadBtn:SetAttribute("type1", "macro")
+	reloadBtn:SetAttribute("macrotext1", "/reload")
 
 	-- WoW frames are shown by default at creation; hide so the very
 	-- first /simly call doesn't toggle a just-created visible frame off.
