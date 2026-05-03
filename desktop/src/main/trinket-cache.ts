@@ -81,7 +81,12 @@ export class TrinketCacheStore {
   }
 
   get(character_key: string, scenario: string): TrinketCacheEntry | undefined {
-    return this.store.get('entries')[makeCacheKey(character_key, scenario)];
+    // electron-store's `defaults` apply on first construction but a
+    // file-system-side delete (e.g., user wiping cache for testing)
+    // can leave the in-memory cache with no `entries` key. Defaulting
+    // here keeps callers from seeing undefined.
+    const entries = this.store.get('entries') ?? {};
+    return entries[makeCacheKey(character_key, scenario)];
   }
 
   put(entry: TrinketCacheEntry): void {

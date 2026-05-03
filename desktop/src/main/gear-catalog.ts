@@ -161,7 +161,11 @@ export class GearCatalogStore {
   }
 
   get(character_key: string, scenario: string): GearCatalogEntry | undefined {
-    return this.store.get('entries')[makeKey(character_key, scenario)];
+    // Defensive: a runtime file-delete (e.g., wiping cache for
+    // testing) can leave the in-memory cache without an `entries`
+    // key, which would make subsequent lookups throw.
+    const entries = this.store.get('entries') ?? {};
+    return entries[makeKey(character_key, scenario)];
   }
 
   put(entry: GearCatalogEntry): void {
