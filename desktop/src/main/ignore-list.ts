@@ -16,7 +16,27 @@
  * electron-store default to `app.getPath('userData')`.
  */
 
-import Store from 'electron-store';
+// electron-store@11 is ESM-only with a default export. electron-vite
+// externalizes deps into a CJS main bundle, so the import is resolved
+// at runtime via Node's CJS->ESM interop. Depending on the path, the
+// constructor lands at `module`, `module.default`, or
+// `module.default.default` (double-wrapping happens when `esModuleInterop`
+// emits `__importDefault` around an already-wrapped namespace). Probe
+// all three rather than fight the bundler interop matrix.
+import type ElectronStore from 'electron-store';
+import * as ElectronStoreModule from 'electron-store';
+
+function resolveStoreCtor(): typeof ElectronStore {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const m: any = ElectronStoreModule;
+  for (const candidate of [m, m?.default, m?.default?.default]) {
+    if (typeof candidate === 'function') {
+      return candidate as typeof ElectronStore;
+    }
+  }
+  const keys = m && typeof m === 'object' ? Object.keys(m) : String(m);
+  throw new Error(`electron-store default export is not a constructor; module shape: ${JSON.stringify(keys)}`);
+}
 
 export interface IgnoreEntry {
   /** `Charname-Realm-region` style — matches `SimlyResults.character_key`. */
@@ -72,10 +92,11 @@ export interface IgnoreListOptions {
 }
 
 export class IgnoreListStore {
-  private readonly store: Store<Schema>;
+  private readonly store: ElectronStore<Schema>;
 
   constructor(opts: IgnoreListOptions = {}) {
-    this.store = new Store<Schema>({
+    const StoreClass = resolveStoreCtor();
+    this.store = new StoreClass<Schema>({
       name: opts.name ?? 'ignore-list',
       cwd: opts.cwd,
       defaults: { entries: {} },
