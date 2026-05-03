@@ -38,6 +38,15 @@ import {
   TrinketCacheStore,
 } from './trinket-cache';
 import {
+  fullPoolSignature,
+  GearCatalogStore,
+  updateCatalogFromGearScan,
+  updateCatalogFromSwapTest,
+  type GearCatalogEntry,
+} from './gear-catalog';
+import { planQuickSim, type QuickSimDecision } from './quick-sim';
+import { runSwapTest, type SwapTestResult } from './swap-test';
+import {
   getTrinketPool,
   parseSimcExport,
   type ParsedExport,
@@ -66,6 +75,8 @@ export interface ScanQueueOptions {
   ignoreList?: IgnoreListStore;
   /** Optional trinket cache store. Same pattern as ignoreList. */
   trinketCache?: TrinketCacheStore;
+  /** Optional gear catalog store. Same pattern. */
+  gearCatalog?: GearCatalogStore;
 }
 
 export interface PastedProfileSource {
@@ -94,6 +105,7 @@ export class ScanQueue {
   private inFlight = false;
   private readonly ignoreList: IgnoreListStore | undefined;
   private readonly trinketCache: TrinketCacheStore | undefined;
+  private readonly gearCatalog: GearCatalogStore | undefined;
 
   constructor(private readonly opts: ScanQueueOptions) {
     this.lastCompletedAt =
@@ -105,6 +117,7 @@ export class ScanQueue {
     // gear-coarse still runs without ignore-list persistence.
     this.ignoreList = opts.ignoreList ?? tryCreateIgnoreList();
     this.trinketCache = opts.trinketCache ?? tryCreateTrinketCache();
+    this.gearCatalog = opts.gearCatalog ?? tryCreateGearCatalog();
   }
 
   /**
@@ -191,6 +204,131 @@ export class ScanQueue {
     });
   }
 
+  /**
+   * Run the quick-sim gate. Returns:
+   *   - 'up_to_date'   → caller should short-circuit (no further sim).
+   *   - 'no_upgrades'  → swap-test ran, no new item is an upgrade,
+   *                      caller should short-circuit.
+   *   - 'continue'     → caller should run the full pipeline.
+   *
+   * Catches all errors and falls through to 'continue' so a broken
+   * catalog entry never blocks a real sim.
+   */
+  private async maybeQuickSim(
+    args: {
+      baseProfile: string;
+      useRealExport: boolean;
+      parsedExport?: ParsedExport;
+      characterKey: string;
+      scenario: Scenario;
+    },
+    runnerPaths: { binPath: string; scratchDir: string },
+  ): Promise<'up_to_date' | 'no_upgrades' | 'continue'> {
+    if (!args.useRealExport || !args.parsedExport || !this.gearCatalog) {
+      return 'continue';
+    }
+    let catalog: GearCatalogEntry | undefined;
+    let decision: QuickSimDecision;
+    try {
+      catalog = this.gearCatalog.get(args.characterKey, args.scenario);
+      decision = planQuickSim({ parsed: args.parsedExport, catalog });
+    } catch (err) {
+      console.warn('[quick-sim] planner threw — falling through:', (err as Error).message);
+      return 'continue';
+    }
+    console.log(`[quick-sim] decision: ${decision.kind} (${decision.reason})`);
+
+    if (decision.kind === 'up_to_date') {
+      // Refresh the catalog's last_quick_sim_at so the user can see
+      // when we last verified up-to-date status.
+      if (catalog) {
+        try {
+          this.gearCatalog.put({
+            ...catalog,
+            last_quick_sim_at: Math.floor(Date.now() / 1000),
+          });
+        } catch (err) {
+          console.warn('[catalog] last_quick_sim_at update failed:', (err as Error).message);
+        }
+      }
+      console.log(
+        `[sim] up to date — no new gear, no removals affecting best loadout. ` +
+          `Last full sim: ${formatRelative(catalog?.last_full_sim_at ?? 0)}`,
+      );
+      return 'up_to_date';
+    }
+
+    if (decision.kind === 'full_sim') return 'continue';
+
+    // swap_test — sim the new items vs the cached best loadout.
+    if (!catalog) return 'continue'; // defensive — planner shouldn't reach swap_test without catalog
+    const swapStarted = Math.floor(Date.now() / 1000);
+    const swapProgress = makeStageProgressLogger(
+      `swap_test (${decision.newItems.length} item${decision.newItems.length === 1 ? '' : 's'})`,
+      args.characterKey,
+    );
+    let result: SwapTestResult;
+    try {
+      const r = await runSwapTest({
+        paths: runnerPaths,
+        baseProfile: args.baseProfile,
+        bestLoadout: catalog.best_loadout,
+        baselineItemBySlot: decision.baselineItemBySlot,
+        newItems: decision.newItems,
+        onProgress: swapProgress.onProgress,
+      });
+      swapProgress.stop();
+      result = r.result;
+    } catch (err) {
+      swapProgress.stop();
+      console.error(
+        `[swap-test] failed — falling through to full sim:`,
+        (err as Error).message,
+      );
+      return 'continue';
+    }
+    void swapStarted;
+
+    for (const r of result.results) {
+      const verdict = r.is_upgrade
+        ? 'UPGRADE'
+        : r.delta_pct > -0.1
+        ? 'sidegrade'
+        : r.delta_pct <= -3
+        ? 'TRASH'
+        : 'good';
+      console.log(
+        `[swap-test] ${r.item.name} (${r.slot}): ${r.delta_pct >= 0 ? '+' : ''}${r.delta_pct.toFixed(2)}% — ${verdict}`,
+      );
+    }
+
+    // Update catalog with swap-test outcomes — every swapped item
+    // gets a seen_items entry so the next quick-sim won't redo this.
+    try {
+      const updated = updateCatalogFromSwapTest({
+        prior: catalog,
+        swap_results: result.results,
+      });
+      this.gearCatalog.put(updated);
+    } catch (err) {
+      console.warn('[catalog] swap-test write failed:', (err as Error).message);
+    }
+
+    if (!result.any_upgrade) {
+      console.log(
+        `[sim] no upgrades among ${decision.newItems.length} new item(s); ` +
+          `skipping full pipeline (best loadout unchanged)`,
+      );
+      return 'no_upgrades';
+    }
+
+    console.log(
+      `[sim] swap test found ${result.results.filter((r) => r.is_upgrade).length} upgrade(s); ` +
+        `falling through to full pipeline`,
+    );
+    return 'continue';
+  }
+
   private async runScan(args: {
     baseProfile: string;
     useRealExport: boolean;
@@ -206,6 +344,18 @@ export class ScanQueue {
         scratchDir: this.opts.simc.scratchDir,
       };
       const scans: ScanCollection = {};
+
+      // Quick-sim gate. Runs first; can short-circuit to "up to date"
+      // (no SimC) or to "swap test only" (just enough SimC to verify
+      // a few new items aren't upgrades). Falls through to the full
+      // pipeline otherwise. See quick-sim.ts for the planner logic.
+      const earlyExit = await this.maybeQuickSim(args, runnerPaths);
+      if (earlyExit === 'up_to_date' || earlyExit === 'no_upgrades') {
+        this.lastCompletedAt = Math.floor(Date.now() / 1000);
+        setWindowTitle(`Simly — Up to date (${args.characterKey})`);
+        showScanCompleteNotification({}, args.characterKey);
+        return;
+      }
 
       // Stage 1: stat weights (only on a real character export — the
       // static fallback profile has no gear/talents and produces
@@ -441,6 +591,30 @@ export class ScanQueue {
             ? `winner ${w.combo_id} @ ${Math.round(w.mean_dps)} dps (${result.combos.length} combos)`
             : `(no combos)`;
           console.log(`[sim] gear_coarse (${dt}s, 1000 iter): ${winnerStr}`);
+
+          // Write to the gear catalog: best_loadout from the winning
+          // combo, seen_items classifications across every combo.
+          // This is what the next "Update sims" reads via the
+          // quick-sim gate to decide what (if anything) needs simming.
+          if (this.gearCatalog && args.parsedExport) {
+            try {
+              const prior = this.gearCatalog.get(args.characterKey, args.scenario);
+              const updated = updateCatalogFromGearScan({
+                prior,
+                character_key: args.characterKey,
+                scenario: args.scenario,
+                pool_signature: fullPoolSignature(args.parsedExport),
+                combos: result.combos,
+              });
+              this.gearCatalog.put(updated);
+              console.log(
+                `[catalog] updated: best loadout dps=${Math.round(updated.best_loadout_dps ?? 0)}, ` +
+                  `${Object.keys(updated.seen_items).length} seen item(s)`,
+              );
+            } catch (err) {
+              console.warn('[catalog] write failed:', (err as Error).message);
+            }
+          }
 
           // Write losers to the ignore list. 4d-ii is write-only —
           // the pruner doesn't read this yet. 4d-iii wires the read
@@ -747,6 +921,26 @@ function tryCreateTrinketCache(): TrinketCacheStore | undefined {
     return new TrinketCacheStore();
   } catch (err) {
     console.warn('[trinket-cache] could not initialize store:', (err as Error).message);
+    return undefined;
+  }
+}
+
+/** "5 min ago" / "2 hours ago" / "(unknown)" formatter for log lines. */
+function formatRelative(unixSeconds: number): string {
+  if (!unixSeconds) return '(unknown)';
+  const now = Math.floor(Date.now() / 1000);
+  const dt = now - unixSeconds;
+  if (dt < 60) return `${dt}s ago`;
+  if (dt < 3600) return `${Math.floor(dt / 60)}m ago`;
+  if (dt < 86400) return `${Math.floor(dt / 3600)}h ago`;
+  return `${Math.floor(dt / 86400)}d ago`;
+}
+
+function tryCreateGearCatalog(): GearCatalogStore | undefined {
+  try {
+    return new GearCatalogStore();
+  } catch (err) {
+    console.warn('[gear-catalog] could not initialize store:', (err as Error).message);
     return undefined;
   }
 }
