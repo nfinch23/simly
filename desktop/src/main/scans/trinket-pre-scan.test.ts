@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildTrinketProfilesetScript,
+  pairKey,
   parseTrinketPreScanResult,
 } from './trinket-pre-scan';
 import {
@@ -48,29 +49,33 @@ function fakeRun(profilesets: Array<{ name: string; mean: number }>): SimcRunRes
 
 describe('buildTrinketProfilesetScript', () => {
   it('emits one profileset per unordered pair (n choose 2)', () => {
-    const trinkets = [
-      fakeTrinket({ item_id: 1, name: 'A', ilvl: 250 }),
-      fakeTrinket({ item_id: 2, name: 'B', ilvl: 260 }),
-      fakeTrinket({ item_id: 3, name: 'C', ilvl: 270 }),
-    ];
-    const { script, pairsByName } = buildTrinketProfilesetScript(trinkets);
+    const A = fakeTrinket({ item_id: 1, name: 'A', ilvl: 250 });
+    const B = fakeTrinket({ item_id: 2, name: 'B', ilvl: 260 });
+    const C = fakeTrinket({ item_id: 3, name: 'C', ilvl: 270 });
+    const { script, pairsByName } = buildTrinketProfilesetScript([A, B, C]);
     // 3 trinkets → 3 pairs → 6 lines (each pair has trinket1 + trinket2)
     const lines = script.split('\n').filter((l) => l.length > 0);
     expect(lines).toHaveLength(6);
     expect(pairsByName.size).toBe(3);
-    expect(pairsByName.has('t_0_1')).toBe(true);
-    expect(pairsByName.has('t_0_2')).toBe(true);
-    expect(pairsByName.has('t_1_2')).toBe(true);
+    // Names are identity-derived (sorted, hashed) so caching works across runs.
+    expect(pairsByName.has(pairKey(A, B))).toBe(true);
+    expect(pairsByName.has(pairKey(A, C))).toBe(true);
+    expect(pairsByName.has(pairKey(B, C))).toBe(true);
+  });
+
+  it('pair name is identity-stable: pairKey(A, B) === pairKey(B, A)', () => {
+    const A = fakeTrinket({ item_id: 1, name: 'A', ilvl: 250 });
+    const B = fakeTrinket({ item_id: 2, name: 'B', ilvl: 260 });
+    expect(pairKey(A, B)).toBe(pairKey(B, A));
   });
 
   it('writes both trinket1 and trinket2 lines per pair using the profileset += syntax', () => {
-    const trinkets = [
-      fakeTrinket({ item_id: 100, name: 'A', ilvl: 250, bonus_ids: [42] }),
-      fakeTrinket({ item_id: 200, name: 'B', ilvl: 260, bonus_ids: [99] }),
-    ];
-    const { script } = buildTrinketProfilesetScript(trinkets);
-    expect(script).toContain('profileset."t_0_1"+="trinket1=,id=100,bonus_id=42"');
-    expect(script).toContain('profileset."t_0_1"+="trinket2=,id=200,bonus_id=99"');
+    const A = fakeTrinket({ item_id: 100, name: 'A', ilvl: 250, bonus_ids: [42] });
+    const B = fakeTrinket({ item_id: 200, name: 'B', ilvl: 260, bonus_ids: [99] });
+    const { script } = buildTrinketProfilesetScript([A, B]);
+    const key = pairKey(A, B);
+    expect(script).toContain(`profileset."${key}"+="trinket1=,id=100,bonus_id=42"`);
+    expect(script).toContain(`profileset."${key}"+="trinket2=,id=200,bonus_id=99"`);
   });
 
   it('produces an empty script for a one-trinket pool (no pairs possible)', () => {
@@ -84,42 +89,39 @@ describe('buildTrinketProfilesetScript', () => {
 
 describe('parseTrinketPreScanResult', () => {
   it('maps profileset names back to trinket pairs and ranks by mean DPS', () => {
-    const trinkets = [
-      fakeTrinket({ item_id: 1, name: 'Alpha', ilvl: 250 }),
-      fakeTrinket({ item_id: 2, name: 'Beta', ilvl: 260 }),
-      fakeTrinket({ item_id: 3, name: 'Gamma', ilvl: 270 }),
-    ];
-    const { pairsByName } = buildTrinketProfilesetScript(trinkets);
+    const A = fakeTrinket({ item_id: 1, name: 'Alpha', ilvl: 250 });
+    const B = fakeTrinket({ item_id: 2, name: 'Beta', ilvl: 260 });
+    const C = fakeTrinket({ item_id: 3, name: 'Gamma', ilvl: 270 });
+    const { pairsByName } = buildTrinketProfilesetScript([A, B, C]);
     const run = fakeRun([
-      { name: 't_0_1', mean: 100000 },
-      { name: 't_0_2', mean: 110000 },
-      { name: 't_1_2', mean: 105000 },
+      { name: pairKey(A, B), mean: 100000 },
+      { name: pairKey(A, C), mean: 110000 },
+      { name: pairKey(B, C), mean: 105000 },
     ]);
     const result = parseTrinketPreScanResult(run, pairsByName);
     expect(result.pairs).toHaveLength(3);
-    expect(result.winner?.pair_id).toBe('t_0_2');
-    expect(result.winner?.trinket1.name).toBe('Alpha');
-    expect(result.winner?.trinket2.name).toBe('Gamma');
+    expect(result.winner?.pair_id).toBe(pairKey(A, C));
+    const winnerNames = [result.winner?.trinket1.name, result.winner?.trinket2.name].sort();
+    expect(winnerNames).toEqual(['Alpha', 'Gamma']);
     expect(result.winner?.delta_pct).toBe(0);
-    // Other pairs sorted desc with negative deltas
-    expect(result.pairs[1]!.pair_id).toBe('t_1_2');
+    // Other pairs sorted desc with negative deltas.
+    expect(result.pairs[1]!.pair_id).toBe(pairKey(B, C));
     expect(result.pairs[1]!.delta_pct).toBeLessThan(0);
     expect(result.pairs[2]!.delta_pct).toBeLessThan(result.pairs[1]!.delta_pct);
   });
 
   it('ignores profileset entries that do not match a known pair name', () => {
-    const trinkets = [
-      fakeTrinket({ item_id: 1, name: 'A', ilvl: 250 }),
-      fakeTrinket({ item_id: 2, name: 'B', ilvl: 260 }),
-    ];
-    const { pairsByName } = buildTrinketProfilesetScript(trinkets);
+    const A = fakeTrinket({ item_id: 1, name: 'A', ilvl: 250 });
+    const B = fakeTrinket({ item_id: 2, name: 'B', ilvl: 260 });
+    const { pairsByName } = buildTrinketProfilesetScript([A, B]);
     const run = fakeRun([
-      { name: 't_0_1', mean: 100000 },
+      { name: pairKey(A, B), mean: 100000 },
       { name: 'flask_blood_knights', mean: 99999 }, // bleed-through from another scan
     ]);
     const result = parseTrinketPreScanResult(run, pairsByName);
     expect(result.pairs).toHaveLength(1);
-    expect(result.pairs[0]!.trinket1.name).toBe('A');
+    const names = [result.pairs[0]!.trinket1.name, result.pairs[0]!.trinket2.name].sort();
+    expect(names).toEqual(['A', 'B']);
   });
 
   it('returns an empty pair list (no winner) when SimC produced nothing', () => {

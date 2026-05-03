@@ -80,10 +80,20 @@ export interface TrinketLock {
   trinket2: ParsedItem;
 }
 
+/**
+ * Default pruner multiplier. Items whose `score × multiplier < slot_max_score`
+ * are dropped. SCOPE recommended 1.5; we tightened to 1.2 after observing
+ * a 1728-combo cartesian on Felfriend take 27min at 1000 iter — 1.2
+ * keeps the iterative dev loop under ~10min while still letting through
+ * stat-distribution mismatches the sim deserves to evaluate. Override
+ * via opts.multiplier.
+ */
+export const DEFAULT_PRUNER_MULTIPLIER = 1.2;
+
 export interface PruneOptions {
   parsed: ParsedExport;
   weights: StatWeights;
-  /** Items whose `score × multiplier < slot_max_score` are dropped. Default 1.5. */
+  /** Items whose `score × multiplier < slot_max_score` are dropped. Default 1.2. */
   multiplier?: number;
   /** Identity hashes to skip (read by 4d-iii once the ignore list is online). */
   ignoreSet?: ReadonlySet<string>;
@@ -124,7 +134,7 @@ export interface PruneResult {
  * paired via `allUnorderedPairs` (so 3 surviving rings → 3 pairs).
  */
 export function pruneGearPool(opts: PruneOptions): PruneResult {
-  const multiplier = opts.multiplier ?? 1.5;
+  const multiplier = opts.multiplier ?? DEFAULT_PRUNER_MULTIPLIER;
   const scorer = opts.scorer ?? ilvlScorer;
   const ignoreSet = opts.ignoreSet ?? new Set<string>();
 
