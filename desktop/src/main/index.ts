@@ -128,6 +128,15 @@ async function startRoundTrip(): Promise<WowPaths | undefined> {
   return paths;
 }
 
+// Windows-only: tell the OS our App User Model ID. Without this,
+// notification toasts are silently suppressed on Windows 10/11
+// because Electron looks like an "unknown app" to the action center.
+// Must be called before any Notification is shown — easiest is
+// before app.whenReady() resolves.
+if (process.platform === 'win32') {
+  app.setAppUserModelId('com.simly.desktop');
+}
+
 app.whenReady().then(async () => {
   await startRoundTrip();
   createWindow();

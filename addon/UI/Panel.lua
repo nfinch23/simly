@@ -68,9 +68,12 @@ local function createFrame()
 	updateBtn:SetScript("OnClick", function()
 		ns.SavedVars.RequestUpdate()
 		DEFAULT_CHAT_FRAME:AddMessage(
-			"|cff00ffffSimly:|r scan requested. /reload now to start the run; wait for the desktop notification, then /reload again to see results."
+			"|cff00ffffSimly:|r reloading to start scan. Wait for the desktop notification, then /reload again to see results."
 		)
-		Panel.Refresh()
+		-- Auto-reload so the user doesn't have to click /reload as a
+		-- second step. /reload flushes SimlyDB to disk so the desktop
+		-- watcher sees the new update_requested_at and kicks the queue.
+		C_Timer.After(0.1, function() ReloadUI() end)
 	end)
 
 	local reloadBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
@@ -89,18 +92,22 @@ end
 -- Format the live "is a scan running?" indicator. Compares the
 -- panel-button request stamp (SimlyDB.update_requested_at) to the
 -- desktop's last completed scan timestamp (SimlyResults.generated_at).
--- If a request is newer than the last completion, the desktop is
--- either currently running or about to run — the user should wait
--- for the Windows toast notification before /reload'ing.
+--
+-- We can't distinguish "user hasn't /reloaded since clicking" from
+-- "user did /reload and desktop is now scanning" — from the addon's
+-- perspective both look the same (request newer than results). The
+-- "Update sims" button auto-reloads, so in practice the panel only
+-- shows the second state. Wording reflects: "scan running on the
+-- desktop right now, wait for the notification."
 local function statusBlock()
 	local req = (SimlyDB and SimlyDB.update_requested_at) or 0
 	local gen = (SimlyResults and SimlyResults.generated_at) or 0
 	if req == 0 and gen == 0 then
-		return "|cffaaaaaaStatus:|r |cffaaaaaaIdle (no sims have run)|r"
+		return "|cffaaaaaaStatus:|r |cffaaaaaaIdle (no sims have run yet — click Update sims to start one)|r"
 	end
 	if req > gen then
 		local age = formatAge(req)
-		return "|cffaaaaaaStatus:|r |cffffff00\226\151\143 Scan in progress|r |cffaaaaaa(requested " .. age .. " — wait for desktop notification, then /reload)|r"
+		return "|cffaaaaaaStatus:|r |cffffff00\226\151\143 Scan running on desktop|r |cffaaaaaa(started " .. age .. " — wait for desktop notification, then /reload)|r"
 	end
 	return "|cffaaaaaaStatus:|r |cff00ff00\226\151\143 Up to date|r |cffaaaaaa(results " .. formatAge(gen) .. ")|r"
 end
