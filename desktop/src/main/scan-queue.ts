@@ -4,6 +4,7 @@ import {
   RESULTS_SCHEMA_VERSION,
   type BestFlaskResult,
   type BestFoodResult,
+  type ComposedGearItem,
   type ComposedLoadout,
   type GearScanResult,
   type ScanCollection,
@@ -256,18 +257,34 @@ export class ScanQueue {
         const source = await readFile(path, 'utf8');
         const parsed = parseResultsFile(source);
         if (parsed) {
+          // Backfill composed.gear from the catalog if the parsed
+          // file lacks it — pre-Phase-4e files don't have this field,
+          // and we don't want users stuck without the gear panel
+          // until the next full sim.
+          const catalog = this.gearCatalog?.get(args.characterKey, args.scenario);
+          const composed: ComposedLoadout | undefined = parsed.composed
+            ? {
+                ...parsed.composed,
+                gear: parsed.composed.gear ?? deriveGearFromCatalog(catalog),
+              }
+            : catalog
+            ? {
+                label: 'Cached best loadout',
+                expected_dps: catalog.best_loadout_dps,
+                gear: deriveGearFromCatalog(catalog),
+              }
+            : undefined;
           next = {
             ...parsed,
             generated_at: args.finishedAt,
             character_key: args.characterKey,
             active_scenario: args.scenario,
             scans: refreshScanTimestamps(parsed.scans, args.finishedAt),
+            composed,
             // Catalog state may have changed since the last full sim
             // (the swap-test path adds entries) — re-derive from the
             // current catalog rather than preserving the stale snapshot.
-            catalog_summary: buildCatalogSummary(
-              this.gearCatalog?.get(args.characterKey, args.scenario),
-            ),
+            catalog_summary: buildCatalogSummary(catalog),
           };
         }
       } catch (err) {
@@ -835,7 +852,10 @@ export class ScanQueue {
         }
       }
 
-      const composed = composeFromConsumableScans(scans);
+      const composed = composeFromScans(
+        scans,
+        this.gearCatalog?.get(args.characterKey, args.scenario),
+      );
       const results: SimlyResults = {
         schema_version: RESULTS_SCHEMA_VERSION,
         generated_at: finishedAt,
@@ -1112,10 +1132,26 @@ function synthesizeResultsFromCatalog(opts: {
   simcVersion: string;
   finishedAt: number;
 }): SimlyResults {
+  // Build composed.gear from the catalog's best_loadout so the addon
+  // panel can render the recommended gear list even when this is a
+  // synthesized result (no fresh sim ran).
   const composed: ComposedLoadout | undefined = opts.catalog
     ? {
         label: 'Cached best loadout',
         expected_dps: opts.catalog.best_loadout_dps,
+        gear: Object.keys(opts.catalog.best_loadout).length > 0
+          ? Object.fromEntries(
+              Object.entries(opts.catalog.best_loadout).map(([slot, info]) => [
+                slot,
+                {
+                  item_id: info.item_id,
+                  name: info.name,
+                  ilvl: info.ilvl,
+                  identity: info.identity,
+                },
+              ]),
+            )
+          : undefined,
       }
     : undefined;
 
@@ -1146,6 +1182,28 @@ function formatRelative(unixSeconds: number): string {
   return `${Math.floor(dt / 86400)}d ago`;
 }
 
+/**
+ * Map a catalog's best_loadout (per-slot winners) into the addon-facing
+ * composed.gear shape. Used by the synthesize-from-catalog fallback
+ * and the quick-sim refresh path so the panel always has gear data
+ * to render even when no fresh sim ran.
+ */
+function deriveGearFromCatalog(
+  catalog: GearCatalogEntry | undefined,
+): Record<string, ComposedGearItem> | undefined {
+  if (!catalog || Object.keys(catalog.best_loadout).length === 0) return undefined;
+  const out: Record<string, ComposedGearItem> = {};
+  for (const [slot, info] of Object.entries(catalog.best_loadout)) {
+    out[slot] = {
+      item_id: info.item_id,
+      name: info.name,
+      ilvl: info.ilvl,
+      identity: info.identity,
+    };
+  }
+  return out;
+}
+
 function tryCreateGearCatalog(): GearCatalogStore | undefined {
   try {
     return new GearCatalogStore();
@@ -1156,19 +1214,67 @@ function tryCreateGearCatalog(): GearCatalogStore | undefined {
 }
 
 /**
- * Phase 3 v1-shim composer: assemble the addon-facing `composed` view
- * from the two consumable scans we run today. Phase 4 replaces this with
- * a real `composer.ts` that combines results from the full gear ladder.
+ * Phase 4e composer: combine consumables (flask/food) with the gear
+ * ladder winner (per-slot best items) into the addon-facing
+ * `composed` view. Phase 4d's gear_coarse populates composed.gear;
+ * Phase 4d-iii's refined+final stages will tighten the per-slot
+ * choices. Both feed the same shape so the addon panel doesn't care
+ * which sim stage produced the winner.
+ */
+export function composeFromScans(
+  scans: ScanCollection,
+  catalog: GearCatalogEntry | undefined,
+): ComposedLoadout | undefined {
+  const flask = scans.best_flask?.data as BestFlaskResult | undefined;
+  const food = scans.best_food?.data as BestFoodResult | undefined;
+  const gearScan = scans.gear_coarse?.data as
+    | { winner?: { items: ReadonlyArray<{ slot: string; item: { item_id: number; name: string; identity: string; ilvl: number } }>; mean_dps: number } }
+    | undefined;
+
+  // Per-slot gear: prefer the freshly-completed gear_coarse winner.
+  // If gear_coarse wasn't part of this run (e.g., a quick-sim
+  // short-circuit wrote a refresh without a full pipeline), fall back
+  // to the catalog's last-known best_loadout so the panel still shows
+  // something useful.
+  const gear: Record<string, ComposedGearItem> = {};
+  if (gearScan?.winner) {
+    for (const ref of gearScan.winner.items) {
+      gear[ref.slot] = {
+        item_id: ref.item.item_id,
+        name: ref.item.name,
+        ilvl: ref.item.ilvl,
+        identity: ref.item.identity,
+      };
+    }
+  } else if (catalog?.best_loadout) {
+    for (const [slot, slotInfo] of Object.entries(catalog.best_loadout)) {
+      gear[slot] = {
+        item_id: slotInfo.item_id,
+        name: slotInfo.name,
+        ilvl: slotInfo.ilvl,
+        identity: slotInfo.identity,
+      };
+    }
+  }
+
+  const hasAnything = flask || food || Object.keys(gear).length > 0;
+  if (!hasAnything) return undefined;
+  return {
+    label: 'Best loadout (single-target Patchwerk)',
+    flask: flask?.best ? { item_id: flask.best.item_id, name: flask.best.name } : undefined,
+    food: food?.best ? { item_id: food.best.item_id, name: food.best.name } : undefined,
+    gear: Object.keys(gear).length > 0 ? gear : undefined,
+    expected_dps: gearScan?.winner?.mean_dps ?? catalog?.best_loadout_dps,
+  };
+}
+
+/**
+ * Back-compat alias. The old name was a Phase 3 v1-shim that only
+ * combined consumables; we kept the symbol so any out-of-tree usages
+ * still resolve. Internal callers should use composeFromScans.
  */
 export function composeFromConsumableScans(
   scans: ScanCollection,
 ): ComposedLoadout | undefined {
-  const flask = scans.best_flask?.data as BestFlaskResult | undefined;
-  const food = scans.best_food?.data as BestFoodResult | undefined;
-  if (!flask && !food) return undefined;
-  return {
-    label: 'Best consumables (single-target Patchwerk)',
-    flask: flask?.best ? { item_id: flask.best.item_id, name: flask.best.name } : undefined,
-    food: food?.best ? { item_id: food.best.item_id, name: food.best.name } : undefined,
-  };
+  return composeFromScans(scans, undefined);
 }
