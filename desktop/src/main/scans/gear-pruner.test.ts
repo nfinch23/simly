@@ -5,6 +5,7 @@ import {
   buildGearProfileset,
   GEAR_LADDER_SLOTS,
   ilvlScorer,
+  is2HWeapon,
   pruneGearPool,
   type Scorer,
   type TrinketLock,
@@ -24,6 +25,7 @@ function fakeItem(opts: {
   ilvl: number;
   bonus_ids?: number[];
   name?: string;
+  equip_loc?: string;
 }): ParsedItem {
   const bonus_ids = opts.bonus_ids ?? [];
   return {
@@ -34,7 +36,7 @@ function fakeItem(opts: {
     bonus_ids,
     is_equipped: false,
     identity: makeItemIdentity(opts.item_id, bonus_ids, undefined),
-    extras: {},
+    extras: opts.equip_loc ? { simly_equip_loc: opts.equip_loc } : {},
   };
 }
 
@@ -361,6 +363,117 @@ describe('buildGearProfileset', () => {
     const parsed = exportWith(items);
     const prune = pruneGearPool({ parsed, weights: NO_WEIGHTS });
     expect(() => buildGearProfileset(prune)).not.toThrow();
+  });
+});
+
+describe('is2HWeapon', () => {
+  it('returns true when extras.simly_equip_loc === INVTYPE_2HWEAPON', () => {
+    const it = fakeItem({ slot: 'main_hand', item_id: 1, ilvl: 272, equip_loc: 'INVTYPE_2HWEAPON' });
+    expect(is2HWeapon(it)).toBe(true);
+  });
+  it('returns false for INVTYPE_WEAPON (1H)', () => {
+    const it = fakeItem({ slot: 'main_hand', item_id: 1, ilvl: 272, equip_loc: 'INVTYPE_WEAPON' });
+    expect(is2HWeapon(it)).toBe(false);
+  });
+  it('returns false when annotation is missing (conservative — assume 1H)', () => {
+    const it = fakeItem({ slot: 'main_hand', item_id: 1, ilvl: 272 });
+    expect(is2HWeapon(it)).toBe(false);
+  });
+});
+
+describe('buildGearProfileset — 2H/1H cartesian split', () => {
+  it('all-1H pool: cartesian includes off_hand on every combo', () => {
+    const parsed = exportWith([
+      fakeItem({ slot: 'main_hand', item_id: 1, ilvl: 272, equip_loc: 'INVTYPE_WEAPON' }),
+      fakeItem({ slot: 'main_hand', item_id: 2, ilvl: 272, equip_loc: 'INVTYPE_WEAPON' }),
+      fakeItem({ slot: 'off_hand', item_id: 50, ilvl: 272, equip_loc: 'INVTYPE_HOLDABLE' }),
+    ]);
+    const prune = pruneGearPool({ parsed, weights: NO_WEIGHTS });
+    const build = buildGearProfileset(prune);
+    // 2 mains × 1 oh = 2 combos, each with both slots.
+    expect(build.comboCount).toBe(2);
+    for (const combo of build.combosByName.values()) {
+      expect(combo.slots.main_hand).toBeDefined();
+      expect(combo.slots.off_hand).toBeDefined();
+    }
+  });
+
+  it('all-2H pool: cartesian omits off_hand on every combo', () => {
+    const parsed = exportWith([
+      fakeItem({ slot: 'main_hand', item_id: 1, ilvl: 272, equip_loc: 'INVTYPE_2HWEAPON' }),
+      fakeItem({ slot: 'main_hand', item_id: 2, ilvl: 272, equip_loc: 'INVTYPE_2HWEAPON' }),
+      fakeItem({ slot: 'off_hand', item_id: 50, ilvl: 272 }),
+    ]);
+    const prune = pruneGearPool({ parsed, weights: NO_WEIGHTS });
+    const build = buildGearProfileset(prune);
+    expect(build.comboCount).toBe(2);
+    for (const combo of build.combosByName.values()) {
+      expect(combo.slots.main_hand).toBeDefined();
+      expect(combo.slots.off_hand).toBeUndefined();
+    }
+  });
+
+  it('mixed pool: 1H combos get OH, 2H combos do not', () => {
+    const parsed = exportWith([
+      fakeItem({ slot: 'main_hand', item_id: 1, ilvl: 272, equip_loc: 'INVTYPE_WEAPON' }),
+      fakeItem({ slot: 'main_hand', item_id: 2, ilvl: 272, equip_loc: 'INVTYPE_2HWEAPON' }),
+      fakeItem({ slot: 'off_hand', item_id: 50, ilvl: 272 }),
+    ]);
+    const prune = pruneGearPool({ parsed, weights: NO_WEIGHTS });
+    const build = buildGearProfileset(prune);
+    // 1H × OH = 1 combo, 2H without OH = 1 combo, total 2.
+    expect(build.comboCount).toBe(2);
+    let with1H = 0;
+    let with2H = 0;
+    for (const combo of build.combosByName.values()) {
+      const mh = combo.slots.main_hand;
+      if (mh?.item_id === 1) {
+        with1H++;
+        expect(combo.slots.off_hand).toBeDefined();
+      }
+      if (mh?.item_id === 2) {
+        with2H++;
+        expect(combo.slots.off_hand).toBeUndefined();
+      }
+    }
+    expect(with1H).toBe(1);
+    expect(with2H).toBe(1);
+  });
+
+  it('mixed pool with multiple OH options: only 1H mains multiply by OH count', () => {
+    const parsed = exportWith([
+      fakeItem({ slot: 'main_hand', item_id: 1, ilvl: 272, equip_loc: 'INVTYPE_WEAPON' }),
+      fakeItem({ slot: 'main_hand', item_id: 2, ilvl: 272, equip_loc: 'INVTYPE_2HWEAPON' }),
+      fakeItem({ slot: 'off_hand', item_id: 50, ilvl: 272 }),
+      fakeItem({ slot: 'off_hand', item_id: 51, ilvl: 272 }),
+    ]);
+    const prune = pruneGearPool({ parsed, weights: NO_WEIGHTS });
+    const build = buildGearProfileset(prune);
+    // 1 (1H) × 2 (OH) + 1 (2H) × 0 (no OH) = 3 total combos.
+    expect(build.comboCount).toBe(3);
+  });
+
+  it('combos retain unique sequential ids across the split branches', () => {
+    const parsed = exportWith([
+      fakeItem({ slot: 'main_hand', item_id: 1, ilvl: 272, equip_loc: 'INVTYPE_WEAPON' }),
+      fakeItem({ slot: 'main_hand', item_id: 2, ilvl: 272, equip_loc: 'INVTYPE_2HWEAPON' }),
+      fakeItem({ slot: 'off_hand', item_id: 50, ilvl: 272 }),
+    ]);
+    const prune = pruneGearPool({ parsed, weights: NO_WEIGHTS });
+    const build = buildGearProfileset(prune);
+    expect([...build.combosByName.keys()].sort()).toEqual(['g_0000', 'g_0001']);
+  });
+
+  it('items without an equip_loc annotation are treated as 1H (conservative)', () => {
+    const parsed = exportWith([
+      fakeItem({ slot: 'main_hand', item_id: 1, ilvl: 272 }), // no annotation
+      fakeItem({ slot: 'off_hand', item_id: 50, ilvl: 272 }),
+    ]);
+    const prune = pruneGearPool({ parsed, weights: NO_WEIGHTS });
+    const build = buildGearProfileset(prune);
+    expect(build.comboCount).toBe(1);
+    const combo = build.combosByName.get('g_0000')!;
+    expect(combo.slots.off_hand).toBeDefined();
   });
 });
 
