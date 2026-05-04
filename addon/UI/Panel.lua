@@ -190,13 +190,16 @@ function Panel.Refresh()
 					totalCount = totalCount + 1
 					local equippedId = GetInventoryItemID and GetInventoryItemID("player", slot.inv) or nil
 					local color, suffix
-					if equippedId == nil then
-						color = "|cffaaaaaa"
-						suffix = ""
-					elseif equippedId == rec.item_id then
+					if equippedId == rec.item_id then
 						color = "|cff00ff00"
 						suffix = " |cffaaaaaa[equipped]|r"
 						equippedCount = equippedCount + 1
+					elseif equippedId == nil then
+						-- Slot is empty but we have a recommendation —
+						-- treat as a swap-in (the user is missing a DPS-
+						-- relevant item, not "no data to display").
+						color = "|cffffff00"
+						suffix = " |cffaaaaaa[empty — equip!]|r"
 					else
 						color = "|cffffff00"
 						suffix = " |cffaaaaaa[swap in]|r"
