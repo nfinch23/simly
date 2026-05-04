@@ -367,7 +367,9 @@ Each phase is a checkpoint with concrete acceptance criteria. Don't move to phas
 - Pasting a SimC string into the desktop UI also triggers the queue.
 - Existing flask + food results continue to populate.
 
-### Phase 4 — Stat Weights Scan + Top Gear Scan (the heavy lift)
+### Phase 4 — Stat Weights Scan + Top Gear Scan (the heavy lift) — ✅ COMPLETE
+
+**Status: shipped to main as PR #1 + open PR #2.** All sub-phases (4a/4b/4c/4d-i/4d-ii/4d-iii/4e) live, plus a quick-sim gate, persistent gear catalog, weapon-aware cartesian, and a stack of correctness fixes that emerged during live testing on Felfriend (Demo Warlock). 276 desktop unit tests pass. See CLAUDE.md "Phase 4 sub-status" for per-commit detail.
 
 **Goal:** the actual product. "Given my equipped + bag inventory, find the maximum-DPS gear combo for single-target Patchwerk." Implements the multi-stage scan model with stat-weight pruning and the persistent ignore list.
 
@@ -377,7 +379,7 @@ Each phase is a checkpoint with concrete acceptance criteria. Don't move to phas
 
 1. **`stat_weights`** — SimC `--scale_factors`. Output: `{ int: 1.00, mastery: 0.74, crit: 0.68, ... }`. ~30s. Recomputed every "Update sims" — they drift as gear changes and are needed for step 3's pruning. Not used as the final answer (stat weights are inaccurate at predicting real DPS); only as a coarse filter.
 2. **`trinket_pre_scan`** — All trinket-pair combos from equipped + bags. Hold everything else constant. 3000 iterations per profileset. Top-K trinkets carried forward. Trinkets that lose by more than `ignore_threshold_pct` (default 3%) twice consistently are added to the ignore list with `slot=trinket` flag. Trinkets are NEVER pruned by stat weight — only by simulated DPS — because passive/on-use effects can dominate.
-3. **`gear_coarse`** — 1000 iterations. For each non-trinket slot, prune candidates: keep items whose stat-weight score × `stat_weight_multiplier` (default 1.5) is at or above the best item's score in that slot. Trinkets are slotted from the pre-scan winners. Cartesian product of survivors across slots. Items that lose by more than `ignore_threshold_pct` are added to the ignore list (per scenario, per item identity).
+3. **`gear_coarse`** — 1000 iterations. For each non-trinket slot, prune candidates: keep items whose stat-weight score × `stat_weight_multiplier` (default 1.2 — tightened from SCOPE-original 1.5 after observing 27-min runs at 1.5×) is at or above the best item's score in that slot. Trinkets are slotted from the pre-scan winners. Cartesian product of survivors across slots. **2H/1H weapon-aware:** when main_hand pool is mixed, splits into two sub-cartesians (1H mains × off_hand pool; 2H mains × no off_hand) to skip simming structurally-zero off_hand contributions on 2H combos. Pruner reads catalog `trash` classifications and skips those items entirely. Items that lose by more than `ignore_threshold_pct` are added to the ignore list (per scenario, per item identity).
 4. **`gear_refined`** — 3000 iterations. Top-N survivors from `gear_coarse` (within ~1% of winner). Tighter ignore-list update.
 5. **`gear_final`** — 5000+ iterations. Top-M survivors from `gear_refined` (within 0.5% of winner). Final ranked gear list with sidegrades (anything within 0.1% of the winner counts as tied).
 6. **`consumables_gems_enchants`** — 5000 iterations. Take winning gear from `gear_final`. Vary flask × food × potion × augment rune × gem combos × enchant combos. Single profileset sim.
@@ -391,13 +393,16 @@ Each phase is a checkpoint with concrete acceptance criteria. Don't move to phas
 - "Close-but-lost" items (within `keep_threshold_pct`, default 1%) stay eligible — re-simmed every cycle in case context changed.
 - Manually removable from the desktop UI (per-item or "clear all").
 
-**Configurable thresholds (desktop settings, all live-editable):**
-- `stat_weight_multiplier` (default 1.5)
-- `ignore_threshold_pct` (default 3%)
-- `keep_threshold_pct` (default 1%)
-- `ignore_after_n_sims` (default 2)
-- `tie_window_pct` (default 0.1%)
-- `iterations_coarse` / `iterations_refined` / `iterations_final` (defaults 1000 / 3000 / 5000)
+**Configurable thresholds (currently constants in code; Phase 5 surfaces them as live-editable settings):**
+- `DEFAULT_PRUNER_MULTIPLIER` (default 1.2 — tightened from SCOPE-original 1.5 after live testing showed 1.5 produced ~864-combo cartesians on Felfriend → 27min coarse runs)
+- `ignore_threshold_pct` (default 3%, in `gear-catalog.ts` as `trash_threshold_pct`)
+- `keep_threshold_pct` (used internally by quick-sim swap-test for sidegrade band; classified as `good` in catalog)
+- `tie_window_pct` (default 0.1%, in `gear-catalog.ts`)
+- `COARSE_KEEP_THRESHOLD_PCT` (1%, refined re-sims combos within this of coarse winner)
+- `REFINED_KEEP_THRESHOLD_PCT` (0.5%, final re-sims combos within this of refined winner)
+- Iteration counts: 1000 (coarse), 3000 (refined / `REFINED_ITERATIONS`), 5000 (final / `FINAL_ITERATIONS`)
+- `TOP_TRINKETS_TO_KEEP` (4, in `trinket-cache.ts`)
+- `ignore_after_n_sims` — deferred; current implementation classifies on first observation (catalog status recomputed on every catalog write).
 
 **Acceptance:**
 - "Update sims" runs all six scans in 3-15 minutes against a typical character.

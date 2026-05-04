@@ -20,7 +20,7 @@ If a task seems to conflict with SCOPE.md (different tech, different file layout
 
 ## Build phase tracking
 
-Current phase: **Phases 0/1/2/3 + 4a/4b/4c complete; Phase 4d (gear ladder + ignore list) next, split into 4d-i / 4d-ii / 4d-iii** — see SCOPE.md section 6 for acceptance criteria.
+Current phase: **All of Phase 4 (a/b/c/d/e) complete and merged to main as PR #1 + open PR #2. Phase 5 (desktop renderer UI) and Phase 6 (scenario selector) are the next two SCOPE-defined milestones.** See SCOPE.md section 6 for acceptance criteria.
 
 ### Phase 3 sub-status (all done)
 
@@ -28,31 +28,55 @@ Current phase: **Phases 0/1/2/3 + 4a/4b/4c complete; Phase 4d (gear ladder + ign
 - **3b (scan-queue + update_requested_at gate)** — `ef6c6e4`
 - **3c (in-game /simly panel)** — `c93da75`
 
-### Phase 4 sub-status
+### Phase 4 sub-status (all done)
 
 - **4a (SimC export parser → typed gear pool)** — `7b773fe`. Parses Felfriend's real export into equipped + bag + poolBySlot with stable item identity hashes.
 - **4b (stat weights scan)** — `48bc226`. SimC `--scale_factors` stage runs first, surfaces canonical-keyed StatWeights, panel renders sorted desc.
 - **4c (trinket pre-scan)** — `bfa7441`. All unordered trinket pairs from pool, hold else constant, 3000 iter; panel shows winner + 3 alternatives. Trinkets exempt from stat-weight pruning by design.
-- **4d (gear ladder + ignore list)** — NEXT. Split into:
-  - **4d-i**: pruning + cartesian product builder (pure logic, no SimC). Take parsed gear pool + stat weights, score per slot, prune by `multiplier × top_score` (default 1.5×, configurable). Trinkets fixed from 4c winner. Generate cartesian-product profilesets. Heavy unit tests.
-  - **4d-ii**: first gear scan integration. Wire the 4d-i pruner into a new `gear_coarse` scan @ 1000 iter. Surface result. Add electron-store ignore-list scaffolding (write-only).
-  - **4d-iii**: refined + final stages + ignore-list reads. `gear_refined` @ 3000 iter on top survivors, `gear_final` @ 5000 iter with sidegrade window (0.1%). Pruner consults ignore-list.
-- **4e (composer + panel gear render)** — pending after 4d. Assemble final loadout into `composed.gear`, render in panel.
+- **4d-i (gear pruner + cartesian builder)** — `582e70c`. Pure logic, ilvl-based scorer with pluggable `Scorer` type, ring pre-pairing, trinket exemption, deterministic profileset emitter with `maxCombos` safety cap. 25 unit tests.
+- **4d-ii (gear_coarse scan + ignore-list scaffolding)** — `951358e`. Pruner wired into a real SimC stage @ 1000 iter; ignore-list `electron-store` module added (write-only at this point).
+- **4d-iii (refined + final stages + ignore-list reads)** — `16d1a87`. New `scans/gear-rerank.ts` module shared by both stages: `gear_refined` @ 3000 iter on top 1% of coarse survivors, `gear_final` @ 5000 iter on top 0.5% of refined. Catalog cascade through all three stages; composer prefers final > refined > coarse winner.
+- **4e (composer + panel gear render)** — `f48d8bf`. New `composed.gear` field on the SimlyResults schema, rendered in the addon panel as a per-slot list with WoW-character-screen ordering. Green = currently equipped, yellow = recommended-but-not-equipped, "[empty — equip!]" for empty slots with recommendations. Off-hand row hidden when main_hand is 2H.
 
-### Polish that landed alongside Phase 4
+### Phase 4 polish + correctness fixes (post-4e, all on main)
 
-- `0ca1881`: SecureActionButton fix for ReloadUI() in panel buttons
-- `97cffee` / `edc3ae0` / `3cd619f`: live status indicator in panel + window title updates + flashFrame
-- `7360249` / `628f206`: node-notifier for Windows toasts (electron's native API drops them in dev)
-- `91e8c8e`: in-game "fresh results" popup with sound on PLAYER_LOGIN when SimlyResults.generated_at > last_seen_generated_at
-- `ff8f566`: replaced "Phase 0 — empty window" renderer text with usage instructions
+These shipped during live testing on Felfriend (Demo Warlock, Zul'jin):
 
-Update this line as phases complete.
+- **Persistent gear catalog + quick-sim gate + swap test** — `03cf2f1`. `seen_items` map classifies every simmed item as `best`/`good`/`sidegrade`/`trash`/`unknown`. Quick-sim short-circuits to `up_to_date` (no SimC) when bag pool is unchanged, or `swap_test` (small profileset) when only new items arrived; full pipeline only on the upgrade-cascade or first run.
+- **Trinket pre-scan cache + multiplier 1.5 → 1.2** — `5b6bded`. Pool-unchanged ⇒ reuse cached pairs; new trinket(s) ⇒ incremental sim of (new × cached top-4) only. Tightened pruner default after observing 27-min coarse runs.
+- **Trinket cache invalidation on gear upgrade** — `cacb9a5`. Cached trinket pairs were sim'd against the prior gear context; invalidate when an upgrade-cascade fires.
+- **Catalog `trash` → pruner reads** — `36039a5`. Items the catalog classified as trash skip the next gear_coarse cartesian. Free perf win.
+- **2H/1H weapon-aware cartesian split + addon equip_loc annotation** — `5a65c1f`. Addon's Export.lua attaches `simly_equip_loc=INVTYPE_*` to every item line; pruner detects 2H mains and drops off_hand from those combos to avoid simming structurally-zero contributions.
+- **Junk filter** — `1db41b2`. Addon strips Poor-quality (gray) bag items from the SimC export before sim — vendor trash never reaches the desktop.
+- **Catalog summary in addon panel** — `345a23f`. Per-status grouping with color-coded item names so the user can see `trash`/`good`/`sidegrade` directly in `/simly`.
+- **Live SimC progress + heartbeat + window title** — `851eb61`. SimC stdout streams to console with per-stage label + 30s heartbeat so silent-but-alive runs are visible.
+- **Lua round-trip fixes** — `29256ce` + `32810e3`. Non-ASCII (em dash etc.) escaped as `\ddd` UTF-8 bytes in lua-writer, parser reinterprets latin1 char codes back to UTF-8 → idempotent across refresh cycles.
+- **Refresh path fixes** — `1fc0c54`/`0cb4114`/`8966bae`/`634dc6f`. electron-store ESM interop, fresh `SimlyResults.lua` on quick-sim short-circuit, defensive `?? {}` reads, preserve results.lua across dev restarts.
+- **Hide-on-close + single-instance** — `63d373f`. Closing the Simly window hides instead of killing the watcher + queue; second `npm run dev` re-shows the existing instance.
+- **Scrollable panel + paper-doll-ordered gear list** — `583543d` + `f48d8bf`/`d4dbea9`/`11e16f6`.
 
-### Phase 2 prep TODOs
+### Refactor (post-Phase-4)
+
+- **scan-queue.ts split** — `4e36f97`. 1469-line file split into:
+  - `scan-queue.ts` (~1090 LOC): orchestration only.
+  - `composer.ts` (189 LOC, +20 tests): pure data-transformation helpers (composeFromScans, deriveGearFromCatalog, synthesizeResultsFromCatalog, refreshScanTimestamps).
+  - `stage-logger.ts` (226 LOC, +12 tests): UI side-effects (makeStageProgressLogger, setWindowTitle, showScanCompleteNotification, formatRelative, isInterestingSimcLine).
+  - `store-factories.ts` (39 LOC): lazy `tryCreate*` wrappers.
+
+### What's next (SCOPE-required for v1)
+
+- **Phase 5 — desktop renderer UI** (Raidbots-style results page). Currently the desktop window is a passive log view; needs Status / Scans / Composed / Settings / PasteInput views with IPC channels. See SCOPE section 6 Phase 5.
+- **Phase 6 — scenario selector**. Add `m_plus`, `aoe_cleave`, `aoe_funnel` scenarios alongside the existing `single_target_patchwerk`. Catalog/cache keys already include scenario; need addon-side toggle and per-scenario default APL.
+- **Phase 7 — content recommender** (v2 territory; deferred per SCOPE).
+
+### Phase 2 prep TODOs (still open)
 
 - When real IPC lands, switch `BrowserWindow` to `sandbox: true` and route everything through `contextBridge` in the preload.
 - 6 moderate `npm audit` advisories remain, all from one root cause: `esbuild < 0.24.2` dev-server CVE pulled in transitively via `vite`/`vitest`/`electron-vite`. Dev-server-only, doesn't affect built artifacts. Fix requires `vite@6` + `electron-vite@3` (breaking changes) — defer until we have a reason to touch the build setup, or do it as a focused upgrade PR.
+
+### Test counts
+
+- 276 desktop unit tests passing (started Phase 4 with ~100). Major suites: `composer` (20), `gear-pruner` (35), `gear-rerank` (8), `gear-coarse` (4), `gear-catalog` (19), `quick-sim` (9), `swap-test` (13), `trinket-cache` (18), `trinket-pre-scan` (6), `swap-test-result-mapping`, `ignore-list` (12), `stage-logger` (12), `lua-parser` (5), `lua-writer` (9), `simc-export-parser` (20), `simc-runner`/`simc-installer`/`simc-version-source`/`simc-paths`/`simc-bootstrap`/`scan-queue`/`scans/registry`/`scans/index`/`scans/best-flask`/`scans/best-food`/`scans/stat-weights`/`wow-paths`.
 
 ## gstack
 
