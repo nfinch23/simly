@@ -35,6 +35,11 @@
 import type ElectronStore from 'electron-store';
 import * as ElectronStoreModule from 'electron-store';
 import type { ParsedExport, ParsedItem } from './simc-export-parser';
+import {
+  GOOD_THRESHOLD_PCT,
+  TIE_WINDOW_PCT,
+  TRASH_THRESHOLD_PCT,
+} from './gear-config';
 
 function resolveStoreCtor(): typeof ElectronStore {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -98,9 +103,9 @@ export interface ClassificationThresholds {
 }
 
 export const DEFAULT_THRESHOLDS: Required<ClassificationThresholds> = {
-  good_threshold_pct: 1,
-  tie_window_pct: 0.1,
-  trash_threshold_pct: 3,
+  good_threshold_pct: GOOD_THRESHOLD_PCT,
+  tie_window_pct: TIE_WINDOW_PCT,
+  trash_threshold_pct: TRASH_THRESHOLD_PCT,
 };
 
 /**

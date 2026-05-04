@@ -18,11 +18,20 @@ export interface SavedVarsCharacter {
 }
 
 /**
- * Scenario tag for v1 (single-target Patchwerk only). Phase 6 adds
- * 'm_plus' / 'aoe_cleave' / 'aoe_funnel'. Keep this as a string union so
- * future additions are explicit.
+ * Scenario tag. v1 ships single_target_patchwerk only; Phase 6 adds
+ * the dungeon / AoE variants. Each scenario maps to a different SimC
+ * `fight_style=` directive (see desktop/src/main/scenario-config.ts);
+ * the catalog / trinket cache / ignore list are all already keyed on
+ * `(character_key, scenario)` so future additions are isolated per-key.
+ *
+ * Keep this as a string union so future additions are explicit and
+ * exhaustively-checked.
  */
-export type Scenario = 'single_target_patchwerk';
+export type Scenario =
+  | 'single_target_patchwerk'
+  | 'm_plus'
+  | 'aoe_cleave'
+  | 'aoe_funnel';
 
 export interface SimlyDB {
   schema_version: number;

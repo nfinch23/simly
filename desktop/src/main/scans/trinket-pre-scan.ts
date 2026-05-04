@@ -5,6 +5,7 @@ import {
   type ParsedItem,
 } from '../simc-export-parser';
 import { runSimc, type RunnerPaths, type SimcRunResult } from '../simc-runner';
+import { TRINKET_ITERATIONS } from '../gear-config';
 
 /**
  * Build a SimC profileset script for an explicit list of trinket
@@ -81,7 +82,7 @@ export interface RunTrinketPreScanOptions {
 export async function runTrinketPreScanSim(
   opts: RunTrinketPreScanOptions,
 ): Promise<{ run: SimcRunResult; pairsByName: ReturnType<typeof buildTrinketProfilesetScript>['pairsByName'] }> {
-  const iterations = opts.iterations ?? 3000;
+  const iterations = opts.iterations ?? TRINKET_ITERATIONS;
   const { script, pairsByName } = buildTrinketProfilesetScript(opts.trinkets);
   const profileScript = [opts.baseProfile.trim(), '', script].join('\n');
   const run = await runSimc({
@@ -110,7 +111,7 @@ export interface RunTrinketPairsOptions {
 export async function runTrinketPairsSim(
   opts: RunTrinketPairsOptions,
 ): Promise<{ run: SimcRunResult; pairsByName: ReturnType<typeof buildTrinketProfilesetScriptFromPairs>['pairsByName'] }> {
-  const iterations = opts.iterations ?? 3000;
+  const iterations = opts.iterations ?? TRINKET_ITERATIONS;
   const { script, pairsByName } = buildTrinketProfilesetScriptFromPairs(opts.pairs);
   const profileScript = [opts.baseProfile.trim(), '', script].join('\n');
   const run = await runSimc({

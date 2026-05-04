@@ -20,9 +20,14 @@
 
 import type { TrinketPairResult, TrinketPreScanResult } from '@simly/shared';
 import type { ParsedItem } from './simc-export-parser';
+import { TOP_TRINKETS_TO_KEEP as TOP_FROM_CONFIG } from './gear-config';
 
-/** Number of "leader" trinkets carried forward from one full sim to the next. */
-export const TOP_TRINKETS_TO_KEEP = 4;
+/**
+ * Number of "leader" trinkets carried forward from one full sim to the
+ * next. Re-exported from gear-config.ts so callers don't need a config
+ * import; canonical value lives there.
+ */
+export const TOP_TRINKETS_TO_KEEP = TOP_FROM_CONFIG;
 
 export interface TrinketCacheEntry {
   character_key: string;
