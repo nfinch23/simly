@@ -183,9 +183,29 @@ function Panel.Refresh()
 		--   gray   = no live equip data (e.g., GetInventoryItemID
 		--            returned nil — slot empty or transient)
 		if c.gear then
+			-- Detect a 2H recommended main hand. WoW locks out the
+			-- off-hand slot when a 2H weapon is equipped, so showing
+			-- an off-hand recommendation would be misleading — the
+			-- player can't act on it. GetItemInfo's itemEquipLoc
+			-- returns "INVTYPE_2HWEAPON" for staves / 2H swords / etc.
+			-- If GetItemInfo returns nil (item not cached yet), fall
+			-- through to default render — better to show a stale row
+			-- than to silently hide a legitimate off-hand suggestion.
+			local mhIs2H = false
+			local mhRec = c.gear.main_hand
+			if mhRec and GetItemInfo then
+				local _, _, _, _, _, _, _, _, equipLoc = GetItemInfo(mhRec.item_id)
+				mhIs2H = (equipLoc == "INVTYPE_2HWEAPON")
+			end
+
 			local equippedCount, totalCount = 0, 0
 			for _, slot in ipairs(SLOT_DISPLAY_ORDER) do
 				local rec = c.gear[slot.id]
+				-- Skip off_hand entirely when main_hand is 2H — the
+				-- slot is locked, so any recommendation is noise.
+				if slot.id == "off_hand" and mhIs2H then
+					rec = nil
+				end
 				if rec then
 					totalCount = totalCount + 1
 					local equippedId = GetInventoryItemID and GetInventoryItemID("player", slot.inv) or nil
