@@ -45,7 +45,7 @@ function Export.BuildProfile()
 		return NO_PROFILE, "GetSimcProfile returned empty"
 	end
 
-	return Export.StripJunkBagItems(profile)
+	return Export.AnnotateEquipLoc(Export.StripJunkBagItems(profile))
 end
 
 -- Quality 0 = Poor (gray) per Enum.ItemQuality. These are vendor trash
@@ -117,6 +117,62 @@ function Export.StripJunkBagItems(profile)
 	end
 
 	return table.concat(out, "\n")
+end
+
+--- Append `simly_equip_loc=INVTYPE_*` to every item line in the profile.
+--
+-- The desktop's gear-pruner needs to know whether the recommended
+-- main_hand is 2H so it can drop the off_hand from those combos
+-- (WoW locks out OH while a 2H is equipped, and SimC sims the OH
+-- contribution as zero — wasting iterations on a meaningless slot).
+--
+-- We attach equipLoc as a trailing key=value on the existing item
+-- line. SimC tolerates unknown trailing fields on `slot=,id=...`
+-- entries (it parses what it knows and silently drops the rest), so
+-- the export is still valid as a SimC profile. Our parser collects
+-- unknown fields into ParsedItem.extras, where the pruner reads it
+-- as `extras.simly_equip_loc`.
+--
+-- Walks both equipped lines (`slot=,id=...`) and bag lines
+-- (`# slot=,id=...`). GetItemInfo cache miss → skip annotation for
+-- that item; the pruner conservatively treats unannotated items as
+-- 1H, which means an off-hand might still be paired with a 2H mh
+-- in the rare cache-cold case (worst case: SimC wastes a few
+-- iterations, no correctness loss).
+function Export.AnnotateEquipLoc(profile)
+	if not profile or profile == "" then return profile end
+
+	local lines = {}
+	for line in (profile .. "\n"):gmatch("([^\n]*)\n") do
+		table.insert(lines, line)
+	end
+
+	local annotated = 0
+	for i, line in ipairs(lines) do
+		-- Match equipped or bag-commented item lines. Capture so we
+		-- can reconstruct: leading prefix (empty or "# "), slot, id, rest.
+		local prefix, body = line:match("^(#?%s*)(%a[%a_]*=,id=%d+.*)$")
+		if body and not body:find("simly_equip_loc=", 1, true) then
+			local itemIdStr = body:match("id=(%d+)")
+			if itemIdStr then
+				local _, _, _, _, _, _, _, _, equipLoc = GetItemInfo(tonumber(itemIdStr))
+				if equipLoc and equipLoc ~= "" then
+					lines[i] = (prefix or "") .. body .. ",simly_equip_loc=" .. equipLoc
+					annotated = annotated + 1
+				end
+			end
+		end
+	end
+
+	if annotated > 0 then
+		-- Quiet log — not noisy enough to merit a chat message every
+		-- /reload, but useful for verifying the annotation pipeline
+		-- when the user is debugging.
+		-- Uncomment if needed:
+		-- DEFAULT_CHAT_FRAME:AddMessage("|cff888888Simly:|r annotated " .. annotated .. " items with equip_loc.")
+	end
+
+	return table.concat(lines, "\n")
 end
 
 Export.NO_PROFILE = NO_PROFILE

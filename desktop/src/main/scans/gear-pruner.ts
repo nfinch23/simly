@@ -237,6 +237,19 @@ export interface BuildProfilesetOptions {
   maxCombos?: number;
 }
 
+/**
+ * Detect a 2H weapon from the addon's equipLoc annotation. The
+ * addon's Export.lua annotates each item line with
+ * `simly_equip_loc=INVTYPE_*` from GetItemInfo, and our parser
+ * collects that into `item.extras`. Items without the annotation
+ * (older exports, or items GetItemInfo couldn't resolve) are
+ * conservatively treated as 1H — better to include them in the OH
+ * cartesian than silently drop a legitimate 1H+OH combo.
+ */
+export function is2HWeapon(item: ParsedItem): boolean {
+  return item.extras?.simly_equip_loc === 'INVTYPE_2HWEAPON';
+}
+
 export interface ProfilesetBuild {
   /** SimC `profileset."<id>"+="..."` lines, joined by '\n'. */
   script: string;
@@ -253,15 +266,104 @@ export interface ProfilesetBuild {
  *
  * Trinket lock is required — Phase 4d depends on the 4c winner. Pass
  * `null` only if you're testing the cartesian shape in isolation.
+ *
+ * 2H/1H weapon handling: WoW locks out the off-hand slot when a 2H
+ * weapon is equipped, so combos pairing a 2H main_hand with any
+ * off_hand are sim-meaningless (SimC ignores the OH contribution but
+ * still spends iterations simming them). When the main_hand pool is
+ * mixed 2H/1H, split into two sub-cartesians:
+ *   - 1H mains × off_hand pool
+ *   - 2H mains × {} (off_hand omitted)
+ * and concatenate. Single-type pools fall through to the simpler
+ * single-walk path.
  */
 export function buildGearProfileset(
   prune: PruneResult,
   opts: BuildProfilesetOptions = {},
 ): ProfilesetBuild {
   const maxCombos = opts.maxCombos ?? 5000;
+  const combos = generateCombos(prune);
 
-  // Materialize the per-slot lists in a deterministic slot order so
-  // combo ids are stable across runs.
+  if (combos.length > maxCombos) {
+    throw new Error(
+      `gear cartesian would emit ${combos.length} combos (max ${maxCombos}); tighten multiplier or top-K per slot`,
+    );
+  }
+
+  // Re-assign deterministic IDs across the (possibly concatenated)
+  // combo list so each combo has a unique zero-padded name.
+  const lines: string[] = [];
+  const combosByName = new Map<string, GearCombo>();
+  for (let i = 0; i < combos.length; i++) {
+    const combo = combos[i]!;
+    const id = `g_${i.toString().padStart(4, '0')}`;
+    const renamed: GearCombo = { id, slots: combo.slots };
+    combosByName.set(id, renamed);
+    for (const [slot, item] of Object.entries(renamed.slots)) {
+      if (!item) continue;
+      lines.push(`profileset."${id}"+="${formatItemLine(item, slot as SlotName)}"`);
+    }
+  }
+
+  return {
+    script: lines.join('\n'),
+    combosByName,
+    comboCount: combos.length,
+  };
+}
+
+/**
+ * Generate the combo list from a PruneResult, branching on the
+ * main_hand pool's weapon-type composition. Combos returned without
+ * final IDs — caller (buildGearProfileset) assigns those after the
+ * single + split paths converge.
+ */
+function generateCombos(prune: PruneResult): GearCombo[] {
+  const mhPool = prune.perSlot.main_hand ?? [];
+  if (mhPool.length === 0) {
+    // No main_hand candidates → walk once with whatever's in the
+    // pool. off_hand is unaffected since there's no MH to gate it.
+    return walkPrune(prune);
+  }
+
+  const mh1H: ParsedItem[] = [];
+  const mh2H: ParsedItem[] = [];
+  for (const it of mhPool) {
+    if (is2HWeapon(it)) mh2H.push(it);
+    else mh1H.push(it);
+  }
+
+  if (mh2H.length === 0) {
+    // All 1H → single walk including off_hand pool.
+    return walkPrune(prune);
+  }
+  if (mh1H.length === 0) {
+    // All 2H → single walk excluding off_hand entirely.
+    return walkPrune(withoutOffHand({ ...prune, perSlot: { ...prune.perSlot, main_hand: mh2H } }));
+  }
+
+  // Mixed: union the two sub-cartesians.
+  const sub1H: PruneResult = { ...prune, perSlot: { ...prune.perSlot, main_hand: mh1H } };
+  const sub2H: PruneResult = withoutOffHand({
+    ...prune,
+    perSlot: { ...prune.perSlot, main_hand: mh2H },
+  });
+  return [...walkPrune(sub1H), ...walkPrune(sub2H)];
+}
+
+function withoutOffHand(prune: PruneResult): PruneResult {
+  const { off_hand: _drop, ...rest } = prune.perSlot;
+  void _drop;
+  return { ...prune, perSlot: rest };
+}
+
+/**
+ * Walk one PruneResult's cartesian and emit combos with placeholder
+ * IDs. Caller renames them after concatenating multiple walks. Slot
+ * order is GEAR_LADDER_SLOTS minus rings (which are handled via the
+ * ringPairs branch inside the emit callback).
+ */
+function walkPrune(prune: PruneResult): GearCombo[] {
   const orderedSlots: SlotName[] = [];
   const slotOptions: ParsedItem[][] = [];
   for (const slot of GEAR_LADDER_SLOTS) {
@@ -271,16 +373,6 @@ export function buildGearProfileset(
       orderedSlots.push(slot);
       slotOptions.push(list);
     }
-  }
-
-  // Estimate size up front; throw before allocating millions of combos.
-  let estimated = 1;
-  for (const list of slotOptions) estimated *= list.length;
-  if (prune.ringPairs.length > 0) estimated *= prune.ringPairs.length;
-  if (estimated > maxCombos) {
-    throw new Error(
-      `gear cartesian would emit ${estimated} combos (max ${maxCombos}); tighten multiplier or top-K per slot`,
-    );
   }
 
   const combos: GearCombo[] = [];
@@ -293,22 +385,7 @@ export function buildGearProfileset(
       combos.push(buildCombo(combos.length, orderedSlots, slotPick, undefined, prune.trinketLock));
     }
   });
-
-  const lines: string[] = [];
-  const combosByName = new Map<string, GearCombo>();
-  for (const combo of combos) {
-    combosByName.set(combo.id, combo);
-    for (const [slot, item] of Object.entries(combo.slots)) {
-      if (!item) continue;
-      lines.push(`profileset."${combo.id}"+="${formatItemLine(item, slot as SlotName)}"`);
-    }
-  }
-
-  return {
-    script: lines.join('\n'),
-    combosByName,
-    comboCount: combos.length,
-  };
+  return combos;
 }
 
 function buildCombo(
