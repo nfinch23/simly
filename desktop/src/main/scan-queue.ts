@@ -85,18 +85,22 @@ export const ADDON_FALLBACK_SENTINELS: ReadonlySet<string> = new Set([
   'NO_PROFILE_AVAILABLE',
 ]);
 
-/**
- * Phase 4d-iii ladder thresholds. Keep widths shrink as iter count
- * grows so the higher-iter stages only re-evaluate combos that have a
- * realistic chance of being the true winner.
- *
- * SCOPE-defined defaults; would move to electron-store settings in a
- * future Phase 5 settings UI.
- */
-export const COARSE_KEEP_THRESHOLD_PCT = 1;     // refined re-sims combos within 1% of coarse winner
-export const REFINED_KEEP_THRESHOLD_PCT = 0.5;  // final re-sims combos within 0.5% of refined winner
-export const REFINED_ITERATIONS = 3000;
-export const FINAL_ITERATIONS = 5000;
+// Phase 4d-iii ladder thresholds re-exported from gear-config.ts so
+// existing consumers continue to find them at scan-queue. Canonical
+// values live in gear-config.ts; Phase 5 settings UI will swap those
+// for electron-store-backed live values.
+export {
+  COARSE_KEEP_THRESHOLD_PCT,
+  REFINED_KEEP_THRESHOLD_PCT,
+  REFINED_ITERATIONS,
+  FINAL_ITERATIONS,
+} from './gear-config';
+import {
+  COARSE_KEEP_THRESHOLD_PCT,
+  REFINED_KEEP_THRESHOLD_PCT,
+  REFINED_ITERATIONS,
+  FINAL_ITERATIONS,
+} from './gear-config';
 
 export interface ScanQueueOptions {
   paths: WowPaths;

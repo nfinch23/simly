@@ -18,6 +18,7 @@ import {
 } from './gear-pruner';
 import type { ParsedExport } from '../simc-export-parser';
 import { runSimc, type RunnerPaths, type SimcRunResult } from '../simc-runner';
+import { COARSE_ITERATIONS } from '../gear-config';
 
 export interface RunGearCoarseOptions {
   paths: RunnerPaths;
@@ -59,7 +60,7 @@ export interface GearCoarseRunResult {
 export async function runGearCoarseScan(
   opts: RunGearCoarseOptions,
 ): Promise<GearCoarseRunResult> {
-  const iterations = opts.iterations ?? 1000;
+  const iterations = opts.iterations ?? COARSE_ITERATIONS;
   const prune = pruneGearPool({
     parsed: opts.parsed,
     weights: opts.weights,

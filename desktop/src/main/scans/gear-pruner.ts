@@ -26,6 +26,7 @@ import {
   type SlotName,
 } from '../simc-export-parser';
 import type { StatWeights } from '@simly/shared';
+import { DEFAULT_MAX_COMBOS, DEFAULT_PRUNER_MULTIPLIER as PRUNER_MULTIPLIER_FROM_CONFIG } from '../gear-config';
 
 /**
  * Slots that participate in the gear cartesian. Trinkets are excluded
@@ -81,14 +82,11 @@ export interface TrinketLock {
 }
 
 /**
- * Default pruner multiplier. Items whose `score × multiplier < slot_max_score`
- * are dropped. SCOPE recommended 1.5; we tightened to 1.2 after observing
- * a 1728-combo cartesian on Felfriend take 27min at 1000 iter — 1.2
- * keeps the iterative dev loop under ~10min while still letting through
- * stat-distribution mismatches the sim deserves to evaluate. Override
- * via opts.multiplier.
+ * Default pruner multiplier. Re-exported from gear-config.ts so callers
+ * can read it without a config import. The canonical value lives in
+ * gear-config.ts (Phase 5 settings UI will swap that for a live value).
  */
-export const DEFAULT_PRUNER_MULTIPLIER = 1.2;
+export const DEFAULT_PRUNER_MULTIPLIER = PRUNER_MULTIPLIER_FROM_CONFIG;
 
 export interface PruneOptions {
   parsed: ParsedExport;
@@ -281,7 +279,7 @@ export function buildGearProfileset(
   prune: PruneResult,
   opts: BuildProfilesetOptions = {},
 ): ProfilesetBuild {
-  const maxCombos = opts.maxCombos ?? 5000;
+  const maxCombos = opts.maxCombos ?? DEFAULT_MAX_COMBOS;
   const combos = generateCombos(prune);
 
   if (combos.length > maxCombos) {

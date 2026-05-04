@@ -34,6 +34,7 @@ import type { ParsedItem, SlotName } from './simc-export-parser';
 import { formatItemLine } from './simc-export-parser';
 import { runSimc, type RunnerPaths, type SimcRunResult } from './simc-runner';
 import type { BestLoadoutSlot } from './gear-catalog';
+import { SWAP_TEST_ITERATIONS, TIE_WINDOW_PCT } from './gear-config';
 
 const BASELINE_NAME = 'swap_baseline';
 
@@ -164,7 +165,7 @@ export interface SwapTestResult {
 export function parseSwapTestResult(
   run: SimcRunResult,
   build: BuildSwapScriptResult,
-  tie_window_pct = 0.1,
+  tie_window_pct = TIE_WINDOW_PCT,
 ): SwapTestResult {
   const psByName = new Map<string, number>();
   for (const ps of run.profilesets) psByName.set(ps.name, ps.mean);
@@ -228,7 +229,7 @@ export interface RunSwapTestOptions {
 export async function runSwapTest(
   opts: RunSwapTestOptions,
 ): Promise<{ result: SwapTestResult; build: BuildSwapScriptResult }> {
-  const iterations = opts.iterations ?? 2000;
+  const iterations = opts.iterations ?? SWAP_TEST_ITERATIONS;
   const build = buildSwapTestScript(opts.bestLoadout, opts.baselineItemBySlot, opts.newItems);
   const profileScript = [opts.baseProfile.trim(), '', build.script].join('\n');
   const run = await runSimc({

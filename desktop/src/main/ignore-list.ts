@@ -1,3 +1,5 @@
+import { IGNORE_THRESHOLD_PCT } from './gear-config';
+
 /**
  * Phase 4d-ii — persistent ignore list, write-only API.
  *
@@ -117,10 +119,10 @@ export class IgnoreListStore {
     name: string;
     slot: string;
     delta_pct: number;
-    /** Threshold above which an item counts as "consistently losing". Default 3. */
+    /** Threshold above which an item counts as "consistently losing". Default from gear-config.IGNORE_THRESHOLD_PCT (3). */
     ignore_threshold_pct?: number;
   }): void {
-    const threshold = input.ignore_threshold_pct ?? 3;
+    const threshold = input.ignore_threshold_pct ?? IGNORE_THRESHOLD_PCT;
     if (input.delta_pct > -threshold) return;
 
     const key = makeIgnoreKey(input.character_key, input.scenario, input.item_identity);
