@@ -25,6 +25,30 @@ local function statusColor(status)
 	return "|cffaaaaaa"
 end
 
+-- Order matches WoW's character screen scan: left column top-to-
+-- bottom (head → wrist), then right column (hands → finger2), then
+-- the bottom row (trinkets + weapons). `inv` is the WoW inventory
+-- slot constant for GetInventoryItemID lookups; `id` matches the
+-- desktop's SimC slot strings used in composed.gear.
+local SLOT_DISPLAY_ORDER = {
+	{ id = "head",      label = "Head",      inv = INVSLOT_HEAD },
+	{ id = "neck",      label = "Neck",      inv = INVSLOT_NECK },
+	{ id = "shoulder",  label = "Shoulder",  inv = INVSLOT_SHOULDER },
+	{ id = "back",      label = "Back",      inv = INVSLOT_BACK },
+	{ id = "chest",     label = "Chest",     inv = INVSLOT_CHEST },
+	{ id = "wrist",     label = "Wrist",     inv = INVSLOT_WRIST },
+	{ id = "hands",     label = "Hands",     inv = INVSLOT_HAND },
+	{ id = "waist",     label = "Waist",     inv = INVSLOT_WAIST },
+	{ id = "legs",      label = "Legs",      inv = INVSLOT_LEGS },
+	{ id = "feet",      label = "Feet",      inv = INVSLOT_FEET },
+	{ id = "finger1",   label = "Finger 1",  inv = INVSLOT_FINGER1 },
+	{ id = "finger2",   label = "Finger 2",  inv = INVSLOT_FINGER2 },
+	{ id = "trinket1",  label = "Trinket 1", inv = INVSLOT_TRINKET1 },
+	{ id = "trinket2",  label = "Trinket 2", inv = INVSLOT_TRINKET2 },
+	{ id = "main_hand", label = "Main hand", inv = INVSLOT_MAINHAND },
+	{ id = "off_hand",  label = "Off hand",  inv = INVSLOT_OFFHAND },
+}
+
 local function createFrame()
 	local f = CreateFrame("Frame", "SimlyPanelFrame", UIParent, "BackdropTemplate")
 	f:SetSize(440, 560)
@@ -147,18 +171,63 @@ function Panel.Refresh()
 	if SimlyResults and SimlyResults.composed then
 		local c = SimlyResults.composed
 		table.insert(lines, "|cffffd700Best loadout|r" ..
-			(c.label and (" |cffaaaaaa(" .. c.label .. ")|r") or ""))
+			(c.label and (" |cffaaaaaa(" .. c.label .. ")|r") or "") ..
+			(c.expected_dps and (" |cff00ff00" .. math.floor(c.expected_dps) .. " dps|r") or ""))
+
+		-- Gear block: per-slot recommended item, in WoW character-
+		-- screen order. Lines colored:
+		--   green  = the recommended item is currently equipped
+		--   yellow = recommendation differs from what's equipped (the
+		--            user has the item somewhere — bag or bank — and
+		--            should swap to it)
+		--   gray   = no live equip data (e.g., GetInventoryItemID
+		--            returned nil — slot empty or transient)
+		if c.gear then
+			local equippedCount, totalCount = 0, 0
+			for _, slot in ipairs(SLOT_DISPLAY_ORDER) do
+				local rec = c.gear[slot.id]
+				if rec then
+					totalCount = totalCount + 1
+					local equippedId = GetInventoryItemID and GetInventoryItemID("player", slot.inv) or nil
+					local color, suffix
+					if equippedId == nil then
+						color = "|cffaaaaaa"
+						suffix = ""
+					elseif equippedId == rec.item_id then
+						color = "|cff00ff00"
+						suffix = " |cffaaaaaa[equipped]|r"
+						equippedCount = equippedCount + 1
+					else
+						color = "|cffffff00"
+						suffix = " |cffaaaaaa[swap in]|r"
+					end
+					table.insert(lines, string.format(
+						"  %s%s|r: %s%s|r |cffaaaaaa(%d)|r%s",
+						color, slot.label, color, rec.name, rec.ilvl or 0, suffix
+					))
+				end
+			end
+			if totalCount > 0 then
+				table.insert(lines, string.format(
+					"  |cffaaaaaaWearing %d/%d recommended slots|r",
+					equippedCount, totalCount
+				))
+			end
+		end
+
+		-- Consumables block, unchanged behavior — populated by the
+		-- consumables scan; nil until that stage runs.
 		if c.flask then
-			table.insert(lines, "  Flask: " .. c.flask.name)
+			table.insert(lines, "  |cff66ccffFlask:|r " .. c.flask.name)
 		end
 		if c.food then
-			table.insert(lines, "  Food: " .. c.food.name)
+			table.insert(lines, "  |cff66ccffFood:|r " .. c.food.name)
 		end
 		if c.potion then
-			table.insert(lines, "  Potion: " .. c.potion.name)
+			table.insert(lines, "  |cff66ccffPotion:|r " .. c.potion.name)
 		end
 		if c.augment_rune then
-			table.insert(lines, "  Augment Rune: " .. c.augment_rune.name)
+			table.insert(lines, "  |cff66ccffAugment Rune:|r " .. c.augment_rune.name)
 		end
 	else
 		table.insert(lines, "|cffaaaaaa(No sim results yet — click \"Update sims\" then /reload.)|r")

@@ -85,6 +85,15 @@ export interface StatWeights {
   [stat: string]: number | undefined;
 }
 
+/** One slot in the recommended best loadout (for the addon's gear render). */
+export interface ComposedGearItem {
+  item_id: number;
+  name: string;
+  ilvl: number;
+  /** Stable identity hash (used to detect bonus-id-level differences vs equipped). */
+  identity: string;
+}
+
 /**
  * The composed final answer the in-game panel renders prominently.
  * Populated incrementally as scans finish; fields are optional because
@@ -97,6 +106,15 @@ export interface ComposedLoadout {
   food?: { item_id: number; name: string };
   potion?: { item_id: number; name: string };
   augment_rune?: { item_id: number; name: string };
+  /**
+   * Per-slot recommended gear, keyed by SimC slot name (head, neck,
+   * shoulder, back, chest, wrist, hands, waist, legs, feet, finger1,
+   * finger2, trinket1, trinket2, main_hand, off_hand). Populated from
+   * the gear_coarse winner + the trinket pre-scan winner. The addon
+   * panel compares each entry against GetInventoryItemID("player", ...)
+   * to highlight slots that aren't currently equipped.
+   */
+  gear?: Record<string, ComposedGearItem>;
   /** Sum of best DPS across the simmed loadout. */
   expected_dps?: number;
 }
