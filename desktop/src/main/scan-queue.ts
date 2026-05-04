@@ -45,6 +45,7 @@ import {
   buildCatalogSummary,
   fullPoolSignature,
   GearCatalogStore,
+  ignoredIdentities,
   updateCatalogFromGearScan,
   updateCatalogFromSwapTest,
   type GearCatalogEntry,
@@ -716,12 +717,25 @@ export class ScanQueue {
         // makeStageProgressLogger swaps the title in onPlanReady below.
         const gcProgress = makeStageProgressLogger('gear_coarse', args.characterKey);
         try {
+          // Pull the catalog's trash list so the pruner can skip
+          // items we've already classified as consistently-losing.
+          // Empty Set if no catalog yet (first sim) — pruner falls
+          // back to its ilvl-multiplier heuristic alone.
+          const ignoreSet = ignoredIdentities(
+            this.gearCatalog?.get(args.characterKey, args.scenario),
+          );
+          if (ignoreSet.size > 0) {
+            console.log(
+              `[sim] gear_coarse: skipping ${ignoreSet.size} catalog-trash item(s) from cartesian`,
+            );
+          }
           const { result, combosByName: _combos } = await runGearCoarseScan({
             paths: runnerPaths,
             baseProfile: args.baseProfile,
             parsed: args.parsedExport,
             weights,
             trinketLock,
+            ignoreSet,
             onProgress: gcProgress.onProgress,
             onPlanReady: (plan) => {
               const slotSummary = Object.entries(plan.perSlotSurvivors)
