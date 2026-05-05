@@ -63,6 +63,7 @@ import {
   synthesizeResultsFromCatalog,
 } from './composer';
 import type { QueueState } from './ipc';
+import { getSettings, type SimlySettings } from './settings';
 import {
   formatRelative,
   makeStageProgressLogger,
@@ -419,6 +420,7 @@ export class ScanQueue {
       scenario: Scenario;
     },
     runnerPaths: { binPath: string; scratchDir: string },
+    settings: SimlySettings,
   ): Promise<'up_to_date' | 'no_upgrades' | 'continue'> {
     if (!args.useRealExport || !args.parsedExport || !this.gearCatalog) {
       return 'continue';
@@ -471,6 +473,7 @@ export class ScanQueue {
         bestLoadout: catalog.best_loadout,
         baselineItemBySlot: decision.baselineItemBySlot,
         newItems: decision.newItems,
+        iterations: settings.swapTestIterations,
         onProgress: swapProgress.onProgress,
       });
       swapProgress.stop();
@@ -553,6 +556,7 @@ export class ScanQueue {
     characterKey: string;
     scenario: Scenario;
   }): Promise<void> {
+    const s = getSettings();
     this.inFlight = true;
     this.runStartedAt = Math.floor(Date.now() / 1000);
     this.currentCharacterKey = args.characterKey;
@@ -570,7 +574,7 @@ export class ScanQueue {
       // (no SimC) or to "swap test only" (just enough SimC to verify
       // a few new items aren't upgrades). Falls through to the full
       // pipeline otherwise. See quick-sim.ts for the planner logic.
-      const earlyExit = await this.maybeQuickSim(args, runnerPaths);
+      const earlyExit = await this.maybeQuickSim(args, runnerPaths, s);
       if (earlyExit === 'up_to_date' || earlyExit === 'no_upgrades') {
         const finishedAt = Math.floor(Date.now() / 1000);
         // Refresh the results file so the addon picks up "complete"
@@ -700,6 +704,7 @@ export class ScanQueue {
                   paths: runnerPaths,
                   baseProfile: args.baseProfile,
                   pairs: plan.pairsToSim,
+                  iterations: s.trinketIterations,
                   onProgress: tProgress.onProgress,
                 });
                 pairsByName = r.pairsByName;
@@ -711,6 +716,7 @@ export class ScanQueue {
                   paths: runnerPaths,
                   baseProfile: args.baseProfile,
                   trinkets: plan.trinkets,
+                  iterations: s.trinketIterations,
                   onProgress: tProgress.onProgress,
                 });
                 pairsByName = r.pairsByName;
@@ -749,7 +755,7 @@ export class ScanQueue {
                     scenario: args.scenario,
                     pool_signature: poolSignature(trinkets),
                     pairs: data.pairs,
-                    top_trinket_identities: selectTopTrinkets(data.pairs),
+                    top_trinket_identities: selectTopTrinkets(data.pairs, s.topTrinketsToKeep),
                     last_simmed_at: tFinished,
                   });
                 } catch (err) {
@@ -819,13 +825,16 @@ export class ScanQueue {
             weights,
             trinketLock,
             ignoreSet,
+            iterations: s.coarseIterations,
+            multiplier: s.prunerMultiplier,
+            maxCombos: s.maxCombos,
             onProgress: gcProgress.onProgress,
             onPlanReady: (plan) => {
               const slotSummary = Object.entries(plan.perSlotSurvivors)
-                .map(([s, n]) => `${s}:${n}`)
+                .map(([slot, n]) => `${slot}:${n}`)
                 .join(' ');
               console.log(
-                `[sim] gear_coarse: starting (${plan.comboCount} combos × 1000 iter, ` +
+                `[sim] gear_coarse: starting (${plan.comboCount} combos × ${s.coarseIterations} iter, ` +
                   `${plan.ringPairs} ring-pair${plan.ringPairs === 1 ? '' : 's'}; ` +
                   `survivors per slot: ${slotSummary})`,
               );
@@ -903,7 +912,7 @@ export class ScanQueue {
           const refinedSurvivors = selectSurvivors(
             result.combos,
             coarseCombos,
-            COARSE_KEEP_THRESHOLD_PCT,
+            s.coarseKeepThresholdPct,
           );
           if (refinedSurvivors.size >= 2) {
             const grStarted = Math.floor(Date.now() / 1000);
@@ -912,15 +921,15 @@ export class ScanQueue {
               args.characterKey,
             );
             console.log(
-              `[sim] gear_refined: starting (${refinedSurvivors.size} combos within ${COARSE_KEEP_THRESHOLD_PCT}% × ${REFINED_ITERATIONS} iter)`,
+              `[sim] gear_refined: starting (${refinedSurvivors.size} combos within ${s.coarseKeepThresholdPct}% × ${s.refinedIterations} iter)`,
             );
             try {
               const r = await runGearRerankScan({
                 paths: runnerPaths,
                 baseProfile: args.baseProfile,
                 combos: refinedSurvivors,
-                iterations: REFINED_ITERATIONS,
-                label: `Gear ladder — refined stage (${REFINED_ITERATIONS} iter)`,
+                iterations: s.refinedIterations,
+                label: `Gear ladder — refined stage (${s.refinedIterations} iter)`,
                 prefix: 'r',
                 scratchTag: `gear-refined-${Date.now()}`,
                 onProgress: grProgress.onProgress,
@@ -980,7 +989,7 @@ export class ScanQueue {
             const finalSurvivors = selectSurvivors(
               refinedResult.combos,
               refinedCombos,
-              REFINED_KEEP_THRESHOLD_PCT,
+              s.refinedKeepThresholdPct,
             );
             if (finalSurvivors.size >= 2) {
               const gfStarted = Math.floor(Date.now() / 1000);
@@ -989,15 +998,15 @@ export class ScanQueue {
                 args.characterKey,
               );
               console.log(
-                `[sim] gear_final: starting (${finalSurvivors.size} combos within ${REFINED_KEEP_THRESHOLD_PCT}% × ${FINAL_ITERATIONS} iter)`,
+                `[sim] gear_final: starting (${finalSurvivors.size} combos within ${s.refinedKeepThresholdPct}% × ${s.finalIterations} iter)`,
               );
               try {
                 const f = await runGearRerankScan({
                   paths: runnerPaths,
                   baseProfile: args.baseProfile,
                   combos: finalSurvivors,
-                  iterations: FINAL_ITERATIONS,
-                  label: `Gear ladder — final stage (${FINAL_ITERATIONS} iter)`,
+                  iterations: s.finalIterations,
+                  label: `Gear ladder — final stage (${s.finalIterations} iter)`,
                   prefix: 'f',
                   scratchTag: `gear-final-${Date.now()}`,
                   onProgress: gfProgress.onProgress,
