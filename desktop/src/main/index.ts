@@ -1,4 +1,4 @@
-import { app, BrowserWindow } from 'electron';
+import { app, BrowserWindow, ipcMain } from 'electron';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { existsSync } from 'node:fs';
@@ -9,6 +9,22 @@ import { writeLuaFile } from './lua-writer';
 import { bootstrapSimc, type BootstrapResult } from './simc-bootstrap';
 import { ScanQueue } from './scan-queue';
 import { RESULTS_SCHEMA_VERSION, type SimlyResults } from '@simly/shared';
+import { getSettings, setSettings, resetSettings } from './settings';
+import { IgnoreListStore } from './ignore-list';
+import {
+  IPC_QUEUE_STATE_CHANGED,
+  IPC_QUEUE_GET_STATE,
+  IPC_PROFILE_PASTE,
+  IPC_SETTINGS_GET,
+  IPC_SETTINGS_SET,
+  IPC_IGNORE_LIST_LIST,
+  IPC_IGNORE_LIST_REMOVE,
+  IPC_IGNORE_LIST_CLEAR,
+  type QueueState,
+  type PasteProfileArgs,
+  type IgnoreListFilter,
+  type RemoveIgnoreEntryArgs,
+} from './ipc';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -23,10 +39,60 @@ SimlyResults.lua
 `;
 
 let watcher: WatcherHandle | undefined;
+let queue: ScanQueue | undefined;
 // Set during the before-quit handler so the close-to-hide intercept
 // knows to actually let the window go when the app is genuinely quitting
 // (Ctrl+C, Task Manager kill, etc.) vs. just the user clicking X.
 let isQuitting = false;
+
+/** Push queue state to all open renderer windows. */
+function pushQueueState(state: QueueState): void {
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (!win.isDestroyed()) {
+      win.webContents.send(IPC_QUEUE_STATE_CHANGED, state);
+    }
+  }
+}
+
+/** Register all ipcMain handlers. Called once before the window opens. */
+function registerIpcHandlers(): void {
+  // Queue state
+  ipcMain.handle(IPC_QUEUE_GET_STATE, () => queue?.getQueueState() ?? {
+    isRunning: false,
+    characterKey: null,
+    scenario: null,
+    runStartedAt: null,
+    lastCompletedAt: null,
+    results: null,
+  });
+
+  // Paste-profile trigger
+  ipcMain.handle(IPC_PROFILE_PASTE, async (_e, args: PasteProfileArgs) => {
+    if (!queue) return;
+    await queue.runWithPastedProfile({
+      profileScript: args.profileScript,
+      characterKey: 'paste-input',
+      scenario: 'single_target_patchwerk',
+    });
+  });
+
+  // Settings
+  ipcMain.handle(IPC_SETTINGS_GET, () => getSettings());
+  ipcMain.handle(IPC_SETTINGS_SET, (_e, updates: Partial<ReturnType<typeof getSettings>>) =>
+    setSettings(updates),
+  );
+
+  // Ignore list — share the same store instance the queue uses
+  const ignoreListStore = new IgnoreListStore();
+  ipcMain.handle(IPC_IGNORE_LIST_LIST, (_e, filter?: IgnoreListFilter) =>
+    ignoreListStore.list({ character_key: filter?.characterKey, scenario: filter?.scenario }),
+  );
+  ipcMain.handle(IPC_IGNORE_LIST_REMOVE, (_e, args: RemoveIgnoreEntryArgs) =>
+    ignoreListStore.markManuallyRemoved(args.characterKey, args.scenario, args.itemIdentity),
+  );
+  ipcMain.handle(IPC_IGNORE_LIST_CLEAR, () => ignoreListStore.clear());
+  void resetSettings; // available but not wired to IPC in Phase 5 — Settings UI uses setSettings
+}
 
 function createWindow(): void {
   const win = new BrowserWindow({
@@ -35,7 +101,7 @@ function createWindow(): void {
     title: 'Simly',
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
-      sandbox: false,
+      sandbox: true,
     },
   });
 
@@ -139,12 +205,12 @@ async function startRoundTrip(): Promise<WowPaths | undefined> {
     return paths;
   }
 
-  const queue = new ScanQueue({ paths, simc });
+  queue = new ScanQueue({ paths, simc, onStateChange: pushQueueState });
   watcher = watchSavedVars(paths.savedVarsPath, (db) => {
     console.log(
       `[main] SavedVars updated: ${db.character.name}-${db.character.realm} (${db.character.class} ${db.character.spec})`,
     );
-    queue.maybeRunForSavedVars(db);
+    queue!.maybeRunForSavedVars(db);
   });
   console.log('[main] watching SavedVariables...');
   console.log(
@@ -185,6 +251,7 @@ if (!gotInstanceLock) {
 }
 
 app.whenReady().then(async () => {
+  registerIpcHandlers();
   await startRoundTrip();
   createWindow();
 });

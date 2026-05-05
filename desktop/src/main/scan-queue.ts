@@ -62,6 +62,7 @@ import {
   refreshScanTimestamps,
   synthesizeResultsFromCatalog,
 } from './composer';
+import type { QueueState } from './ipc';
 import {
   formatRelative,
   makeStageProgressLogger,
@@ -134,6 +135,11 @@ export interface ScanQueueOptions {
   trinketCache?: TrinketCacheStore;
   /** Optional gear catalog store. Same pattern. */
   gearCatalog?: GearCatalogStore;
+  /**
+   * Called whenever queue state changes (run starts, results written,
+   * run finishes). Used by index.ts to push IPC events to the renderer.
+   */
+  onStateChange?: (state: QueueState) => void;
 }
 
 export interface PastedProfileSource {
@@ -163,6 +169,11 @@ export class ScanQueue {
   private readonly ignoreList: IgnoreListStore | undefined;
   private readonly trinketCache: TrinketCacheStore | undefined;
   private readonly gearCatalog: GearCatalogStore | undefined;
+  /** Latest SimlyResults written to disk; exposed via IPC. */
+  latestResults: SimlyResults | null = null;
+  private runStartedAt: number | null = null;
+  private currentCharacterKey: string | null = null;
+  private currentScenario: string | null = null;
 
   constructor(private readonly opts: ScanQueueOptions) {
     this.lastCompletedAt =
@@ -175,6 +186,22 @@ export class ScanQueue {
     this.ignoreList = opts.ignoreList ?? tryCreateIgnoreList();
     this.trinketCache = opts.trinketCache ?? tryCreateTrinketCache();
     this.gearCatalog = opts.gearCatalog ?? tryCreateGearCatalog();
+  }
+
+  /** Current queue state snapshot — used by IPC handler on renderer startup. */
+  getQueueState(): QueueState {
+    return {
+      isRunning: this.inFlight,
+      characterKey: this.currentCharacterKey,
+      scenario: this.currentScenario,
+      runStartedAt: this.runStartedAt,
+      lastCompletedAt: this.lastCompletedAt,
+      results: this.latestResults,
+    };
+  }
+
+  private emitState(): void {
+    this.opts.onStateChange?.(this.getQueueState());
   }
 
   /**
@@ -364,6 +391,7 @@ export class ScanQueue {
         'SimlyResults',
         next as unknown as Parameters<typeof writeLuaFile>[2],
       );
+      this.latestResults = next;
       console.log(
         `[quick-sim] wrote refreshed results (${args.earlyExitKind}) — /reload in WoW`,
       );
@@ -526,6 +554,10 @@ export class ScanQueue {
     scenario: Scenario;
   }): Promise<void> {
     this.inFlight = true;
+    this.runStartedAt = Math.floor(Date.now() / 1000);
+    this.currentCharacterKey = args.characterKey;
+    this.currentScenario = args.scenario;
+    this.emitState();
     setWindowTitle(`Simly — Scan running for ${args.characterKey}…`);
     try {
       const runnerPaths = {
@@ -1097,6 +1129,7 @@ export class ScanQueue {
           'SimlyResults',
           results as unknown as Parameters<typeof writeLuaFile>[2],
         );
+        this.latestResults = results;
         console.log('[sim] wrote SimlyResults.lua — /reload in WoW to see it');
         showScanCompleteNotification(scans, args.characterKey);
       } catch (err) {
@@ -1107,6 +1140,8 @@ export class ScanQueue {
       setWindowTitle(`Simly — Up to date (${args.characterKey})`);
     } finally {
       this.inFlight = false;
+      this.runStartedAt = null;
+      this.emitState();
     }
   }
 }
