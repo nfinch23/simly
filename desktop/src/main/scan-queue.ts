@@ -54,6 +54,7 @@ import {
   type ParsedExport,
 } from './simc-export-parser';
 import { STATIC_DESTRO_WARLOCK_PROFILE } from './static-profile';
+import { scenarioProfileLines } from './scenario-config';
 import {
   composeFromScans,
   composeFromConsumableScans,
@@ -84,6 +85,19 @@ export const ADDON_FALLBACK_SENTINELS: ReadonlySet<string> = new Set([
   'PLACEHOLDER_PROFILE',
   'NO_PROFILE_AVAILABLE',
 ]);
+
+/**
+ * Prepend the scenario's SimC `fight_style=` (and any extras) to a
+ * profile script so every downstream stage — stat weights, trinket
+ * pre-scan, gear ladder, consumables — runs under the same fight
+ * style. SimC treats these as global directives, so they propagate
+ * to all profilesets defined later in the script.
+ */
+function prependScenarioDirectives(baseProfile: string, scenario: Scenario): string {
+  const lines = scenarioProfileLines(scenario);
+  if (lines.length === 0) return baseProfile;
+  return [...lines, '', baseProfile].join('\n');
+}
 
 // Phase 4d-iii ladder thresholds re-exported from gear-config.ts so
 // existing consumers continue to find them at scan-queue. Canonical
@@ -202,7 +216,7 @@ export class ScanQueue {
     // already pasted real `warlock="..." level=... ...` lines. The
     // queue runs the same stages as a SavedVars-triggered run.
     await this.runScan({
-      baseProfile: source.profileScript,
+      baseProfile: prependScenarioDirectives(source.profileScript, source.scenario),
       useRealExport: true,
       characterKey: source.characterKey,
       scenario: source.scenario,
@@ -240,7 +254,7 @@ export class ScanQueue {
 
     try {
       await this.runScan({
-        baseProfile,
+        baseProfile: prependScenarioDirectives(baseProfile, db.active_scenario),
         useRealExport,
         parsedExport,
         characterKey,
