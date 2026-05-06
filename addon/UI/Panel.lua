@@ -130,6 +130,20 @@ local function createFrame()
 	reloadBtn:SetAttribute("type1", "macro")
 	reloadBtn:SetAttribute("macrotext1", "/reload")
 
+	-- Live refresh: re-render whenever the player equips/unequips gear
+	-- so the green-equipped / yellow-swap-in coloring tracks reality
+	-- without the user having to close and reopen /simly. Only runs
+	-- while the panel is visible to avoid useless work on every gear
+	-- change. UNIT_INVENTORY_CHANGED("player") covers a few cases
+	-- PLAYER_EQUIPMENT_CHANGED misses (e.g. enchant/gem changes that
+	-- don't change item_id but might affect a future panel feature);
+	-- both are cheap.
+	f:RegisterEvent("PLAYER_EQUIPMENT_CHANGED")
+	f:RegisterUnitEvent("UNIT_INVENTORY_CHANGED", "player")
+	f:SetScript("OnEvent", function(self)
+		if self:IsShown() then Panel.Refresh() end
+	end)
+
 	-- WoW frames are shown by default at creation; hide so the very
 	-- first /simly call doesn't toggle a just-created visible frame off.
 	f:Hide()
