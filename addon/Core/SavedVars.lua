@@ -49,6 +49,7 @@ function SavedVars.WriteSnapshot()
 	local prevUpdateRequestedAt = (SimlyDB and SimlyDB.update_requested_at) or 0
 	local prevScenario = (SimlyDB and SimlyDB.active_scenario) or DEFAULT_SCENARIO
 	local prevLastSeen = (SimlyDB and SimlyDB.last_seen_generated_at) or 0
+	local prevUpdateAllAt = (SimlyDB and SimlyDB.update_all_requested_at) or 0
 
 	SimlyDB = {
 		schema_version = SCHEMA_VERSION,
@@ -65,6 +66,7 @@ function SavedVars.WriteSnapshot()
 		update_requested_at = prevUpdateRequestedAt,
 		active_scenario = prevScenario,
 		last_seen_generated_at = prevLastSeen,
+		update_all_requested_at = prevUpdateAllAt,
 	}
 end
 
@@ -106,6 +108,14 @@ end
 function SavedVars.SetScenario(scenarioKey)
 	if not SimlyDB then SavedVars.WriteSnapshot() end
 	SimlyDB.active_scenario = scenarioKey
+end
+
+-- Called by the "Update all sims" button. Queues scans for all 4
+-- scenarios on the next /reload cycle.
+function SavedVars.RequestUpdateAll()
+	SavedVars.WriteSnapshot()
+	SimlyDB.update_requested_at = time()
+	SimlyDB.update_all_requested_at = time()
 end
 
 -- Back-compat alias. Removed in a later phase.

@@ -164,8 +164,8 @@ describe('synthesizeResultsFromCatalog', () => {
     });
     expect(r.generated_at).toBe(200);
     expect(r.character_key).toBe('F-S-us');
-    expect(r.scans.stat_weights?.status).toBe('done');
-    expect(r.scans.gear_coarse?.status).toBe('done');
+    expect(r.scans!.stat_weights?.status).toBe('done');
+    expect(r.scans!.gear_coarse?.status).toBe('done');
     expect(r.composed?.expected_dps).toBe(100_000);
     expect(r.composed?.gear?.head?.name).toBe('Helm');
   });
@@ -179,7 +179,7 @@ describe('synthesizeResultsFromCatalog', () => {
       finishedAt: 200,
     });
     expect(r.composed).toBeUndefined();
-    expect(r.scans.stat_weights?.status).toBe('done');
+    expect(r.scans!.stat_weights?.status).toBe('done');
   });
 
   it('always includes catalog_summary even when catalog is undefined', () => {

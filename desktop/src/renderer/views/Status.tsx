@@ -52,17 +52,28 @@ export function Status(): JSX.Element {
         <>
           <h2 style={heading}>Last results</h2>
           <div style={card}>
-            <Row label="Character">{state.results.character_key}</Row>
-            <Row label="Generated">{formatTs(state.results.generated_at)}</Row>
-            <Row label="SimC version">{state.results.simc_version}</Row>
-            <Row label="Scenario">
-              {SCENARIO_LABELS[state.results.active_scenario] ?? state.results.active_scenario}
-            </Row>
-            <Row label="Scans">
-              {Object.entries(state.results.scans)
-                .map(([id, rec]) => `${id}: ${rec?.status ?? '?'}`)
-                .join(' · ')}
-            </Row>
+            {(() => {
+              const activeScenario = state.scenario ?? state.results.active_scenario;
+              const scenarioBucket = (state.results.scenarios as any)?.[activeScenario];
+              const generatedAt = scenarioBucket?.generated_at ?? state.results.generated_at ?? null;
+              const simcVersion = scenarioBucket?.simc_version ?? state.results.simc_version;
+              const scans = scenarioBucket?.scans ?? state.results.scans ?? {};
+              return (
+                <>
+                  <Row label="Character">{state.results.character_key}</Row>
+                  <Row label="Generated">{formatTs(generatedAt)}</Row>
+                  <Row label="SimC version">{simcVersion}</Row>
+                  <Row label="Scenario">
+                    {SCENARIO_LABELS[state.results.active_scenario] ?? state.results.active_scenario}
+                  </Row>
+                  <Row label="Scans">
+                    {Object.entries(scans)
+                      .map(([id, rec]: [string, any]) => `${id}: ${rec?.status ?? '?'}`)
+                      .join(' · ')}
+                  </Row>
+                </>
+              );
+            })()}
           </div>
         </>
       )}

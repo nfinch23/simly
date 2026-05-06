@@ -107,7 +107,7 @@ local function createFrame()
 	-- "Update sims" and "/reload" moved up one row (y=44) to make room
 	-- for the scenario toggle row below them (y=14).
 	local updateBtn = CreateFrame("Button", nil, f, "SecureActionButtonTemplate,UIPanelButtonTemplate")
-	updateBtn:SetSize(140, 26)
+	updateBtn:SetSize(120, 26)
 	updateBtn:SetPoint("BOTTOMLEFT", 18, 44)
 	updateBtn:SetText("Update sims")
 	updateBtn:RegisterForClicks("AnyUp", "AnyDown")
@@ -117,6 +117,21 @@ local function createFrame()
 		ns.SavedVars.RequestUpdate()
 		DEFAULT_CHAT_FRAME:AddMessage(
 			"|cff00ffffSimly:|r reloading to start scan. Wait for the desktop notification, then /reload again to see results."
+		)
+	end)
+
+	-- "Update all sims" — queues scans for all 4 scenarios back-to-back.
+	local updateAllBtn = CreateFrame("Button", nil, f, "SecureActionButtonTemplate,UIPanelButtonTemplate")
+	updateAllBtn:SetSize(140, 26)
+	updateAllBtn:SetPoint("BOTTOMLEFT", 146, 44)
+	updateAllBtn:SetText("Update all sims")
+	updateAllBtn:RegisterForClicks("AnyUp", "AnyDown")
+	updateAllBtn:SetAttribute("type1", "macro")
+	updateAllBtn:SetAttribute("macrotext1", "/reload")
+	updateAllBtn:SetScript("PreClick", function()
+		ns.SavedVars.RequestUpdateAll()
+		DEFAULT_CHAT_FRAME:AddMessage(
+			"|cff00ffffSimly:|r reloading to start all-scenario scan. Wait for the desktop notification, then /reload again to see results."
 		)
 	end)
 
@@ -238,8 +253,16 @@ function Panel.Refresh()
 	table.insert(lines, statusBlock())
 	table.insert(lines, "")
 
-	if SimlyResults and SimlyResults.composed then
-		local c = SimlyResults.composed
+	-- Get the result bucket for the currently-viewed scenario.
+	-- Falls back to top-level fields for v2 files (migration compat).
+	local scenarioData = (SimlyResults and SimlyResults.scenarios and SimlyResults.scenarios[activeScenario]) or nil
+	-- v2 fallback: if no scenarios table but top-level scans exist, treat top-level as the scenario data
+	if not scenarioData and SimlyResults and SimlyResults.scans then
+		scenarioData = SimlyResults
+	end
+
+	if scenarioData and scenarioData.composed then
+		local c = scenarioData.composed
 		table.insert(lines, "|cffffd700Best loadout|r" ..
 			(c.label and (" |cffaaaaaa(" .. c.label .. ")|r") or "") ..
 			(c.expected_dps and (" |cff00ff00" .. math.floor(c.expected_dps) .. " dps|r") or ""))
@@ -328,8 +351,8 @@ function Panel.Refresh()
 	table.insert(lines, "")
 
 	table.insert(lines, "|cffffd700Scans|r")
-	if SimlyResults and SimlyResults.scans and next(SimlyResults.scans) then
-		for id, record in pairs(SimlyResults.scans) do
+	if scenarioData and scenarioData.scans and next(scenarioData.scans) then
+		for id, record in pairs(scenarioData.scans) do
 			local color = statusColor(record.status)
 			local stamp = record.finished_at or record.started_at or 0
 			local age = stamp > 0 and (" (" .. formatAge(stamp) .. ")") or ""
@@ -343,12 +366,12 @@ function Panel.Refresh()
 	-- Trinket winner block (Phase 4c). Renders the best trinket pair
 	-- the pre-scan picked, with delta to alternatives so the user knows
 	-- whether their current setup is close.
-	if SimlyResults and SimlyResults.scans
-		and SimlyResults.scans.trinket_pre_scan
-		and SimlyResults.scans.trinket_pre_scan.status == "done"
-		and SimlyResults.scans.trinket_pre_scan.data
+	if scenarioData and scenarioData.scans
+		and scenarioData.scans.trinket_pre_scan
+		and scenarioData.scans.trinket_pre_scan.status == "done"
+		and scenarioData.scans.trinket_pre_scan.data
 	then
-		local data = SimlyResults.scans.trinket_pre_scan.data
+		local data = scenarioData.scans.trinket_pre_scan.data
 		table.insert(lines, "|cffffd700Best trinkets|r |cffaaaaaa(" .. (data.label or "") .. ")|r")
 		if data.winner then
 			table.insert(lines, string.format(
@@ -373,13 +396,13 @@ function Panel.Refresh()
 	-- Stat weights block (Phase 4b). Renders the per-stat scale factors
 	-- if the stat_weights scan ran successfully. Reminder to the user
 	-- that these are pruning hints, not gear recommendations.
-	if SimlyResults and SimlyResults.scans
-		and SimlyResults.scans.stat_weights
-		and SimlyResults.scans.stat_weights.status == "done"
-		and SimlyResults.scans.stat_weights.data
+	if scenarioData and scenarioData.scans
+		and scenarioData.scans.stat_weights
+		and scenarioData.scans.stat_weights.status == "done"
+		and scenarioData.scans.stat_weights.data
 	then
 		table.insert(lines, "|cffffd700Stat weights|r |cffaaaaaa(used to prune obviously-bad gear)|r")
-		local weights = SimlyResults.scans.stat_weights.data
+		local weights = scenarioData.scans.stat_weights.data
 		-- Sort by value descending so the most important stat is first.
 		local pairs_arr = {}
 		for stat, value in pairs(weights) do
@@ -400,11 +423,11 @@ function Panel.Refresh()
 	-- Gray-quality items don't appear at all because the addon's
 	-- StripJunkBagItems filter drops them at the source before any
 	-- sim sees them.
-	if SimlyResults and SimlyResults.catalog_summary
-		and SimlyResults.catalog_summary.items
-		and #SimlyResults.catalog_summary.items > 0
+	if scenarioData and scenarioData.catalog_summary
+		and scenarioData.catalog_summary.items
+		and #scenarioData.catalog_summary.items > 0
 	then
-		local summary = SimlyResults.catalog_summary
+		local summary = scenarioData.catalog_summary
 		table.insert(lines, "|cffffd700Catalog|r |cffaaaaaa(" ..
 			(summary.total_seen or 0) .. " item" ..
 			((summary.total_seen == 1) and "" or "s") .. " simmed; gray junk filtered before sim)|r")
@@ -445,7 +468,8 @@ function Panel.Refresh()
 	end
 
 	if SimlyResults then
-		table.insert(lines, "|cffaaaaaaSimC|r " .. (SimlyResults.simc_version or "?"))
+		local simc_version = (scenarioData and scenarioData.simc_version) or SimlyResults.simc_version
+		table.insert(lines, "|cffaaaaaaSimC|r " .. (simc_version or "?"))
 		-- "Scenario" is now shown at the top of the panel (selected scenario
 		-- from SimlyDB). Show the results-file scenario here only when it
 		-- differs from the selected one, so the user knows the cached results
@@ -455,7 +479,8 @@ function Panel.Refresh()
 			table.insert(lines, "|cffaaaaaaResults scenario|r " ..
 				(SCENARIO_LABELS[resultsScenario] or resultsScenario))
 		end
-		table.insert(lines, "|cffaaaaaaResults file written|r " .. formatAge(SimlyResults.generated_at))
+		local generated_at = (scenarioData and scenarioData.generated_at) or SimlyResults.generated_at
+		table.insert(lines, "|cffaaaaaaResults file written|r " .. formatAge(generated_at))
 	end
 
 	if SimlyDB and SimlyDB.update_requested_at and SimlyDB.update_requested_at > 0 then
