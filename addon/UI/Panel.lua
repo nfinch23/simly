@@ -81,7 +81,7 @@ local function createFrame()
 	-- frame so users don't have to drag the bar.
 	local scroll = CreateFrame("ScrollFrame", "SimlyPanelScroll", f, "UIPanelScrollFrameTemplate")
 	scroll:SetPoint("TOPLEFT", 18, -40)
-	scroll:SetPoint("BOTTOMRIGHT", -32, 50)
+	scroll:SetPoint("BOTTOMRIGHT", -32, 80)
 
 	local content = CreateFrame("Frame", nil, scroll)
 	content:SetSize(scroll:GetWidth(), 1) -- height set per-Refresh from text height
@@ -104,9 +104,11 @@ local function createFrame()
 	-- the secure macro action invokes the slash command without
 	-- tainting our addon. PreClick (unsecure) runs first to bump the
 	-- request stamp before the reload flushes SimlyDB to disk.
+	-- "Update sims" and "/reload" moved up one row (y=44) to make room
+	-- for the scenario toggle row below them (y=14).
 	local updateBtn = CreateFrame("Button", nil, f, "SecureActionButtonTemplate,UIPanelButtonTemplate")
 	updateBtn:SetSize(140, 26)
-	updateBtn:SetPoint("BOTTOMLEFT", 18, 14)
+	updateBtn:SetPoint("BOTTOMLEFT", 18, 44)
 	updateBtn:SetText("Update sims")
 	updateBtn:RegisterForClicks("AnyUp", "AnyDown")
 	updateBtn:SetAttribute("type1", "macro")
@@ -124,11 +126,39 @@ local function createFrame()
 	-- desktop notification fires.
 	local reloadBtn = CreateFrame("Button", nil, f, "SecureActionButtonTemplate,UIPanelButtonTemplate")
 	reloadBtn:SetSize(80, 26)
-	reloadBtn:SetPoint("BOTTOMRIGHT", -18, 14)
+	reloadBtn:SetPoint("BOTTOMRIGHT", -18, 44)
 	reloadBtn:SetText("/reload")
 	reloadBtn:RegisterForClicks("AnyUp", "AnyDown")
 	reloadBtn:SetAttribute("type1", "macro")
 	reloadBtn:SetAttribute("macrotext1", "/reload")
+
+	-- Scenario toggle row: four equal-width buttons at the very bottom.
+	-- Clicking one calls SavedVars.SetScenario() and refreshes the panel
+	-- to update the active highlight. The change persists to disk only on
+	-- the next /reload (WoW flushes SavedVars at PLAYER_LOGOUT / reload).
+	-- Panel.Refresh() re-applies the Disable/Enable state so the active
+	-- button always stays visually distinct — even if the user switches
+	-- and then switches back without reloading.
+	local scenarios = ns.SavedVars.SCENARIOS
+	local numScenarios = #scenarios
+	-- Total usable width between insets: 440 - 18 - 18 = 404 px.
+	-- Distribute evenly: btnW * n + gap * (n-1) = 404 → gap=4 → btnW=97.
+	local btnW = math.floor((404 - 4 * (numScenarios - 1)) / numScenarios)
+	local scenarioBtns = {}
+	for i, sc in ipairs(scenarios) do
+		local btn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+		btn:SetSize(btnW, 22)
+		btn:SetPoint("BOTTOMLEFT", 18 + (i - 1) * (btnW + 4), 14)
+		btn:SetText(sc.label)
+		local key = sc.key  -- upvalue per-button
+		btn:SetScript("OnClick", function()
+			ns.SavedVars.SetScenario(key)
+			Panel.Refresh()  -- re-highlights the new active button
+		end)
+		scenarioBtns[i] = btn
+	end
+	f.scenarioBtns   = scenarioBtns
+	f.scenarioKeys   = scenarios  -- parallel array — index matches button index
 
 	-- Live refresh: re-render whenever the player equips/unequips gear
 	-- so the green-equipped / yellow-swap-in coloring tracks reality
@@ -174,11 +204,37 @@ local function statusBlock()
 	return "|cffaaaaaaStatus:|r |cff00ff00\226\151\143 Up to date|r |cffaaaaaa(results " .. formatAge(gen) .. ")|r"
 end
 
+-- Human-readable labels for the scenario key (shown in the status block).
+local SCENARIO_LABELS = {
+	single_target_patchwerk = "Single-target (Patchwerk)",
+	m_plus                  = "Mythic+ (DungeonSlice)",
+	aoe_cleave              = "AoE Cleave (3-target)",
+	aoe_funnel              = "AoE Funnel (5-target)",
+}
+
 function Panel.Refresh()
 	if not frame then return end
 
+	-- Re-apply scenario button highlight: disable the active one so it
+	-- looks "pressed"; enable all others so they're clickable.
+	if frame.scenarioBtns then
+		local active = ns.SavedVars.GetScenario()
+		for i, btn in ipairs(frame.scenarioBtns) do
+			if frame.scenarioKeys[i].key == active then
+				btn:Disable()
+			else
+				btn:Enable()
+			end
+		end
+	end
+
 	local lines = {}
 
+	-- Show the currently-selected scenario above the status line so the
+	-- user always knows which scenario the next "Update sims" will run.
+	local activeScenario = ns.SavedVars.GetScenario()
+	local scenarioLabel  = SCENARIO_LABELS[activeScenario] or activeScenario
+	table.insert(lines, "|cffaaaaaaScenario:|r |cffffff00" .. scenarioLabel .. "|r")
 	table.insert(lines, statusBlock())
 	table.insert(lines, "")
 
@@ -390,7 +446,15 @@ function Panel.Refresh()
 
 	if SimlyResults then
 		table.insert(lines, "|cffaaaaaaSimC|r " .. (SimlyResults.simc_version or "?"))
-		table.insert(lines, "|cffaaaaaaScenario|r " .. (SimlyResults.active_scenario or "?"))
+		-- "Scenario" is now shown at the top of the panel (selected scenario
+		-- from SimlyDB). Show the results-file scenario here only when it
+		-- differs from the selected one, so the user knows the cached results
+		-- are from a different run.
+		local resultsScenario = SimlyResults.active_scenario
+		if resultsScenario and resultsScenario ~= ns.SavedVars.GetScenario() then
+			table.insert(lines, "|cffaaaaaaResults scenario|r " ..
+				(SCENARIO_LABELS[resultsScenario] or resultsScenario))
+		end
 		table.insert(lines, "|cffaaaaaaResults file written|r " .. formatAge(SimlyResults.generated_at))
 	end
 

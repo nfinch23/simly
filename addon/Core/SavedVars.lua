@@ -3,8 +3,18 @@ local addonName, ns = ...
 local SCHEMA_VERSION = 2
 local DEFAULT_SCENARIO = "single_target_patchwerk"
 
+-- All supported scenarios in display order. Key matches the Scenario
+-- union type in shared/schema/savedvars.ts; label is shown in the panel.
+local SCENARIOS = {
+	{ key = "single_target_patchwerk", label = "Single" },
+	{ key = "m_plus",                  label = "M+"     },
+	{ key = "aoe_cleave",              label = "Cleave"  },
+	{ key = "aoe_funnel",              label = "Funnel"  },
+}
+
 local SavedVars = {}
 ns.SavedVars = SavedVars
+SavedVars.SCENARIOS = SCENARIOS
 
 -- Build the full SavedVariables payload for the active character.
 -- Called on PLAYER_LOGIN (see Core/Init.lua) once spec data is ready.
@@ -82,6 +92,20 @@ end
 function SavedVars.RequestUpdate()
 	SavedVars.WriteSnapshot()
 	SimlyDB.update_requested_at = time()
+end
+
+-- Returns the currently selected scenario key, defaulting to
+-- single_target_patchwerk if SimlyDB hasn't been initialised yet.
+function SavedVars.GetScenario()
+	return (SimlyDB and SimlyDB.active_scenario) or DEFAULT_SCENARIO
+end
+
+-- Switch the active scenario. Takes effect on the next "Update sims" +
+-- /reload cycle — does NOT trigger a scan by itself. Calling this only
+-- updates the in-memory SimlyDB; WoW writes it to disk at /reload.
+function SavedVars.SetScenario(scenarioKey)
+	if not SimlyDB then SavedVars.WriteSnapshot() end
+	SimlyDB.active_scenario = scenarioKey
 end
 
 -- Back-compat alias. Removed in a later phase.
