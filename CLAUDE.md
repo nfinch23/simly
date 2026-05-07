@@ -84,3 +84,35 @@ Use the `/browse` skill from gstack for all web browsing. Never use `mcp__claude
 
 Available gstack skills:
 `/office-hours`, `/plan-ceo-review`, `/plan-eng-review`, `/plan-design-review`, `/design-consultation`, `/design-shotgun`, `/design-html`, `/review`, `/ship`, `/land-and-deploy`, `/canary`, `/benchmark`, `/browse`, `/connect-chrome`, `/qa`, `/qa-only`, `/design-review`, `/setup-browser-cookies`, `/setup-deploy`, `/retro`, `/investigate`, `/document-release`, `/codex`, `/cso`, `/autoplan`, `/plan-devex-review`, `/devex-review`, `/careful`, `/freeze`, `/guard`, `/unfreeze`, `/gstack-upgrade`, `/learn`.
+
+## Workflow
+
+This project uses one feature branch per slice.
+
+**At session start, before any work:**
+- Read the project-context files listed in "Read these first, in order" above
+- Confirm you are on `main` (or the project's default branch) and synced with origin
+- If the user has not named the slice, ask which step or task this session covers
+- Create the feature branch: `git checkout -b feat/<slice-name>`
+- Do not work on the default branch directly
+
+**During the session:**
+- Commit per logical unit on the feature branch (a function + its passing test, or a small cohesive change)
+- Continuous checkpoint mode is on — auto-`WIP:` commits happen automatically
+- Test-first where any test plan flags 3-star coverage
+- When you hit a decision the planning docs do not answer, stop and ask the user — do not guess
+- Never `git add -A`; stage only files you intentionally changed
+
+**At session end:**
+- Confirm all tests pass before declaring done
+- Summarize what landed and what (if anything) is still open
+- Run `/ship` to push the feature branch and open a PR (note: this project's `/ship` runs in degraded mode without VERSION/CHANGELOG; that's expected for pre-v1)
+- After `/ship` completes successfully, run `gh pr merge --squash --delete-branch` to land the slice on the default branch
+- Sync the default branch locally:
+  - If you are in a worktree where `main` is checked out elsewhere (verify with `git worktree list`), skip the local checkout and instead run `gh pr view <pr> --json mergeCommit` to confirm the merge committed on the remote
+  - Otherwise run `git checkout main && git pull` and verify `git log --oneline -3` shows the merged slice
+- Override: if the user says "stop after `/ship`, I want to review the PR" or similar, do not run the merge — leave the PR open and the branch checked out
+
+**Commits:**
+- Conventional-style messages (`feat:`, `fix:`, `test:`, `chore:`, `docs:`, `refactor:`)
+- Keep messages concrete; explain why in the body if the what is obvious from the diff

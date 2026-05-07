@@ -5,7 +5,7 @@
 
 import type { Scenario } from './savedvars.js';
 
-export const RESULTS_SCHEMA_VERSION = 2;
+export const RESULTS_SCHEMA_VERSION = 3;
 
 export type ScanStatus = 'pending' | 'running' | 'done' | 'failed';
 
@@ -196,15 +196,28 @@ export interface ScanCollection {
   [scanId: string]: ScanRecord<unknown> | undefined;
 }
 
-export interface SimlyResults {
-  schema_version: number;
+/** Per-scenario result bucket stored inside SimlyResults.scenarios. */
+export interface ScenarioResults {
   generated_at: number;
   simc_version: string;
+  scans: ScanCollection;
+  composed?: ComposedLoadout;
+  catalog_summary?: CatalogSummary;
+}
+
+export interface SimlyResults {
+  schema_version: number;
   character_key: string;
+  /** Currently viewed/last-simmed scenario. */
   active_scenario: Scenario;
   /** Hash of equipped+bag items at sim time; addon uses to flag "stale". */
   gear_hash?: string;
-  scans: ScanCollection;
+  /** v3+: per-scenario result buckets. */
+  scenarios?: Partial<Record<Scenario, ScenarioResults>>;
+  // v2 legacy fields — present in old files, absent in new writes:
+  generated_at?: number;
+  simc_version?: string;
+  scans?: ScanCollection;
   composed?: ComposedLoadout;
   /**
    * Snapshot of the gear catalog's seen_items map (excluding the

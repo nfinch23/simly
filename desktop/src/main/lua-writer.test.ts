@@ -98,9 +98,9 @@ describe('serializeLua', () => {
       expect(parsed?.character_key).toBe('Felfriend-Zul\'jin-us');
       expect(parsed?.composed?.label).toBe('Cached best loadout — Felfriend');
       expect(
-        (parsed?.scans.trinket_pre_scan?.data as { label: string })?.label,
+        (parsed?.scans!.trinket_pre_scan?.data as { label: string })?.label,
       ).toBe('Best trinket pair (single-target Patchwerk) — cached');
-      expect(parsed?.scans.trinket_pre_scan?.status).toBe('done');
+      expect(parsed?.scans!.trinket_pre_scan?.status).toBe('done');
     });
 
     it('refresh cycle is idempotent: write→parse→write produces identical bytes', () => {

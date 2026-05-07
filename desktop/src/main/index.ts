@@ -119,6 +119,21 @@ function createWindow(): void {
     }
   });
 
+  // Re-push queue state whenever the window becomes visible/focused.
+  // While the window is hidden Electron sometimes drops queued
+  // webContents.send messages (or the renderer's listeners are paused),
+  // so a scan that completes off-screen can leave the renderer's
+  // QueueState stuck on `isRunning: true`. Pushing on show/focus is
+  // cheap (single IPC message) and covers both "user un-hid the window"
+  // and "user alt-tabbed back" cases.
+  const refreshRenderer = (): void => {
+    if (queue && !win.isDestroyed()) {
+      win.webContents.send(IPC_QUEUE_STATE_CHANGED, queue.getQueueState());
+    }
+  };
+  win.on('show', refreshRenderer);
+  win.on('focus', refreshRenderer);
+
   if (process.env['ELECTRON_RENDERER_URL']) {
     void win.loadURL(process.env['ELECTRON_RENDERER_URL']);
   } else {

@@ -3,13 +3,18 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   buildGearProfileset,
+  calibrateFromCatalog,
+  computeDpsPerIlvlPct,
   GEAR_LADDER_SLOTS,
+  HARD_FLOOR_PCT,
   ilvlScorer,
   is2HWeapon,
   pruneGearPool,
+  type PrunerCalibration,
   type Scorer,
   type TrinketLock,
 } from './gear-pruner';
+import type { GearCatalogEntry } from '../gear-catalog';
 import {
   makeItemIdentity,
   parseSimcExport,
@@ -513,5 +518,297 @@ describe('pruneGearPool — real Felfriend export', () => {
     expect(build.comboCount).toBeGreaterThan(0);
     expect(build.script).toContain('profileset.');
     expect(build.script).toContain('trinket1=,id=');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// computeDpsPerIlvlPct
+// ---------------------------------------------------------------------------
+
+describe('computeDpsPerIlvlPct', () => {
+  it('returns 0 when bestLoadoutDps is 0', () => {
+    expect(computeDpsPerIlvlPct({ intellect: 30 }, 0)).toBe(0);
+  });
+
+  it('returns 0 when bestLoadoutDps is negative', () => {
+    expect(computeDpsPerIlvlPct({ intellect: 30 }, -100)).toBe(0);
+  });
+
+  it('returns 0 when all weights are zero', () => {
+    const result = computeDpsPerIlvlPct({}, 100_000);
+    expect(result).toBe(0);
+  });
+
+  it('uses intellect as primary when it is the highest', () => {
+    // intellect=30, no secondaries → dpsPerIlvl = 30*1 = 30; pct = 30/100000*100 = 0.03%
+    const result = computeDpsPerIlvlPct({ intellect: 30, strength: 10, agility: 5 }, 100_000);
+    expect(result).toBeCloseTo(0.03, 5);
+  });
+
+  it('uses agility when it is the highest primary', () => {
+    const result = computeDpsPerIlvlPct({ agility: 40 }, 100_000);
+    expect(result).toBeCloseTo(0.04, 5);
+  });
+
+  it('incorporates average of non-zero secondaries', () => {
+    // primary=30, secondaries crit=10 haste=20 mastery=0 vers=0
+    // nonZero = [10, 20], avg=15
+    // dpsPerIlvl = 30*1 + 15*1.8 = 30 + 27 = 57
+    // pct = 57/100000*100 = 0.057
+    const result = computeDpsPerIlvlPct(
+      { intellect: 30, crit: 10, haste: 20 },
+      100_000,
+    );
+    expect(result).toBeCloseTo(0.057, 5);
+  });
+
+  it('ignores zero-valued secondaries when computing average', () => {
+    // Same as above — mastery and vers at 0 should not bring down avg
+    const withZeros = computeDpsPerIlvlPct(
+      { intellect: 30, crit: 10, haste: 20, mastery: 0, versatility: 0 },
+      100_000,
+    );
+    const withoutZeros = computeDpsPerIlvlPct(
+      { intellect: 30, crit: 10, haste: 20 },
+      100_000,
+    );
+    expect(withZeros).toBeCloseTo(withoutZeros, 10);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// calibrateFromCatalog
+// ---------------------------------------------------------------------------
+
+function fakeCatalogForCalibration(
+  items: Array<{
+    identity: string;
+    slot: string;
+    ilvl: number;
+    best_delta_pct: number;
+    times_simmed?: number;
+  }>,
+  bestIlvlBySlot?: Record<string, number>,
+): GearCatalogEntry {
+  const seen_items: GearCatalogEntry['seen_items'] = {};
+  for (const it of items) {
+    seen_items[it.identity] = {
+      identity: it.identity,
+      item_id: parseInt(it.identity, 10) || 0,
+      name: `Item ${it.identity}`,
+      slot: it.slot,
+      ilvl: it.ilvl,
+      status: 'good',
+      best_delta_pct: it.best_delta_pct,
+      times_simmed: it.times_simmed ?? 1,
+      last_simmed_at: 1,
+    };
+  }
+  return {
+    character_key: 'F-S-us',
+    scenario: 'single_target_patchwerk',
+    best_loadout: {},
+    seen_items,
+    last_pool_signature: 'sig',
+    last_full_sim_at: 1,
+    best_ilvl_by_slot: bestIlvlBySlot ?? {},
+  };
+}
+
+describe('calibrateFromCatalog', () => {
+  it('returns null when fewer than minSamples items have been simmed', () => {
+    const catalog = fakeCatalogForCalibration([
+      { identity: '1', slot: 'head', ilvl: 300, best_delta_pct: 0 },
+      { identity: '2', slot: 'head', ilvl: 290, best_delta_pct: -1 },
+      { identity: '3', slot: 'head', ilvl: 280, best_delta_pct: -2 },
+      { identity: '4', slot: 'head', ilvl: 270, best_delta_pct: -3 },
+    ]);
+    expect(calibrateFromCatalog(catalog, 0.3)).toBeNull();
+  });
+
+  it('returns null when items exist but none have been simmed (times_simmed=0)', () => {
+    const items = Array.from({ length: 10 }, (_, i) => ({
+      identity: String(i),
+      slot: 'head',
+      ilvl: 300 - i * 5,
+      best_delta_pct: -i * 0.5,
+      times_simmed: 0,
+    }));
+    const catalog = fakeCatalogForCalibration(items);
+    expect(calibrateFromCatalog(catalog, 0.3)).toBeNull();
+  });
+
+  it('returns slope equal to input dpsPerIlvlPct', () => {
+    const items = Array.from({ length: 5 }, (_, i) => ({
+      identity: String(i),
+      slot: 'head',
+      ilvl: 300 - i * 10,
+      best_delta_pct: -i * 1.5,
+    }));
+    const catalog = fakeCatalogForCalibration(items, { head: 300 });
+    const result = calibrateFromCatalog(catalog, 0.15);
+    expect(result).not.toBeNull();
+    expect(result!.slope).toBe(0.15);
+  });
+
+  it('returns zero maxResidualPct when model is a perfect fit', () => {
+    // If predicted_delta = best_delta_pct exactly, residual = 0.
+    // With dpsPerIlvlPct=0.15 and bestIlvl=300:
+    //   item at ilvl 290 → predicted = (290-300)*0.15 = -1.5; best_delta_pct = -1.5 → residual = 0
+    const items = Array.from({ length: 5 }, (_, i) => ({
+      identity: String(i),
+      slot: 'head',
+      ilvl: 300 - i * 10,
+      best_delta_pct: -(i * 10) * 0.15,
+    }));
+    const catalog = fakeCatalogForCalibration(items, { head: 300 });
+    const result = calibrateFromCatalog(catalog, 0.15);
+    expect(result!.maxResidualPct).toBeCloseTo(0, 10);
+  });
+
+  it('returns correct maxResidualPct for a known case', () => {
+    // dpsPerIlvlPct=0.2, bestIlvl=300
+    // item A: ilvl=290, predicted=(290-300)*0.2=-2, best_delta_pct=-3 → residual=|-2-(-3)|=1
+    // item B: ilvl=280, predicted=(280-300)*0.2=-4, best_delta_pct=-4 → residual=0
+    // maxResidual should be 1
+    const catalog = fakeCatalogForCalibration(
+      [
+        { identity: 'A', slot: 'head', ilvl: 290, best_delta_pct: -3 },
+        { identity: 'B', slot: 'head', ilvl: 280, best_delta_pct: -4 },
+        { identity: 'C', slot: 'head', ilvl: 270, best_delta_pct: -6 },
+        { identity: 'D', slot: 'head', ilvl: 260, best_delta_pct: -8 },
+        { identity: 'E', slot: 'head', ilvl: 250, best_delta_pct: -10 },
+      ],
+      { head: 300 },
+    );
+    const result = calibrateFromCatalog(catalog, 0.2);
+    expect(result).not.toBeNull();
+    expect(result!.maxResidualPct).toBeCloseTo(1, 5);
+  });
+
+  it('uses item.ilvl as slotBestIlvl fallback when slot is absent from best_ilvl_by_slot', () => {
+    // With no bestIlvl for 'chest', slotBestIlvl defaults to item.ilvl itself.
+    // predicted = (item.ilvl - item.ilvl) * dpsPerIlvlPct = 0
+    // residual = |0 - best_delta_pct|
+    const catalog = fakeCatalogForCalibration(
+      [
+        { identity: '1', slot: 'chest', ilvl: 290, best_delta_pct: -2 },
+        { identity: '2', slot: 'chest', ilvl: 280, best_delta_pct: -3 },
+        { identity: '3', slot: 'chest', ilvl: 270, best_delta_pct: -1 },
+        { identity: '4', slot: 'chest', ilvl: 260, best_delta_pct: -4 },
+        { identity: '5', slot: 'chest', ilvl: 250, best_delta_pct: -5 },
+      ],
+      {}, // no bestIlvl for 'chest'
+    );
+    const result = calibrateFromCatalog(catalog, 0.3);
+    expect(result).not.toBeNull();
+    // All residuals = |0 - best_delta_pct| = |best_delta_pct|, max = 5
+    expect(result!.maxResidualPct).toBeCloseTo(5, 5);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// pruneSinglePool — calibration path (via pruneGearPool)
+// ---------------------------------------------------------------------------
+
+describe('pruneGearPool — calibrated pruning', () => {
+  it('keeps all items when calibration is null (fallback to multiplier)', () => {
+    // This is identical to the existing behavior — calibration=undefined → multiplier path
+    const parsed = exportWith([
+      fakeItem({ slot: 'head', item_id: 1, ilvl: 300 }),
+      fakeItem({ slot: 'head', item_id: 2, ilvl: 250 }),
+      fakeItem({ slot: 'head', item_id: 3, ilvl: 200 }),
+      fakeItem({ slot: 'head', item_id: 4, ilvl: 150 }), // dropped: 150*1.5=225 < 300
+    ]);
+    const prune = pruneGearPool({ parsed, weights: NO_WEIGHTS, multiplier: 1.5 });
+    expect(prune.perSlot.head?.map((i) => i.item_id)).toEqual([1, 2, 3]);
+  });
+
+  it('keeps items whose predicted delta survives the hard floor', () => {
+    // dpsPerIlvlPct=0.3, bestIlvlBySlot.head=300, maxResidualPct=0, safetyBuffer=0.5
+    // hardFloor=3.0; effective floor = -(3.0 - 0 - 0.5) = -2.5% (before residual/buffer applied)
+    // keep if: predictedDelta - 0 - 0.5 >= -3.0
+    // i.e., predictedDelta >= -2.5
+    // item at ilvl 291: predicted=(291-300)*0.3=-2.7 → -2.7 - 0.5 = -3.2 < -3.0 → drop
+    // item at ilvl 293: predicted=(293-300)*0.3=-2.1 → -2.1 - 0.5 = -2.6 < -3.0 → drop
+    // Wait — let me recalculate: keep if predictedDelta - maxResidual - safetyBuffer >= -hardFloor
+    // = predictedDelta - 0 - 0.5 >= -3.0 = predictedDelta >= -2.5
+    // ilvl 292: (292-300)*0.3 = -2.4 → -2.4 - 0.5 = -2.9 >= -3.0 ✓ (keep)
+    // ilvl 290: (290-300)*0.3 = -3.0 → -3.0 - 0.5 = -3.5 < -3.0 ✗ (drop)
+    const calibration: PrunerCalibration = {
+      bestIlvlBySlot: { head: 300 },
+      dpsPerIlvlPct: 0.3,
+      maxResidualPct: 0,
+      hardFloorPct: HARD_FLOOR_PCT,
+      safetyBufferPct: 0.5,
+    };
+    const parsed = exportWith([
+      fakeItem({ slot: 'head', item_id: 1, ilvl: 300 }),
+      fakeItem({ slot: 'head', item_id: 2, ilvl: 292 }),
+      fakeItem({ slot: 'head', item_id: 3, ilvl: 290 }), // expected: dropped
+    ]);
+    const prune = pruneGearPool({ parsed, weights: NO_WEIGHTS, calibration });
+    const ids = prune.perSlot.head?.map((i) => i.item_id);
+    expect(ids).toContain(1);
+    expect(ids).toContain(2);
+    expect(ids).not.toContain(3);
+  });
+
+  it('falls back to keeping all items when residual+buffer >= hardFloor', () => {
+    // When maxResidualPct + safetyBufferPct >= hardFloorPct, over-pruning is likely.
+    // The pruner should keep everything as a safety measure.
+    const calibration: PrunerCalibration = {
+      bestIlvlBySlot: { head: 300 },
+      dpsPerIlvlPct: 0.3,
+      maxResidualPct: 3.0,   // >= hardFloor (3.0)
+      safetyBufferPct: 0.5,  // residual + buffer = 3.5 >= 3.0 → keep all
+    };
+    const parsed = exportWith([
+      fakeItem({ slot: 'head', item_id: 1, ilvl: 300 }),
+      fakeItem({ slot: 'head', item_id: 2, ilvl: 200 }), // would be aggressively pruned otherwise
+    ]);
+    const prune = pruneGearPool({ parsed, weights: NO_WEIGHTS, calibration });
+    expect(prune.perSlot.head).toHaveLength(2);
+  });
+
+  it('uses multiplier path for slots without bestIlvlBySlot entry', () => {
+    // calibration is provided but 'chest' is absent from bestIlvlBySlot
+    // → falls back to multiplier for that slot
+    const calibration: PrunerCalibration = {
+      bestIlvlBySlot: { head: 300 },  // no 'chest'
+      dpsPerIlvlPct: 0.3,
+      maxResidualPct: 0,
+    };
+    const parsed = exportWith([
+      fakeItem({ slot: 'chest', item_id: 1, ilvl: 300 }),
+      fakeItem({ slot: 'chest', item_id: 2, ilvl: 250 }),
+      fakeItem({ slot: 'chest', item_id: 3, ilvl: 150 }), // dropped by 1.2x multiplier
+    ]);
+    const prune = pruneGearPool({
+      parsed,
+      weights: NO_WEIGHTS,
+      multiplier: 1.2,
+      calibration,
+    });
+    // 150 * 1.2 = 180 < 300 → dropped
+    expect(prune.perSlot.chest?.map((i) => i.item_id)).not.toContain(3);
+  });
+
+  it('always returns at least one item even when calibration would prune everything', () => {
+    // With a very large bestIlvl gap, all items would be predicted to lose badly.
+    // The pruner must return at least the first eligible item.
+    const calibration: PrunerCalibration = {
+      bestIlvlBySlot: { head: 9999 }, // artificially high
+      dpsPerIlvlPct: 1.0,
+      maxResidualPct: 0,
+      hardFloorPct: HARD_FLOOR_PCT,
+      safetyBufferPct: 0.5,
+    };
+    const parsed = exportWith([
+      fakeItem({ slot: 'head', item_id: 1, ilvl: 300 }),
+      fakeItem({ slot: 'head', item_id: 2, ilvl: 290 }),
+    ]);
+    const prune = pruneGearPool({ parsed, weights: NO_WEIGHTS, calibration });
+    expect(prune.perSlot.head).toHaveLength(1);
   });
 });

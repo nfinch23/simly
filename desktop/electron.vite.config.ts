@@ -21,6 +21,10 @@ export default defineConfig({
   },
   renderer: {
     root: resolve(__dirname, 'src/renderer'),
+    server: {
+      port: 5888,
+      strictPort: true,
+    },
     build: {
       outDir: resolve(__dirname, 'out/renderer'),
       emptyOutDir: true,

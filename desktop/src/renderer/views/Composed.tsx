@@ -103,7 +103,9 @@ function LoadoutView({ composed }: { composed: ComposedLoadout }): JSX.Element {
 
 export function Composed(): JSX.Element {
   const state = useQueueState();
-  const composed = state.results?.composed;
+  const activeScenario = state.scenario ?? 'single_target_patchwerk';
+  const composed = (state.results?.scenarios as any)?.[activeScenario]?.composed
+    ?? state.results?.composed;  // v2 fallback
 
   return (
     <div>

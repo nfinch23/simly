@@ -53,4 +53,6 @@ export interface SimlyDB {
    * prominent "fresh results available" message at login.
    */
   last_seen_generated_at?: number;
+  /** When set and newer than lastCompletedAllAt, desktop runs all 4 scenarios. */
+  update_all_requested_at?: number;
 }

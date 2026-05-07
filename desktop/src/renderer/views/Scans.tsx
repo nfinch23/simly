@@ -194,7 +194,10 @@ const SCAN_ORDER = [
 
 export function Scans(): JSX.Element {
   const state = useQueueState();
-  const scans = state.results?.scans ?? {};
+  const activeScenario = state.scenario ?? 'single_target_patchwerk';
+  const scans = (state.results?.scenarios as any)?.[activeScenario]?.scans
+    ?? state.results?.scans  // v2 fallback
+    ?? {};
 
   const allIds = [
     ...SCAN_ORDER.filter((id) => id in scans),

@@ -4,6 +4,7 @@ import {
   type GearScanResult,
   type ScanCollection,
   type ScanRecord,
+  type ScenarioResults,
   type Scenario,
   type SimlyDB,
   type SimlyResults,
@@ -28,7 +29,14 @@ import {
 } from './scans/trinket-pre-scan';
 import { runGearCoarseScan } from './scans/gear-coarse';
 import { runGearRerankScan, selectSurvivors } from './scans/gear-rerank';
-import type { GearCombo, TrinketLock } from './scans/gear-pruner';
+import {
+  calibrateFromCatalog,
+  computeDpsPerIlvlPct,
+  HARD_FLOOR_PCT,
+  type GearCombo,
+  type PrunerCalibration,
+  type TrinketLock,
+} from './scans/gear-pruner';
 import { computeItemObservations, IgnoreListStore } from './ignore-list';
 import {
   mergePairResults,
@@ -166,6 +174,13 @@ export interface PastedProfileSource {
  */
 export class ScanQueue {
   private lastCompletedAt: number;
+  /**
+   * In-memory gate for "Update all sims". Initialized to "now" so a
+   * stale update_all_requested_at left in SavedVariables from a prior
+   * session doesn't re-fire all 4 scenarios on every desktop start.
+   * Same defense as lastCompletedAt — both are gated on a fresh boot.
+   */
+  private lastCompletedAllAt: number;
   private inFlight = false;
   private readonly ignoreList: IgnoreListStore | undefined;
   private readonly trinketCache: TrinketCacheStore | undefined;
@@ -179,6 +194,10 @@ export class ScanQueue {
   constructor(private readonly opts: ScanQueueOptions) {
     this.lastCompletedAt =
       opts.initialLastCompletedAt ?? Math.floor(Date.now() / 1000);
+    // Same boot-now default as lastCompletedAt — defends against a
+    // stale update_all_requested_at in SavedVariables from a previous
+    // session re-firing all 4 scenarios on every desktop start.
+    this.lastCompletedAllAt = Math.floor(Date.now() / 1000);
     // electron-store needs an electron app context to default its cwd.
     // Constructing it here lazily — if Electron isn't available (rare;
     // really only happens when an environment misconfigures), we log
@@ -216,6 +235,30 @@ export class ScanQueue {
       console.log('[queue] sim in flight; ignoring SavedVars update');
       return;
     }
+
+    // "Update all sims" — run all 4 scenarios back-to-back
+    if (
+      db.update_all_requested_at &&
+      db.update_all_requested_at > this.lastCompletedAllAt
+    ) {
+      const character = db.character;
+      const characterKey = `${character.name}-${character.realm}-${character.region}`;
+      const exportTrimmed = (db.simc_export ?? '').trim();
+      const useRealExport =
+        exportTrimmed.length > 0 && !ADDON_FALLBACK_SENTINELS.has(exportTrimmed);
+      const baseProfile = useRealExport ? exportTrimmed : STATIC_DESTRO_WARLOCK_PROFILE;
+      let parsedExport: ParsedExport | undefined;
+      if (useRealExport) {
+        try {
+          parsedExport = parseSimcExport(exportTrimmed);
+        } catch (err) {
+          console.warn('[queue] failed to parse SimC export for runAllScenarios:', (err as Error).message);
+        }
+      }
+      void this.runAllScenarios({ useRealExport, parsedExport: parsedExport ?? null, baseProfile, characterKey });
+      return;
+    }
+
     if (db.update_requested_at <= this.lastCompletedAt) {
       console.log(
         `[queue] no new request (update_requested_at=${db.update_requested_at} <= last_completed=${this.lastCompletedAt}); idle`,
@@ -226,6 +269,31 @@ export class ScanQueue {
       `[queue] new request from addon (update_requested_at=${db.update_requested_at}); running for ${db.character.name}`,
     );
     void this.runForSavedVars(db);
+  }
+
+  private async runAllScenarios(args: {
+    useRealExport: boolean;
+    parsedExport: ParsedExport | null;
+    baseProfile: string;
+    characterKey: string;
+  }): Promise<void> {
+    const scenarios: Scenario[] = ['single_target_patchwerk', 'm_plus', 'aoe_cleave', 'aoe_funnel'];
+    for (const scenario of scenarios) {
+      await this.runScan({
+        ...args,
+        parsedExport: args.parsedExport ?? undefined,
+        baseProfile: prependScenarioDirectives(args.baseProfile, scenario),
+        scenario,
+      });
+    }
+    const finishedAt = Math.floor(Date.now() / 1000);
+    this.lastCompletedAllAt = finishedAt;
+    // Also advance lastCompletedAt: RequestUpdateAll() in the addon
+    // sets BOTH update_requested_at AND update_all_requested_at, so a
+    // followup "Update sims" click would otherwise see the stale
+    // update_requested_at (still > lastCompletedAt) and replay a
+    // single-scenario scan unprompted.
+    this.lastCompletedAt = finishedAt;
   }
 
   /**
@@ -330,60 +398,99 @@ export class ScanQueue {
     earlyExitKind: 'up_to_date' | 'no_upgrades';
   }): Promise<void> {
     const path = this.opts.paths.resultsLuaPath;
-    let next: SimlyResults | undefined;
+
+    // Load existing results to preserve other scenarios' data
+    let existingScenarios: Partial<Record<Scenario, ScenarioResults>> = {};
+    let existingResult: SimlyResults | undefined;
 
     if (existsSync(path)) {
       try {
         const source = await readFile(path, 'utf8');
         const parsed = parseResultsFile(source);
         if (parsed) {
-          // Backfill composed.gear from the catalog if the parsed
-          // file lacks it — pre-Phase-4e files don't have this field,
-          // and we don't want users stuck without the gear panel
-          // until the next full sim.
-          const catalog = this.gearCatalog?.get(args.characterKey, args.scenario);
-          const composed: ComposedLoadout | undefined = parsed.composed
-            ? {
-                ...parsed.composed,
-                gear: parsed.composed.gear ?? deriveGearFromCatalog(catalog),
-              }
-            : catalog
-            ? {
-                label: 'Cached best loadout',
-                expected_dps: catalog.best_loadout_dps,
-                gear: deriveGearFromCatalog(catalog),
-              }
-            : undefined;
-          next = {
-            ...parsed,
-            generated_at: args.finishedAt,
-            character_key: args.characterKey,
-            active_scenario: args.scenario,
-            scans: refreshScanTimestamps(parsed.scans, args.finishedAt),
-            composed,
-            // Catalog state may have changed since the last full sim
-            // (the swap-test path adds entries) — re-derive from the
-            // current catalog rather than preserving the stale snapshot.
-            catalog_summary: buildCatalogSummary(catalog),
-          };
+          existingResult = parsed;
+          if (parsed.scenarios) {
+            existingScenarios = parsed.scenarios as Partial<Record<Scenario, ScenarioResults>>;
+          } else if (parsed.scans) {
+            // Migrate v2 flat structure
+            existingScenarios[parsed.active_scenario as Scenario] = {
+              generated_at: parsed.generated_at ?? 0,
+              simc_version: parsed.simc_version ?? '',
+              scans: parsed.scans,
+              composed: parsed.composed,
+              catalog_summary: parsed.catalog_summary,
+            };
+          }
         }
       } catch (err) {
         console.warn('[quick-sim] failed to read existing results file:', (err as Error).message);
       }
     }
 
-    if (!next) {
+    // Build refreshed scenario bucket for the current scenario
+    const catalog = this.gearCatalog?.get(args.characterKey, args.scenario);
+    let scenarioResult: ScenarioResults;
+
+    const priorScenarioBucket = existingScenarios[args.scenario];
+    if (priorScenarioBucket) {
+      // Backfill composed.gear from catalog if missing
+      const composed: ComposedLoadout | undefined = priorScenarioBucket.composed
+        ? {
+            ...priorScenarioBucket.composed,
+            gear: priorScenarioBucket.composed.gear ?? deriveGearFromCatalog(catalog),
+          }
+        : catalog
+        ? {
+            label: 'Cached best loadout',
+            expected_dps: catalog.best_loadout_dps,
+            gear: deriveGearFromCatalog(catalog),
+          }
+        : undefined;
+      scenarioResult = {
+        ...priorScenarioBucket,
+        generated_at: args.finishedAt,
+        scans: refreshScanTimestamps(priorScenarioBucket.scans, args.finishedAt),
+        composed,
+        // Catalog state may have changed since the last full sim
+        // (the swap-test path adds entries) — re-derive from the
+        // current catalog rather than preserving the stale snapshot.
+        catalog_summary: buildCatalogSummary(catalog),
+      };
+    } else {
       // Synthesize from catalog — covers first-run edge cases and
       // unparseable files. Composed loadout is the catalog's
       // best_loadout converted to the addon's shape.
-      const catalog = this.gearCatalog?.get(args.characterKey, args.scenario);
-      next = synthesizeResultsFromCatalog({
+      const synthesized = synthesizeResultsFromCatalog({
         catalog,
         characterKey: args.characterKey,
         scenario: args.scenario,
         simcVersion: this.opts.simc.installedVersion?.tag ?? 'cached',
         finishedAt: args.finishedAt,
       });
+      // synthesizeResultsFromCatalog returns a flat v2-style SimlyResults;
+      // extract the fields we need for a ScenarioResults bucket.
+      scenarioResult = {
+        generated_at: synthesized.generated_at ?? args.finishedAt,
+        simc_version: synthesized.simc_version ?? 'cached',
+        scans: synthesized.scans ?? {},
+        composed: synthesized.composed,
+        catalog_summary: synthesized.catalog_summary,
+      };
+    }
+
+    const next: SimlyResults = {
+      schema_version: RESULTS_SCHEMA_VERSION,
+      character_key: args.characterKey,
+      active_scenario: args.scenario,
+      scenarios: {
+        ...existingScenarios,
+        [args.scenario]: scenarioResult,
+      },
+    };
+
+    // Preserve gear_hash from existing top-level if available
+    if (existingResult?.gear_hash) {
+      next.gear_hash = existingResult.gear_hash;
     }
 
     try {
@@ -810,14 +917,39 @@ export class ScanQueue {
           // items we've already classified as consistently-losing.
           // Empty Set if no catalog yet (first sim) — pruner falls
           // back to its ilvl-multiplier heuristic alone.
-          const ignoreSet = ignoredIdentities(
-            this.gearCatalog?.get(args.characterKey, args.scenario),
-          );
+          const catalogForPruner = this.gearCatalog?.get(args.characterKey, args.scenario);
+          const ignoreSet = ignoredIdentities(catalogForPruner);
           if (ignoreSet.size > 0) {
             console.log(
               `[sim] gear_coarse: skipping ${ignoreSet.size} catalog-trash item(s) from cartesian`,
             );
           }
+
+          // Build calibration if we have stat weights + catalog data with
+          // enough simmed items. Falls back to ilvl-multiplier heuristic
+          // when catalog is absent or too sparse.
+          let prunerCalibration: PrunerCalibration | undefined;
+          const statWeights = weights as StatWeights;
+          if (catalogForPruner && (catalogForPruner.best_loadout_dps ?? 0) > 0) {
+            const dpsPerIlvlPct = computeDpsPerIlvlPct(statWeights, catalogForPruner.best_loadout_dps!);
+            const cal = calibrateFromCatalog(catalogForPruner, dpsPerIlvlPct);
+            if (cal) {
+              prunerCalibration = {
+                bestIlvlBySlot: catalogForPruner.best_ilvl_by_slot ?? {},
+                dpsPerIlvlPct: cal.slope,
+                maxResidualPct: cal.maxResidualPct,
+              };
+              console.log(
+                `[pruner] calibrated: ${dpsPerIlvlPct.toFixed(3)}% dps/ilvl, ` +
+                `maxResidual=${cal.maxResidualPct.toFixed(2)}%, ` +
+                `effective floor=${(HARD_FLOOR_PCT - cal.maxResidualPct - 0.5).toFixed(2)}% ` +
+                `(≈${((HARD_FLOOR_PCT - cal.maxResidualPct - 0.5) / dpsPerIlvlPct).toFixed(1)} ilvl gap)`,
+              );
+            } else {
+              console.log(`[pruner] not enough catalog data for calibration — using ilvl multiplier fallback`);
+            }
+          }
+
           const { result, combosByName: coarseCombos } = await runGearCoarseScan({
             paths: runnerPaths,
             baseProfile: args.baseProfile,
@@ -828,6 +960,7 @@ export class ScanQueue {
             iterations: s.coarseIterations,
             multiplier: s.prunerMultiplier,
             maxCombos: s.maxCombos,
+            calibration: prunerCalibration,
             onProgress: gcProgress.onProgress,
             onPlanReady: (plan) => {
               const slotSummary = Object.entries(plan.perSlotSurvivors)
@@ -870,6 +1003,7 @@ export class ScanQueue {
                 scenario: args.scenario,
                 pool_signature: fullPoolSignature(args.parsedExport),
                 combos: result.combos,
+                parsedExport: args.parsedExport,
               });
               this.gearCatalog.put(updated);
               console.log(
@@ -960,6 +1094,7 @@ export class ScanQueue {
                     scenario: args.scenario,
                     pool_signature: fullPoolSignature(args.parsedExport),
                     combos: r.result.combos,
+                    parsedExport: args.parsedExport,
                   });
                   this.gearCatalog.put(updated);
                 } catch (err) {
@@ -1034,6 +1169,7 @@ export class ScanQueue {
                       scenario: args.scenario,
                       pool_signature: fullPoolSignature(args.parsedExport),
                       combos: f.result.combos,
+                      parsedExport: args.parsedExport,
                     });
                     this.gearCatalog.put(updated);
                     console.log(
@@ -1119,12 +1255,33 @@ export class ScanQueue {
         scans,
         this.gearCatalog?.get(args.characterKey, args.scenario),
       );
-      const results: SimlyResults = {
-        schema_version: RESULTS_SCHEMA_VERSION,
+
+      // Load existing results to preserve other scenarios' data
+      let existingScenarios: Partial<Record<Scenario, ScenarioResults>> = {};
+      try {
+        const existingSource = await readFile(this.opts.paths.resultsLuaPath, 'utf8').catch(() => null);
+        if (existingSource) {
+          const existing = parseResultsFile(existingSource);
+          if (existing) {
+            if (existing.scenarios) {
+              existingScenarios = existing.scenarios as Partial<Record<Scenario, ScenarioResults>>;
+            } else if (existing.scans) {
+              // Migrate v2 flat structure into the scenario that was active
+              existingScenarios[existing.active_scenario as Scenario] = {
+                generated_at: existing.generated_at ?? 0,
+                simc_version: existing.simc_version ?? '',
+                scans: existing.scans,
+                composed: existing.composed,
+                catalog_summary: existing.catalog_summary,
+              };
+            }
+          }
+        }
+      } catch { /* ignore read errors — treat as fresh */ }
+
+      const scenarioResult: ScenarioResults = {
         generated_at: finishedAt,
         simc_version: `${run.simcVersion} (${run.gitRevision.slice(0, 8)})`,
-        character_key: args.characterKey,
-        active_scenario: args.scenario,
         scans,
         composed,
         catalog_summary: buildCatalogSummary(
@@ -1132,13 +1289,23 @@ export class ScanQueue {
         ),
       };
 
+      const mergedResults: SimlyResults = {
+        schema_version: RESULTS_SCHEMA_VERSION,
+        character_key: args.characterKey,
+        active_scenario: args.scenario,
+        scenarios: {
+          ...existingScenarios,
+          [args.scenario]: scenarioResult,
+        },
+      };
+
       try {
         await writeLuaFile(
           this.opts.paths.resultsLuaPath,
           'SimlyResults',
-          results as unknown as Parameters<typeof writeLuaFile>[2],
+          mergedResults as unknown as Parameters<typeof writeLuaFile>[2],
         );
-        this.latestResults = results;
+        this.latestResults = mergedResults;
         console.log('[sim] wrote SimlyResults.lua — /reload in WoW to see it');
         showScanCompleteNotification(scans, args.characterKey);
       } catch (err) {
