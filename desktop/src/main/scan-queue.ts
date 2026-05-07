@@ -174,7 +174,13 @@ export interface PastedProfileSource {
  */
 export class ScanQueue {
   private lastCompletedAt: number;
-  private lastCompletedAllAt: number | null = null;
+  /**
+   * In-memory gate for "Update all sims". Initialized to "now" so a
+   * stale update_all_requested_at left in SavedVariables from a prior
+   * session doesn't re-fire all 4 scenarios on every desktop start.
+   * Same defense as lastCompletedAt — both are gated on a fresh boot.
+   */
+  private lastCompletedAllAt: number;
   private inFlight = false;
   private readonly ignoreList: IgnoreListStore | undefined;
   private readonly trinketCache: TrinketCacheStore | undefined;
@@ -188,6 +194,10 @@ export class ScanQueue {
   constructor(private readonly opts: ScanQueueOptions) {
     this.lastCompletedAt =
       opts.initialLastCompletedAt ?? Math.floor(Date.now() / 1000);
+    // Same boot-now default as lastCompletedAt — defends against a
+    // stale update_all_requested_at in SavedVariables from a previous
+    // session re-firing all 4 scenarios on every desktop start.
+    this.lastCompletedAllAt = Math.floor(Date.now() / 1000);
     // electron-store needs an electron app context to default its cwd.
     // Constructing it here lazily — if Electron isn't available (rare;
     // really only happens when an environment misconfigures), we log
@@ -229,7 +239,7 @@ export class ScanQueue {
     // "Update all sims" — run all 4 scenarios back-to-back
     if (
       db.update_all_requested_at &&
-      db.update_all_requested_at > (this.lastCompletedAllAt ?? 0)
+      db.update_all_requested_at > this.lastCompletedAllAt
     ) {
       const character = db.character;
       const characterKey = `${character.name}-${character.realm}-${character.region}`;
@@ -276,7 +286,14 @@ export class ScanQueue {
         scenario,
       });
     }
-    this.lastCompletedAllAt = Math.floor(Date.now() / 1000);
+    const finishedAt = Math.floor(Date.now() / 1000);
+    this.lastCompletedAllAt = finishedAt;
+    // Also advance lastCompletedAt: RequestUpdateAll() in the addon
+    // sets BOTH update_requested_at AND update_all_requested_at, so a
+    // followup "Update sims" click would otherwise see the stale
+    // update_requested_at (still > lastCompletedAt) and replay a
+    // single-scenario scan unprompted.
+    this.lastCompletedAt = finishedAt;
   }
 
   /**
