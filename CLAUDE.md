@@ -105,9 +105,13 @@ This project uses one feature branch per slice.
 
 **At session end:**
 - Confirm all tests pass before declaring done
-- Summarize what landed and what is still open
-- Do not merge to the default branch yourself — the user runs `/ship` from gstack to land the slice
-- Leave the feature branch checked out so `/ship` knows what to land
+- Summarize what landed and what (if anything) is still open
+- Run `/ship` to push the feature branch and open a PR (note: this project's `/ship` runs in degraded mode without VERSION/CHANGELOG; that's expected for pre-v1)
+- After `/ship` completes successfully, run `gh pr merge --squash --delete-branch` to land the slice on the default branch
+- Sync the default branch locally:
+  - If you are in a worktree where `main` is checked out elsewhere (verify with `git worktree list`), skip the local checkout and instead run `gh pr view <pr> --json mergeCommit` to confirm the merge committed on the remote
+  - Otherwise run `git checkout main && git pull` and verify `git log --oneline -3` shows the merged slice
+- Override: if the user says "stop after `/ship`, I want to review the PR" or similar, do not run the merge — leave the PR open and the branch checked out
 
 **Commits:**
 - Conventional-style messages (`feat:`, `fix:`, `test:`, `chore:`, `docs:`, `refactor:`)
