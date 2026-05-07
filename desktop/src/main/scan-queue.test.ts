@@ -1,9 +1,15 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { mkdtempSync, rmSync, writeFileSync, existsSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
   ADDON_FALLBACK_SENTINELS,
   ScanQueue,
   composeFromConsumableScans,
 } from './scan-queue';
+import { GearCatalogStore } from './gear-catalog';
+import { TrinketCacheStore } from './trinket-cache';
+import { IgnoreListStore } from './ignore-list';
 import type { SimlyDB, ScanCollection, BestFlaskResult, BestFoodResult } from '@simly/shared';
 import type { WowPaths } from './wow-paths';
 import type { BootstrapResult } from './simc-bootstrap';
@@ -110,5 +116,164 @@ describe('composeFromConsumableScans', () => {
     });
     expect(out?.flask?.name).toBe('Flask of the Magisters');
     expect(out?.food).toBeUndefined();
+  });
+});
+
+describe('ScanQueue.clearAllCaches', () => {
+  let tmp: string;
+  beforeEach(() => {
+    tmp = mkdtempSync(join(tmpdir(), 'simly-clear-cache-'));
+  });
+  afterEach(() => {
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  function makeQueueWithStores(): {
+    queue: ScanQueue;
+    gearCatalog: GearCatalogStore;
+    trinketCache: TrinketCacheStore;
+    ignoreList: IgnoreListStore;
+    resultsLuaPath: string;
+  } {
+    const tag = Math.random().toString(36).slice(2);
+    const gearCatalog = new GearCatalogStore({ cwd: tmp, name: `gear-${tag}` });
+    const trinketCache = new TrinketCacheStore({ cwd: tmp, name: `trinket-${tag}` });
+    const ignoreList = new IgnoreListStore({ cwd: tmp, name: `ignore-${tag}` });
+    const resultsLuaPath = join(tmp, 'SimlyResults.lua');
+    const queue = new ScanQueue({
+      paths: { resultsLuaPath } as unknown as WowPaths,
+      simc: fakeSimc,
+      initialLastCompletedAt: 1000,
+      gearCatalog,
+      trinketCache,
+      ignoreList,
+    });
+    return { queue, gearCatalog, trinketCache, ignoreList, resultsLuaPath };
+  }
+
+  it('clears all stores, deletes results.lua, and resets in-memory state', async () => {
+    const { queue, gearCatalog, trinketCache, ignoreList, resultsLuaPath } = makeQueueWithStores();
+
+    // Seed each store with at least one entry so we can verify clear()
+    // actually emptied them.
+    gearCatalog.put({
+      character_key: 'Char-Realm',
+      scenario: 'single_target_patchwerk',
+      best_loadout: {},
+      seen_items: {},
+      last_pool_signature: 'sig',
+      last_full_sim_at: 100,
+      last_quick_sim_at: 100,
+      best_ilvl_by_slot: {},
+    });
+    trinketCache.put({
+      character_key: 'Char-Realm',
+      scenario: 'single_target_patchwerk',
+      pool_signature: 'sig',
+      pairs: [],
+      top_trinket_identities: [],
+      last_simmed_at: 100,
+    });
+    ignoreList.recordObservation({
+      character_key: 'Char-Realm',
+      scenario: 'single_target_patchwerk',
+      item_identity: 'item-1',
+      item_id: 1,
+      slot: 'head',
+      name: 'Test Helm',
+      delta_pct: -10,
+    });
+    writeFileSync(resultsLuaPath, '-- stale results\n', 'utf8');
+
+    expect(gearCatalog.get('Char-Realm', 'single_target_patchwerk')).toBeDefined();
+    expect(trinketCache.get('Char-Realm', 'single_target_patchwerk')).toBeDefined();
+    expect(ignoreList.list().length).toBeGreaterThan(0);
+    expect(existsSync(resultsLuaPath)).toBe(true);
+
+    // Plant some "latest results" so we can confirm the in-memory state resets too.
+    queue.latestResults = { schema_version: 3 } as never;
+
+    const result = await queue.clearAllCaches();
+
+    expect(result).toEqual({
+      inFlight: false,
+      catalogCleared: true,
+      trinketCleared: true,
+      ignoreCleared: true,
+      resultsLuaDeleted: true,
+    });
+    expect(gearCatalog.get('Char-Realm', 'single_target_patchwerk')).toBeUndefined();
+    expect(trinketCache.get('Char-Realm', 'single_target_patchwerk')).toBeUndefined();
+    expect(ignoreList.list().length).toBe(0);
+    expect(existsSync(resultsLuaPath)).toBe(false);
+    expect(queue.latestResults).toBeNull();
+    // lastCompletedAt should be bumped to "now" (>= a few seconds ago) so a
+    // stale update_requested_at in SavedVariables can't immediately re-fire.
+    const nowSec = Math.floor(Date.now() / 1000);
+    expect(queue.getQueueState().lastCompletedAt).toBeGreaterThanOrEqual(nowSec - 2);
+  });
+
+  it('treats a missing results.lua as success (ENOENT is not an error)', async () => {
+    const { queue, resultsLuaPath } = makeQueueWithStores();
+    expect(existsSync(resultsLuaPath)).toBe(false);
+
+    const result = await queue.clearAllCaches();
+
+    expect(result.inFlight).toBe(false);
+    // resultsLuaDeleted is false because there was nothing to delete, but
+    // the call succeeded — no warn was logged because ENOENT is suppressed.
+    expect(result.resultsLuaDeleted).toBe(false);
+  });
+
+  it('refuses to clear while a scan is in flight (returns inFlight:true, no side effects)', async () => {
+    const { queue, gearCatalog, resultsLuaPath } = makeQueueWithStores();
+
+    gearCatalog.put({
+      character_key: 'Char-Realm',
+      scenario: 'single_target_patchwerk',
+      best_loadout: {},
+      seen_items: {},
+      last_pool_signature: 'sig',
+      last_full_sim_at: 100,
+      last_quick_sim_at: 100,
+      best_ilvl_by_slot: {},
+    });
+    writeFileSync(resultsLuaPath, '-- stale\n', 'utf8');
+
+    // Force the in-flight flag on so clearAllCaches sees a "scan running" state.
+    (queue as unknown as { inFlight: boolean }).inFlight = true;
+
+    const result = await queue.clearAllCaches();
+
+    expect(result).toEqual({
+      inFlight: true,
+      catalogCleared: false,
+      trinketCleared: false,
+      ignoreCleared: false,
+      resultsLuaDeleted: false,
+    });
+    // Stores and file untouched.
+    expect(gearCatalog.get('Char-Realm', 'single_target_patchwerk')).toBeDefined();
+    expect(existsSync(resultsLuaPath)).toBe(true);
+  });
+
+  it('emits a fresh queue state with results=null after clearing', async () => {
+    let lastEmitted: { results: unknown } | null = null;
+    const tag = Math.random().toString(36).slice(2);
+    const queue = new ScanQueue({
+      paths: { resultsLuaPath: join(tmp, 'r.lua') } as unknown as WowPaths,
+      simc: fakeSimc,
+      initialLastCompletedAt: 1000,
+      gearCatalog: new GearCatalogStore({ cwd: tmp, name: `gear-${tag}` }),
+      trinketCache: new TrinketCacheStore({ cwd: tmp, name: `trinket-${tag}` }),
+      ignoreList: new IgnoreListStore({ cwd: tmp, name: `ignore-${tag}` }),
+      onStateChange: (s) => { lastEmitted = s; },
+    });
+    queue.latestResults = { schema_version: 3 } as never;
+
+    await queue.clearAllCaches();
+
+    expect(lastEmitted).not.toBeNull();
+    expect(lastEmitted!.results).toBeNull();
   });
 });

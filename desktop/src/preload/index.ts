@@ -17,10 +17,12 @@ import {
   IPC_IGNORE_LIST_LIST,
   IPC_IGNORE_LIST_REMOVE,
   IPC_IGNORE_LIST_CLEAR,
+  IPC_DEV_CLEAR_SIM_CACHE,
   type QueueState,
   type PasteProfileArgs,
   type IgnoreListFilter,
   type RemoveIgnoreEntryArgs,
+  type ClearSimCacheResult,
 } from '../main/ipc';
 import type { SimlySettings } from '../main/settings';
 import type { IgnoreEntry } from '../main/ignore-list';
@@ -64,6 +66,12 @@ const simlyBridge = {
 
   clearIgnoreList: (): Promise<void> =>
     ipcRenderer.invoke(IPC_IGNORE_LIST_CLEAR),
+
+  // -------------------------------------------------------------------------
+  // Dev tools
+  // -------------------------------------------------------------------------
+  clearSimCache: (): Promise<ClearSimCacheResult> =>
+    ipcRenderer.invoke(IPC_DEV_CLEAR_SIM_CACHE),
 };
 
 contextBridge.exposeInMainWorld('simly', simlyBridge);

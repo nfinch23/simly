@@ -13,7 +13,7 @@ import {
 } from '@simly/shared';
 import { writeLuaFile } from './lua-writer';
 import { parseResultsFile } from './lua-parser';
-import { readFile } from 'node:fs/promises';
+import { readFile, unlink } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { runSimc } from './simc-runner';
 import type { BootstrapResult } from './simc-bootstrap';
@@ -223,6 +223,73 @@ export class ScanQueue {
 
   private emitState(): void {
     this.opts.onStateChange?.(this.getQueueState());
+  }
+
+  /**
+   * Dev tool: forget every persisted sim cache so the next scan runs
+   * the full pipeline from scratch. Wipes the gear catalog, trinket
+   * cache, and ignore list (sim-derived; manual_removed overrides are
+   * lost), and deletes SimlyResults.lua so the addon stops reading
+   * stale results until the next sim regenerates it. Refuses while a
+   * scan is in flight — clearing mid-run would corrupt the catalog
+   * write at the end of the run.
+   *
+   * `lastCompletedAt`/`lastCompletedAllAt` are bumped to "now" with the
+   * same boot-time defense logic: the addon's last `update_requested_at`
+   * in SavedVariables would otherwise re-fire a sim immediately after
+   * the clear. The user has to click "Update sims" again to trigger.
+   */
+  async clearAllCaches(): Promise<{
+    inFlight: boolean;
+    catalogCleared: boolean;
+    trinketCleared: boolean;
+    ignoreCleared: boolean;
+    resultsLuaDeleted: boolean;
+  }> {
+    if (this.inFlight) {
+      return {
+        inFlight: true,
+        catalogCleared: false,
+        trinketCleared: false,
+        ignoreCleared: false,
+        resultsLuaDeleted: false,
+      };
+    }
+
+    let catalogCleared = false;
+    let trinketCleared = false;
+    let ignoreCleared = false;
+
+    if (this.gearCatalog) {
+      try { this.gearCatalog.clear(); catalogCleared = true; }
+      catch (err) { console.warn('[clear-cache] gearCatalog.clear threw:', (err as Error).message); }
+    }
+    if (this.trinketCache) {
+      try { this.trinketCache.clear(); trinketCleared = true; }
+      catch (err) { console.warn('[clear-cache] trinketCache.clear threw:', (err as Error).message); }
+    }
+    if (this.ignoreList) {
+      try { this.ignoreList.clear(); ignoreCleared = true; }
+      catch (err) { console.warn('[clear-cache] ignoreList.clear threw:', (err as Error).message); }
+    }
+
+    let resultsLuaDeleted = false;
+    try {
+      await unlink(this.opts.paths.resultsLuaPath);
+      resultsLuaDeleted = true;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
+        console.warn('[clear-cache] unlink results.lua threw:', (err as Error).message);
+      }
+    }
+
+    this.latestResults = null;
+    const nowSec = Math.floor(Date.now() / 1000);
+    this.lastCompletedAt = nowSec;
+    this.lastCompletedAllAt = nowSec;
+    this.emitState();
+
+    return { inFlight: false, catalogCleared, trinketCleared, ignoreCleared, resultsLuaDeleted };
   }
 
   /**
