@@ -369,7 +369,7 @@ Each phase is a checkpoint with concrete acceptance criteria. Don't move to phas
 
 ### Phase 4 — Stat Weights Scan + Top Gear Scan (the heavy lift) — ✅ COMPLETE
 
-**Status: shipped to main as PR #1 + open PR #2.** All sub-phases (4a/4b/4c/4d-i/4d-ii/4d-iii/4e) live, plus a quick-sim gate, persistent gear catalog, weapon-aware cartesian, and a stack of correctness fixes that emerged during live testing on Felfriend (Demo Warlock). 276 desktop unit tests pass. See CLAUDE.md "Phase 4 sub-status" for per-commit detail.
+**Status: shipped to main as PRs #1, #2, then extended through PRs #3–#6 (Phases 5 + 6).** All sub-phases (4a/4b/4c/4d-i/4d-ii/4d-iii/4e) live, plus a quick-sim gate, persistent gear catalog, weapon-aware cartesian, calibrated stat-weight pruner (Phase 6), and a stack of correctness fixes that emerged during live testing on Felfriend (Demo Warlock). <!-- AUTOSYNC: test_count_desktop -->314<!-- /AUTOSYNC --> desktop unit tests pass. See CLAUDE.md "Phase 4 sub-status" through "Phase 6 sub-status" for per-commit detail.
 
 **Goal:** the actual product. "Given my equipped + bag inventory, find the maximum-DPS gear combo for single-target Patchwerk." Implements the multi-stage scan model with stat-weight pruning and the persistent ignore list.
 
@@ -393,7 +393,7 @@ Each phase is a checkpoint with concrete acceptance criteria. Don't move to phas
 - "Close-but-lost" items (within `keep_threshold_pct`, default 1%) stay eligible — re-simmed every cycle in case context changed.
 - Manually removable from the desktop UI (per-item or "clear all").
 
-**Configurable thresholds (currently constants in code; Phase 5 surfaces them as live-editable settings):**
+**Configurable thresholds (live-editable via the Settings view — see `desktop/src/main/settings.ts` and `desktop/src/renderer/views/Settings.tsx`):**
 - `DEFAULT_PRUNER_MULTIPLIER` (default 1.2 — tightened from SCOPE-original 1.5 after live testing showed 1.5 produced ~864-combo cartesians on Felfriend → 27min coarse runs)
 - `ignore_threshold_pct` (default 3%, in `gear-catalog.ts` as `trash_threshold_pct`)
 - `keep_threshold_pct` (used internally by quick-sim swap-test for sidegrade band; classified as `good` in catalog)

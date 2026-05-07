@@ -20,7 +20,13 @@ If a task seems to conflict with SCOPE.md (different tech, different file layout
 
 ## Build phase tracking
 
-Current phase: **All of Phase 4 (a/b/c/d/e) complete and merged to main as PR #1 + open PR #2. Phase 5 (desktop renderer UI) and Phase 6 (scenario selector) are the next two SCOPE-defined milestones.** See SCOPE.md section 6 for acceptance criteria.
+Current phase: **Phases 4, 5, and 6 all shipped to main. Phase 7 (content recommender) is the next SCOPE-defined milestone but is deferred per SCOPE — pre-v1 polish slices are the active work today.** See SCOPE.md section 6 for acceptance criteria; sub-status sections below show what shipped per phase.
+
+Live status (auto-synced on `/ship` — see "Auto-sync on /ship" section):
+
+- Latest main commit: <!-- AUTOSYNC: latest_main_commit -->a0761f9<!-- /AUTOSYNC -->
+- Merged PRs: <!-- AUTOSYNC: merged_prs -->1, 2, 3, 4, 5, 6<!-- /AUTOSYNC -->
+- Last synced: <!-- AUTOSYNC: last_synced_at -->2026-05-07T03:34:49Z<!-- /AUTOSYNC -->
 
 ### Phase 3 sub-status (all done)
 
@@ -63,11 +69,22 @@ These shipped during live testing on Felfriend (Demo Warlock, Zul'jin):
   - `stage-logger.ts` (226 LOC, +12 tests): UI side-effects (makeStageProgressLogger, setWindowTitle, showScanCompleteNotification, formatRelative, isInterestingSimcLine).
   - `store-factories.ts` (39 LOC): lazy `tryCreate*` wrappers.
 
-### What's next (SCOPE-required for v1)
+### Phase 5 sub-status (all done)
 
-- **Phase 5 — desktop renderer UI** (Raidbots-style results page). Currently the desktop window is a passive log view; needs Status / Scans / Composed / Settings / PasteInput views with IPC channels. See SCOPE section 6 Phase 5.
-- **Phase 6 — scenario selector**. Add `m_plus`, `aoe_cleave`, `aoe_funnel` scenarios alongside the existing `single_target_patchwerk`. Catalog/cache keys already include scenario; need addon-side toggle and per-scenario default APL.
+- **5a (desktop renderer UI + IPC layer)** — PR #4 (`deec248`). Replaces the passive log view with a Raidbots-style results page: Status / Scans / Composed / PasteInput / Settings tabs. New `preload/index.ts` IPC bridge (`window.simly.*`) with sandboxed `BrowserWindow` and `contextBridge`. Renderer subscribes to `IPC_QUEUE_STATE_CHANGED` for live state pushes. Settings view is wired to `electron-store` so threshold changes apply on next sim.
+
+### Phase 6 sub-status (all done)
+
+- **6a (in-game scenario toggle)** — PR #5 (`ca8ba1e`). 4 scenario buttons in `/simly` panel (Single / M+ / Cleave / Funnel). Click sets `SimlyDB.active_scenario`; desktop reads it on next "Update sims".
+- **6b (per-scenario result storage + Update all sims)** — PR #5 (`17697ff`). `SimlyResults` schema bumped to v3 with nested `scenarios` map (`Partial<Record<Scenario, ScenarioResults>>`). Switching scenario buttons shows cached results for that scenario instantly without re-simming. New "Update all sims" button runs all 4 scenarios back-to-back (gated by `update_all_requested_at`). v2-flat results files migrate transparently on read.
+- **Calibrated stat-weight pruner** — PR #5 (`b736220`). Replaces the hardcoded 1.5x ilvl multiplier with a DPS-model estimate calibrated against the gear catalog's actual sim history. `computeDpsPerIlvlPct(weights, dps)` + `calibrateFromCatalog(catalog, dpsPerIlvlPct)` derive the pruning threshold from measured prediction error rather than a fixed gap. Falls back to the multiplier when catalog has < 5 simmed items per scenario. 18 new tests; expected M+ gear_coarse speedup once catalog is populated.
+- **Renderer state-push fix + addon status block fixes** — PR #5 (`b736220`, `249171c`, `0648df4`). Window show/focus events re-push `QueueState` so the Status tab can't get stuck on `isRunning: true` after a scan completes off-screen. Addon status block now reads `generated_at` from active-scenario bucket with v2 fallback, and compares request to MAX `generated_at` across scenarios so switching to an unscanned scenario doesn't falsely show "Scan running".
+- **Update All gate hardening** — PR #5 (`3747b0c`). `lastCompletedAllAt` initialized in constructor (defends against stale `update_all_requested_at` re-firing all 4 scenarios on desktop restart). `runAllScenarios` now bumps both `lastCompletedAt` and `lastCompletedAllAt` (prevents spurious single-scenario replay after Update All). Both caught + fixed inline by /ship's pre-landing review.
+
+### What's next
+
 - **Phase 7 — content recommender** (v2 territory; deferred per SCOPE).
+- **Pre-v1 polish slices** are the active work today. Live tracking lives in session memory + the `/loop` skill todos. Known open items at this snapshot: stale desktop window title after scan ends, optional "Force full sim" toggle to bypass quick-sim during testing, end-to-end live verification of the calibrated pruner on a real M+ gear_coarse run.
 
 ### Phase 2 prep TODOs (still open)
 
@@ -76,7 +93,7 @@ These shipped during live testing on Felfriend (Demo Warlock, Zul'jin):
 
 ### Test counts
 
-- 276 desktop unit tests passing (started Phase 4 with ~100). Major suites: `composer` (20), `gear-pruner` (35), `gear-rerank` (8), `gear-coarse` (4), `gear-catalog` (19), `quick-sim` (9), `swap-test` (13), `trinket-cache` (18), `trinket-pre-scan` (6), `swap-test-result-mapping`, `ignore-list` (12), `stage-logger` (12), `lua-parser` (5), `lua-writer` (9), `simc-export-parser` (20), `simc-runner`/`simc-installer`/`simc-version-source`/`simc-paths`/`simc-bootstrap`/`scan-queue`/`scans/registry`/`scans/index`/`scans/best-flask`/`scans/best-food`/`scans/stat-weights`/`wow-paths`.
+- <!-- AUTOSYNC: test_count_desktop -->314<!-- /AUTOSYNC --> desktop unit tests passing (started Phase 4 with ~100). Major suites: `composer` (20), `gear-pruner` (53 — +18 from Phase 6's calibration), `gear-rerank` (8), `gear-coarse` (4), `gear-catalog` (19), `quick-sim` (9), `swap-test` (13), `trinket-cache` (18), `trinket-pre-scan` (6), `swap-test-result-mapping`, `ignore-list` (12), `stage-logger` (12), `lua-parser` (5), `lua-writer` (9), `simc-export-parser` (20), `simc-runner`/`simc-installer`/`simc-version-source`/`simc-paths`/`simc-bootstrap`/`scan-queue`/`scans/registry`/`scans/index`/`scans/best-flask`/`scans/best-food`/`scans/stat-weights`/`wow-paths`.
 
 ## gstack
 
@@ -84,6 +101,23 @@ Use the `/browse` skill from gstack for all web browsing. Never use `mcp__claude
 
 Available gstack skills:
 `/office-hours`, `/plan-ceo-review`, `/plan-eng-review`, `/plan-design-review`, `/design-consultation`, `/design-shotgun`, `/design-html`, `/review`, `/ship`, `/land-and-deploy`, `/canary`, `/benchmark`, `/browse`, `/connect-chrome`, `/qa`, `/qa-only`, `/design-review`, `/setup-browser-cookies`, `/setup-deploy`, `/retro`, `/investigate`, `/document-release`, `/codex`, `/cso`, `/autoplan`, `/plan-devex-review`, `/devex-review`, `/careful`, `/freeze`, `/guard`, `/unfreeze`, `/gstack-upgrade`, `/learn`.
+
+## Auto-sync on /ship
+
+Volatile fields in `CLAUDE.md` and `SCOPE.md` are wrapped in HTML comment markers like `<!-- AUTOSYNC: <field-name> -->VALUE<!-- /AUTOSYNC -->`. The `/document-release` subagent dispatched by `/ship` (Step 18) refreshes these on every merge.
+
+On every merge, `document-release` should:
+1. Find every `<!-- AUTOSYNC: <field-name> -->...<!-- /AUTOSYNC -->` pair in `CLAUDE.md` and `SCOPE.md`
+2. Compute the field's current value:
+   - `latest_main_commit` — `git rev-parse --short main` after `git fetch origin main`
+   - `test_count_desktop` — last `npm test --workspace desktop` output, the line matching `Tests N passed`
+   - `merged_prs` — `gh pr list --repo nfinch23/simly --state merged --limit 50 --json number -q 'map(.number) | join(", ")'`
+   - `last_synced_at` — current ISO 8601 UTC timestamp (`date -u +%Y-%m-%dT%H:%M:%SZ`)
+3. Replace ONLY the value between the marker pair. Never modify text outside the markers and never edit the marker comments themselves.
+
+When a new phase milestone ships, the slice that ships it manually appends a `### Phase N sub-status (all done)` block to the "Build phase tracking" section above. Auto-sync handles the live counters; the narrative is owned by the slice that introduced the work.
+
+If a `/ship` runs in degraded mode (no VERSION/CHANGELOG, document-release skipped), the slice author must manually invoke `/document-release` after merge to refresh the markers.
 
 ## Workflow
 
