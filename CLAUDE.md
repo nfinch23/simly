@@ -92,7 +92,7 @@ This project uses one feature branch per slice.
 **At session start, before any work:**
 - Read the project-context files listed in "Read these first, in order" above
 - Confirm you are on `main` (or the project's default branch) and synced with origin
-- If the user has not named the slice, ask which step or task this session covers
+- Pick the slice name yourself (short kebab-case noun phrase reflecting the work — e.g. `calibrated-pruner`, `m-plus-status-fix`, `auto-name-slices`). Tell the user what you picked in your first response of the session — do not ask them to name it. If the user explicitly says "call this <name>", use their name instead.
 - Create the feature branch: `git checkout -b feat/<slice-name>`
 - Do not work on the default branch directly
 
