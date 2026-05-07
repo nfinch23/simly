@@ -84,3 +84,31 @@ Use the `/browse` skill from gstack for all web browsing. Never use `mcp__claude
 
 Available gstack skills:
 `/office-hours`, `/plan-ceo-review`, `/plan-eng-review`, `/plan-design-review`, `/design-consultation`, `/design-shotgun`, `/design-html`, `/review`, `/ship`, `/land-and-deploy`, `/canary`, `/benchmark`, `/browse`, `/connect-chrome`, `/qa`, `/qa-only`, `/design-review`, `/setup-browser-cookies`, `/setup-deploy`, `/retro`, `/investigate`, `/document-release`, `/codex`, `/cso`, `/autoplan`, `/plan-devex-review`, `/devex-review`, `/careful`, `/freeze`, `/guard`, `/unfreeze`, `/gstack-upgrade`, `/learn`.
+
+## Workflow
+
+This project uses one feature branch per slice.
+
+**At session start, before any work:**
+- Read the project-context files listed in "Read these first, in order" above
+- Confirm you are on `main` (or the project's default branch) and synced with origin
+- If the user has not named the slice, ask which step or task this session covers
+- Create the feature branch: `git checkout -b feat/<slice-name>`
+- Do not work on the default branch directly
+
+**During the session:**
+- Commit per logical unit on the feature branch (a function + its passing test, or a small cohesive change)
+- Continuous checkpoint mode is on — auto-`WIP:` commits happen automatically
+- Test-first where any test plan flags 3-star coverage
+- When you hit a decision the planning docs do not answer, stop and ask the user — do not guess
+- Never `git add -A`; stage only files you intentionally changed
+
+**At session end:**
+- Confirm all tests pass before declaring done
+- Summarize what landed and what is still open
+- Do not merge to the default branch yourself — the user runs `/ship` from gstack to land the slice
+- Leave the feature branch checked out so `/ship` knows what to land
+
+**Commits:**
+- Conventional-style messages (`feat:`, `fix:`, `test:`, `chore:`, `docs:`, `refactor:`)
+- Keep messages concrete; explain why in the body if the what is obvious from the diff
