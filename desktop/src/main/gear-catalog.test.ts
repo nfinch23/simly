@@ -224,6 +224,7 @@ describe('updateCatalogFromSwapTest', () => {
       seen_items: {},
       last_pool_signature: 'sig-1',
       last_full_sim_at: 1,
+      best_ilvl_by_slot: {},
     };
     const next = updateCatalogFromSwapTest({
       prior,
@@ -286,6 +287,7 @@ describe('findUnseenItems', () => {
       },
       last_pool_signature: 'sig',
       last_full_sim_at: 1,
+      best_ilvl_by_slot: {},
     };
     const unseen = findUnseenItems(parsed, catalog);
     expect(unseen.map((i) => i.item_id)).toEqual([2]);
@@ -322,6 +324,7 @@ describe('GearCatalogStore', () => {
       seen_items: {},
       last_pool_signature: 'sig',
       last_full_sim_at: 1,
+      best_ilvl_by_slot: {},
     };
     store.put(entry);
     expect(store.get('F-S-us', 'single_target_patchwerk')).toEqual(entry);
@@ -336,6 +339,7 @@ describe('GearCatalogStore', () => {
       seen_items: {},
       last_pool_signature: 'sig',
       last_full_sim_at: 1,
+      best_ilvl_by_slot: {},
     });
     store.clear();
     expect(store.get('F-S-us', 'single_target_patchwerk')).toBeUndefined();

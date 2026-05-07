@@ -77,6 +77,7 @@ function fakeCatalog(opts?: { dps?: number; slots?: Record<string, { item_id: nu
     seen_items: {},
     last_pool_signature: 'sig',
     last_full_sim_at: 1,
+    best_ilvl_by_slot: {},
   };
 }
 

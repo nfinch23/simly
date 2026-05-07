@@ -29,7 +29,14 @@ import {
 } from './scans/trinket-pre-scan';
 import { runGearCoarseScan } from './scans/gear-coarse';
 import { runGearRerankScan, selectSurvivors } from './scans/gear-rerank';
-import type { GearCombo, TrinketLock } from './scans/gear-pruner';
+import {
+  calibrateFromCatalog,
+  computeDpsPerIlvlPct,
+  HARD_FLOOR_PCT,
+  type GearCombo,
+  type PrunerCalibration,
+  type TrinketLock,
+} from './scans/gear-pruner';
 import { computeItemObservations, IgnoreListStore } from './ignore-list';
 import {
   mergePairResults,
@@ -893,14 +900,39 @@ export class ScanQueue {
           // items we've already classified as consistently-losing.
           // Empty Set if no catalog yet (first sim) — pruner falls
           // back to its ilvl-multiplier heuristic alone.
-          const ignoreSet = ignoredIdentities(
-            this.gearCatalog?.get(args.characterKey, args.scenario),
-          );
+          const catalogForPruner = this.gearCatalog?.get(args.characterKey, args.scenario);
+          const ignoreSet = ignoredIdentities(catalogForPruner);
           if (ignoreSet.size > 0) {
             console.log(
               `[sim] gear_coarse: skipping ${ignoreSet.size} catalog-trash item(s) from cartesian`,
             );
           }
+
+          // Build calibration if we have stat weights + catalog data with
+          // enough simmed items. Falls back to ilvl-multiplier heuristic
+          // when catalog is absent or too sparse.
+          let prunerCalibration: PrunerCalibration | undefined;
+          const statWeights = weights as StatWeights;
+          if (catalogForPruner && (catalogForPruner.best_loadout_dps ?? 0) > 0) {
+            const dpsPerIlvlPct = computeDpsPerIlvlPct(statWeights, catalogForPruner.best_loadout_dps!);
+            const cal = calibrateFromCatalog(catalogForPruner, dpsPerIlvlPct);
+            if (cal) {
+              prunerCalibration = {
+                bestIlvlBySlot: catalogForPruner.best_ilvl_by_slot ?? {},
+                dpsPerIlvlPct: cal.slope,
+                maxResidualPct: cal.maxResidualPct,
+              };
+              console.log(
+                `[pruner] calibrated: ${dpsPerIlvlPct.toFixed(3)}% dps/ilvl, ` +
+                `maxResidual=${cal.maxResidualPct.toFixed(2)}%, ` +
+                `effective floor=${(HARD_FLOOR_PCT - cal.maxResidualPct - 0.5).toFixed(2)}% ` +
+                `(≈${((HARD_FLOOR_PCT - cal.maxResidualPct - 0.5) / dpsPerIlvlPct).toFixed(1)} ilvl gap)`,
+              );
+            } else {
+              console.log(`[pruner] not enough catalog data for calibration — using ilvl multiplier fallback`);
+            }
+          }
+
           const { result, combosByName: coarseCombos } = await runGearCoarseScan({
             paths: runnerPaths,
             baseProfile: args.baseProfile,
@@ -911,6 +943,7 @@ export class ScanQueue {
             iterations: s.coarseIterations,
             multiplier: s.prunerMultiplier,
             maxCombos: s.maxCombos,
+            calibration: prunerCalibration,
             onProgress: gcProgress.onProgress,
             onPlanReady: (plan) => {
               const slotSummary = Object.entries(plan.perSlotSurvivors)
@@ -953,6 +986,7 @@ export class ScanQueue {
                 scenario: args.scenario,
                 pool_signature: fullPoolSignature(args.parsedExport),
                 combos: result.combos,
+                parsedExport: args.parsedExport,
               });
               this.gearCatalog.put(updated);
               console.log(
@@ -1043,6 +1077,7 @@ export class ScanQueue {
                     scenario: args.scenario,
                     pool_signature: fullPoolSignature(args.parsedExport),
                     combos: r.result.combos,
+                    parsedExport: args.parsedExport,
                   });
                   this.gearCatalog.put(updated);
                 } catch (err) {
@@ -1117,6 +1152,7 @@ export class ScanQueue {
                       scenario: args.scenario,
                       pool_signature: fullPoolSignature(args.parsedExport),
                       combos: f.result.combos,
+                      parsedExport: args.parsedExport,
                     });
                     this.gearCatalog.put(updated);
                     console.log(

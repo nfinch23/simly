@@ -27,6 +27,27 @@ import {
 } from '../simc-export-parser';
 import type { StatWeights } from '@simly/shared';
 import { DEFAULT_MAX_COMBOS, DEFAULT_PRUNER_MULTIPLIER as PRUNER_MULTIPLIER_FROM_CONFIG } from '../gear-config';
+import type { GearCatalogEntry } from '../gear-catalog';
+
+// ---------------------------------------------------------------------------
+// Calibration constants
+// ---------------------------------------------------------------------------
+
+/** DPS gained per 1 ilvl via primary stat scaling (1:1 with ilvl). */
+const INT_PER_ILVL = 1.0;
+/** Secondary stat budget per ilvl (approx. sum of all secondaries per point). */
+const SECONDARY_BUDGET_PER_ILVL = 1.8;
+/** Default max residual % when no calibration is available. */
+const DEFAULT_MAX_RESIDUAL_PCT = 1.5;
+/** Hard floor: items that would cost more than this % DPS are dropped. */
+export const HARD_FLOOR_PCT = 3.0;
+/** Safety buffer added on top of measured residual to avoid false pruning. */
+const SAFETY_BUFFER_PCT = 0.5;
+/** Minimum simmed-item count before calibration is trusted. */
+const CALIBRATION_MIN_SAMPLES = 5;
+
+// DEFAULT_MAX_RESIDUAL_PCT is intentionally not exported — it's the cold-start fallback
+// used when calibration is unavailable. External callers use PrunerCalibration.maxResidualPct.
 
 /**
  * Slots that participate in the gear cartesian. Trinkets are excluded
@@ -71,6 +92,85 @@ export type Scorer = (item: ParsedItem, weights: StatWeights) => number;
  */
 export const ilvlScorer: Scorer = (item, _weights) => item.ilvl;
 
+// ---------------------------------------------------------------------------
+// Calibration types + pure functions
+// ---------------------------------------------------------------------------
+
+/**
+ * Calibration input for pruneSinglePool. When provided, the pruner
+ * replaces the ilvl-multiplier heuristic with a DPS-model estimate
+ * for each slot, using the measured residual as a principled buffer.
+ */
+export interface PrunerCalibration {
+  bestIlvlBySlot: Record<string, number>;
+  dpsPerIlvlPct: number;
+  maxResidualPct: number;
+  /** Hard floor % — items predicted to lose by more than this are dropped. Default HARD_FLOOR_PCT. */
+  hardFloorPct?: number;
+  /** Safety buffer added on top of residual to avoid false pruning. Default SAFETY_BUFFER_PCT. */
+  safetyBufferPct?: number;
+}
+
+/**
+ * Estimate % DPS per ilvl using stat weights and a reference DPS.
+ * Primary stat (intellect/str/agi) scales 1:1 with ilvl.
+ * Secondary budget scales by SECONDARY_BUDGET_PER_ILVL per ilvl.
+ * Returns percent (e.g. 0.3 means 0.3% DPS per ilvl).
+ */
+export function computeDpsPerIlvlPct(
+  weights: StatWeights,
+  bestLoadoutDps: number,
+): number {
+  if (bestLoadoutDps <= 0) return 0;
+  const primaryWeight = Math.max(
+    weights.intellect ?? 0,
+    weights.strength ?? 0,
+    weights.agility ?? 0,
+  );
+  const secondaryWeights = [
+    weights.crit ?? 0,
+    weights.haste ?? 0,
+    weights.mastery ?? 0,
+    weights.versatility ?? 0,
+  ];
+  const nonZeroSecondaries = secondaryWeights.filter(w => w > 0);
+  const avgSecondaryWeight = nonZeroSecondaries.length > 0
+    ? nonZeroSecondaries.reduce((a, b) => a + b, 0) / nonZeroSecondaries.length
+    : 0;
+  const dpsPerIlvl =
+    primaryWeight * INT_PER_ILVL +
+    avgSecondaryWeight * SECONDARY_BUDGET_PER_ILVL;
+  return (dpsPerIlvl / bestLoadoutDps) * 100;
+}
+
+/**
+ * Calibrate the ilvl→delta_pct model against actual sim results in the catalog.
+ * For each seen item with times_simmed >= 1:
+ *   predicted_delta = (item.ilvl - slot_best_ilvl) × dpsPerIlvlPct
+ *   residual = |predicted_delta - item.best_delta_pct|
+ * Returns { slope, maxResidualPct } or null if fewer than minSamples items available.
+ */
+export function calibrateFromCatalog(
+  catalog: GearCatalogEntry,
+  dpsPerIlvlPct: number,
+  minSamples = CALIBRATION_MIN_SAMPLES,
+): { slope: number; maxResidualPct: number } | null {
+  const items = Object.values(catalog.seen_items).filter(
+    item => item.times_simmed >= 1,
+  );
+  if (items.length < minSamples) return null;
+
+  let maxResidual = 0;
+  for (const item of items) {
+    const slotBestIlvl = catalog.best_ilvl_by_slot[item.slot] ?? item.ilvl;
+    const predicted = (item.ilvl - slotBestIlvl) * dpsPerIlvlPct;
+    const residual = Math.abs(predicted - item.best_delta_pct);
+    if (residual > maxResidual) maxResidual = residual;
+  }
+
+  return { slope: dpsPerIlvlPct, maxResidualPct: maxResidual };
+}
+
 /**
  * Optional pair of trinkets locked from the 4c pre-scan winner. The
  * pruner does not score or prune trinkets; this pair is emitted
@@ -99,6 +199,13 @@ export interface PruneOptions {
   scorer?: Scorer;
   /** Locked trinket pair from the 4c pre-scan. Required for `buildGearProfileset`. */
   trinketLock?: TrinketLock;
+  /**
+   * Optional calibration from gear catalog + stat weights. When provided and
+   * a slot has a bestIlvl entry, replaces the score×multiplier check with a
+   * DPS-model estimate that uses the measured residual as a pruning buffer.
+   * Falls back to the multiplier heuristic when calibration is absent.
+   */
+  calibration?: PrunerCalibration;
 }
 
 /**
@@ -144,7 +251,7 @@ export function pruneGearPool(opts: PruneOptions): PruneResult {
     const pool = opts.parsed.poolBySlot[slot] ?? [];
     prePruneSizes[slot] = pool.length;
     if (pool.length === 0) continue;
-    perSlot[slot] = pruneSinglePool(pool, scorer, opts.weights, multiplier, ignoreSet);
+    perSlot[slot] = pruneSinglePool(pool, scorer, opts.weights, multiplier, ignoreSet, slot, opts.calibration);
   }
 
   // Rings: merge finger1 + finger2 pools, dedupe by identity (the addon
@@ -156,8 +263,9 @@ export function pruneGearPool(opts: PruneOptions): PruneResult {
     ...(opts.parsed.poolBySlot.finger2 ?? []),
   ]);
   prePruneSizes.finger1 = ringPool.length;
+  // Rings use 'finger1' as the canonical slot name for calibration lookup.
   const prunedRings = ringPool.length > 0
-    ? pruneSinglePool(ringPool, scorer, opts.weights, multiplier, ignoreSet)
+    ? pruneSinglePool(ringPool, scorer, opts.weights, multiplier, ignoreSet, 'finger1', opts.calibration)
     : [];
   const ringPairs: Array<[ParsedItem, ParsedItem]> = [];
   for (const [a, b] of allUnorderedPairs(prunedRings)) {
@@ -190,6 +298,14 @@ export function pruneGearPool(opts: PruneOptions): PruneResult {
  *
  * Items with score <= 0 are excluded from leader selection (a 0 ilvl
  * sentinel would otherwise let the entire pool through).
+ *
+ * When `calibration` is provided AND the slot has a bestIlvl entry,
+ * replaces the score×multiplier check with a DPS-model estimate. The
+ * calibrated path keeps an item if its predicted DPS delta (relative
+ * to the best-ilvl item in the slot) minus the measured residual and
+ * safety buffer doesn't breach the hard floor. Falls back to the
+ * multiplier heuristic when the slot has no calibration data or when
+ * residual + buffer >= hardFloor (degenerate: would drop everything).
  */
 function pruneSinglePool(
   pool: readonly ParsedItem[],
@@ -197,6 +313,8 @@ function pruneSinglePool(
   weights: StatWeights,
   multiplier: number,
   ignoreSet: ReadonlySet<string>,
+  slotName?: string,
+  calibration?: PrunerCalibration,
 ): ParsedItem[] {
   const eligible = pool.filter((it) => !ignoreSet.has(it.identity));
   if (eligible.length === 0) return [];
@@ -210,6 +328,31 @@ function pruneSinglePool(
     // Keep the first item so downstream sim still runs.
     return [eligible[0]!];
   }
+
+  // Calibrated path: use DPS-model estimate instead of raw ilvl multiplier.
+  if (calibration && slotName) {
+    const bestIlvl = calibration.bestIlvlBySlot[slotName];
+    if (bestIlvl !== undefined) {
+      const hardFloor = calibration.hardFloorPct ?? HARD_FLOOR_PCT;
+      const safetyBuffer = calibration.safetyBufferPct ?? SAFETY_BUFFER_PCT;
+      // Safety: if residual + buffer >= hardFloor, the window would be 0 or
+      // negative — always keep everything to avoid over-pruning.
+      if (calibration.maxResidualPct + safetyBuffer >= hardFloor) {
+        return eligible.slice();
+      }
+      const survivors: ParsedItem[] = [];
+      for (const it of eligible) {
+        const predictedDelta = (it.ilvl - bestIlvl) * calibration.dpsPerIlvlPct;
+        const keep = predictedDelta - calibration.maxResidualPct - safetyBuffer >= -hardFloor;
+        if (keep) survivors.push(it);
+      }
+      // Always return at least one item so downstream sim still runs.
+      if (survivors.length === 0) return [eligible[0]!];
+      return survivors;
+    }
+  }
+
+  // Fallback: original multiplier heuristic.
   const survivors: ParsedItem[] = [];
   for (const it of eligible) {
     if (scorer(it, weights) * multiplier >= maxScore) survivors.push(it);

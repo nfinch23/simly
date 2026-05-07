@@ -43,6 +43,7 @@ function catalogWith(opts: {
     seen_items: opts.seen_items ?? {},
     last_pool_signature: opts.pool_signature,
     last_full_sim_at: 1,
+    best_ilvl_by_slot: {},
   };
 }
 

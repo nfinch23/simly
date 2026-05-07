@@ -14,6 +14,7 @@ import {
   buildGearProfileset,
   pruneGearPool,
   type GearCombo,
+  type PrunerCalibration,
   type TrinketLock,
 } from './gear-pruner';
 import type { ParsedExport } from '../simc-export-parser';
@@ -35,6 +36,8 @@ export interface RunGearCoarseOptions {
   ignoreSet?: ReadonlySet<string>;
   /** Hard cap on emitted combos. Default 5000 (gear-pruner default). */
   maxCombos?: number;
+  /** Optional calibration from gear catalog. When provided, replaces ilvl-multiplier pruning. */
+  calibration?: PrunerCalibration;
   /** Streamed progress lines from SimC stdout/stderr. */
   onProgress?: Parameters<typeof runSimc>[0]['onProgress'];
   /**
@@ -67,6 +70,7 @@ export async function runGearCoarseScan(
     multiplier: opts.multiplier,
     ignoreSet: opts.ignoreSet,
     trinketLock: opts.trinketLock,
+    calibration: opts.calibration,
   });
   const build = buildGearProfileset(prune, { maxCombos: opts.maxCombos });
 

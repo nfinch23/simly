@@ -91,6 +91,8 @@ export interface GearCatalogEntry {
   last_pool_signature: string;
   last_full_sim_at: number;
   last_quick_sim_at?: number;
+  /** Max ilvl seen per slot across all sims; used by calibrated pruner. */
+  best_ilvl_by_slot: Record<string, number>;
 }
 
 export interface ClassificationThresholds {
@@ -206,6 +208,8 @@ export function updateCatalogFromGearScan(opts: {
   }>;
   thresholds?: ClassificationThresholds;
   now?: number;
+  /** When provided, used to compute best_ilvl_by_slot. */
+  parsedExport?: ParsedExport;
 }): GearCatalogEntry {
   const now = opts.now ?? Math.floor(Date.now() / 1000);
   const seen_items: Record<string, CatalogItemRecord> = { ...(opts.prior?.seen_items ?? {}) };
@@ -285,6 +289,19 @@ export function updateCatalogFromGearScan(opts: {
     }
   }
 
+  // Compute best_ilvl_by_slot: merge prior values with ilvl from the
+  // current parsed export (equipped + bag), taking the max per slot.
+  const priorBestIlvl: Record<string, number> = opts.prior?.best_ilvl_by_slot ?? {};
+  const best_ilvl_by_slot: Record<string, number> = { ...priorBestIlvl };
+  if (opts.parsedExport) {
+    for (const item of [...opts.parsedExport.equipped, ...opts.parsedExport.bag]) {
+      const prior = best_ilvl_by_slot[item.slot];
+      if (prior === undefined || item.ilvl > prior) {
+        best_ilvl_by_slot[item.slot] = item.ilvl;
+      }
+    }
+  }
+
   return {
     character_key: opts.character_key,
     scenario: opts.scenario,
@@ -295,6 +312,7 @@ export function updateCatalogFromGearScan(opts: {
     last_pool_signature: opts.pool_signature,
     last_full_sim_at: now,
     last_quick_sim_at: opts.prior?.last_quick_sim_at,
+    best_ilvl_by_slot,
   };
 }
 
