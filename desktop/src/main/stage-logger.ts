@@ -35,6 +35,15 @@ export function setWindowTitle(title: string): void {
   }
 }
 
+export function terminalTitle(
+  outcome: 'ok' | 'failed',
+  characterKey: string,
+): string {
+  return outcome === 'ok'
+    ? `Simly — Up to date (${characterKey})`
+    : `Simly — Scan failed (${characterKey})`;
+}
+
 /**
  * "5s ago" / "2h ago" / "(unknown)" formatter for log lines.
  * Pure — exported separately so it can be tested without mocking

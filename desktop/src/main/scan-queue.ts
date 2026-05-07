@@ -77,6 +77,7 @@ import {
   makeStageProgressLogger,
   setWindowTitle,
   showScanCompleteNotification,
+  terminalTitle,
 } from './stage-logger';
 import {
   tryCreateGearCatalog,
@@ -670,6 +671,7 @@ export class ScanQueue {
     this.currentScenario = args.scenario;
     this.emitState();
     setWindowTitle(`Simly — Scan running for ${args.characterKey}…`);
+    let scanOutcome: 'ok' | 'failed' = 'failed';
     try {
       const runnerPaths = {
         binPath: this.opts.simc.binPath,
@@ -698,7 +700,7 @@ export class ScanQueue {
           earlyExitKind: earlyExit,
         });
         this.lastCompletedAt = finishedAt;
-        setWindowTitle(`Simly — Up to date (${args.characterKey})`);
+        scanOutcome = 'ok';
         // Use a synthesized scans summary in the notification so the
         // node-notifier toast says something useful instead of "no
         // scans completed".
@@ -1313,8 +1315,9 @@ export class ScanQueue {
       }
 
       this.lastCompletedAt = finishedAt;
-      setWindowTitle(`Simly — Up to date (${args.characterKey})`);
+      scanOutcome = 'ok';
     } finally {
+      setWindowTitle(terminalTitle(scanOutcome, args.characterKey));
       this.inFlight = false;
       this.runStartedAt = null;
       this.emitState();
