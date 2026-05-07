@@ -208,7 +208,17 @@ end
 -- desktop right now, wait for the notification."
 local function statusBlock()
 	local req = (SimlyDB and SimlyDB.update_requested_at) or 0
-	local gen = (SimlyResults and SimlyResults.generated_at) or 0
+	-- v3 schema: generated_at lives inside scenarios[active_scenario].
+	-- v2 fallback kept for results files written before Phase 6b.
+	local activeScenario = (SimlyDB and SimlyDB.active_scenario) or "single_target_patchwerk"
+	local gen = 0
+	if SimlyResults then
+		if SimlyResults.scenarios and SimlyResults.scenarios[activeScenario] then
+			gen = SimlyResults.scenarios[activeScenario].generated_at or 0
+		elseif SimlyResults.generated_at then
+			gen = SimlyResults.generated_at
+		end
+	end
 	if req == 0 and gen == 0 then
 		return "|cffaaaaaaStatus:|r |cffaaaaaaIdle (no sims have run yet — click Update sims to start one)|r"
 	end
