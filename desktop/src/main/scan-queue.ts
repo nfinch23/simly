@@ -27,16 +27,11 @@ import {
   runTrinketPairsSim,
   runTrinketPreScanSim,
 } from './scans/trinket-pre-scan';
-import { runGearCoarseScan } from './scans/gear-coarse';
-import { runGearRerankScan, selectSurvivors } from './scans/gear-rerank';
+import { runGreedyGearPipeline } from './scans/gear-greedy-pipeline';
 import {
-  calibrateFromCatalog,
-  computeDpsPerIlvlPct,
-  HARD_FLOOR_PCT,
-  type GearCombo,
-  type PrunerCalibration,
   type TrinketLock,
 } from './scans/gear-pruner';
+import { TIE_WINDOW_PCT } from './gear-config';
 import { computeItemObservations, IgnoreListStore } from './ignore-list';
 import {
   mergePairResults,
@@ -982,87 +977,50 @@ export class ScanQueue {
         // makeStageProgressLogger swaps the title in onPlanReady below.
         const gcProgress = makeStageProgressLogger('gear_coarse', args.characterKey);
         try {
-          // Pull the catalog's trash list so the pruner can skip
-          // items we've already classified as consistently-losing.
-          // Empty Set if no catalog yet (first sim) — pruner falls
-          // back to its ilvl-multiplier heuristic alone.
+          // Greedy pipeline: replaces the gear_coarse → gear_refined →
+          // gear_final cascade. Walks each bag item against the current
+          // best, folds upgrades in one at a time until convergence,
+          // then runs an exhaustive 2-and-3 cartesian over remaining
+          // rejects to catch breakpoint synergies. See gear-greedy-pipeline.ts.
           const catalogForPruner = this.gearCatalog?.get(args.characterKey, args.scenario);
-          const ignoreSet = ignoredIdentities(catalogForPruner);
-          if (ignoreSet.size > 0) {
-            console.log(
-              `[sim] gear_coarse: skipping ${ignoreSet.size} catalog-trash item(s) from cartesian`,
-            );
-          }
+          const baselineDps = catalogForPruner?.best_loadout_dps ?? 100_000; // first-run default
 
-          // Build calibration if we have stat weights + catalog data with
-          // enough simmed items. Falls back to ilvl-multiplier heuristic
-          // when catalog is absent or too sparse.
-          let prunerCalibration: PrunerCalibration | undefined;
-          const statWeights = weights as StatWeights;
-          if (catalogForPruner && (catalogForPruner.best_loadout_dps ?? 0) > 0) {
-            const dpsPerIlvlPct = computeDpsPerIlvlPct(statWeights, catalogForPruner.best_loadout_dps!);
-            const cal = calibrateFromCatalog(catalogForPruner, dpsPerIlvlPct);
-            if (cal) {
-              prunerCalibration = {
-                bestIlvlBySlot: catalogForPruner.best_ilvl_by_slot ?? {},
-                dpsPerIlvlPct: cal.slope,
-                maxResidualPct: cal.maxResidualPct,
-              };
-              console.log(
-                `[pruner] calibrated: ${dpsPerIlvlPct.toFixed(3)}% dps/ilvl, ` +
-                `maxResidual=${cal.maxResidualPct.toFixed(2)}%, ` +
-                `effective floor=${(HARD_FLOOR_PCT - cal.maxResidualPct - 0.5).toFixed(2)}% ` +
-                `(≈${((HARD_FLOOR_PCT - cal.maxResidualPct - 0.5) / dpsPerIlvlPct).toFixed(1)} ilvl gap)`,
-              );
-            } else {
-              console.log(`[pruner] not enough catalog data for calibration — using ilvl multiplier fallback`);
-            }
-          }
-
-          const { result, combosByName: coarseCombos } = await runGearCoarseScan({
+          const greedyResult = await runGreedyGearPipeline({
             paths: runnerPaths,
             baseProfile: args.baseProfile,
             parsed: args.parsedExport,
-            weights,
+            weights: weights as StatWeights,
             trinketLock,
-            ignoreSet,
-            iterations: s.coarseIterations,
-            multiplier: s.prunerMultiplier,
-            maxCombos: s.maxCombos,
-            calibration: prunerCalibration,
+            catalog: catalogForPruner,
+            bestLoadoutDps: baselineDps,
+            greedyIterations: s.coarseIterations,
+            breakpointIterations: s.refinedIterations,
+            tieWindowPct: TIE_WINDOW_PCT,
             onProgress: gcProgress.onProgress,
-            onPlanReady: (plan) => {
-              const slotSummary = Object.entries(plan.perSlotSurvivors)
-                .map(([slot, n]) => `${slot}:${n}`)
-                .join(' ');
-              console.log(
-                `[sim] gear_coarse: starting (${plan.comboCount} combos × ${s.coarseIterations} iter, ` +
-                  `${plan.ringPairs} ring-pair${plan.ringPairs === 1 ? '' : 's'}; ` +
-                  `survivors per slot: ${slotSummary})`,
-              );
-              gcProgress.setLabel(`gear_coarse (${plan.comboCount} combos)`);
-            },
           });
-          const gcFinished = Math.floor(Date.now() / 1000);
-          const gcRecord: ScanRecord<GearScanResult> = {
-            status: 'done',
-            started_at: gcStarted,
-            finished_at: gcFinished,
-            data: result,
-          };
-          scans.gear_coarse = gcRecord;
+          const result = greedyResult.result;
           gcProgress.stop();
           const dt = ((Date.now() - gc0) / 1000).toFixed(1);
           const w = result.winner;
           const winnerStr = w
-            ? `winner ${w.combo_id} @ ${Math.round(w.mean_dps)} dps (${result.combos.length} combos)`
+            ? `winner ${w.combo_id} @ ${Math.round(w.mean_dps)} dps (${greedyResult.greedyIterations} greedy iter, ${greedyResult.breakpointCombos} breakpoint combos)`
             : `(no combos)`;
-          console.log(`[sim] gear_coarse (${dt}s, 1000 iter): ${winnerStr}`);
+          console.log(`[sim] greedy gear search (${dt}s): ${winnerStr}`);
 
-          // Write to the gear catalog: best_loadout from the winning
-          // combo, seen_items classifications across every combo.
-          // This is what the next "Update sims" reads via the
-          // quick-sim gate to decide what (if anything) needs simming.
+          // Write to scans.gear_final so the composer (gear_final >
+          // gear_refined > gear_coarse) picks up the new pipeline's
+          // result without changes.
+          scans.gear_final = {
+            status: 'done',
+            started_at: gcStarted,
+            finished_at: Math.floor(Date.now() / 1000),
+            data: result,
+          };
+
+          // Update catalog from synthetic combos (winner + greedy-iter-1
+          // rejects). The winner sets best_loadout; rejects populate
+          // seen_items so the next run's bank-and-add-back workflow
+          // skips items already classified.
           if (this.gearCatalog && args.parsedExport) {
             try {
               const prior = this.gearCatalog.get(args.characterKey, args.scenario);
@@ -1084,9 +1042,7 @@ export class ScanQueue {
             }
           }
 
-          // Write losers to the ignore list. 4d-ii is write-only —
-          // the pruner doesn't read this yet. 4d-iii wires the read
-          // path. Trinkets are excluded inside computeItemObservations.
+          // Ignore-list observations from greedy-iter-1 rejects.
           if (this.ignoreList) {
             try {
               const observations = computeItemObservations(result.combos);
@@ -1106,164 +1062,6 @@ export class ScanQueue {
             }
           }
 
-          // Phase 4d-iii — refined + final stages. Each shrinks the
-          // contender set and re-sims at higher iteration count. The
-          // catalog gets re-updated after each successful stage so
-          // best_loadout converges to the most accurate winner.
-          let refinedResult: GearScanResult | undefined;
-          let refinedCombos: Map<string, GearCombo> | undefined;
-          const refinedSurvivors = selectSurvivors(
-            result.combos,
-            coarseCombos,
-            s.coarseKeepThresholdPct,
-          );
-          if (refinedSurvivors.size >= 2) {
-            const grStarted = Math.floor(Date.now() / 1000);
-            const grProgress = makeStageProgressLogger(
-              `gear_refined (${refinedSurvivors.size} combos)`,
-              args.characterKey,
-            );
-            console.log(
-              `[sim] gear_refined: starting (${refinedSurvivors.size} combos within ${s.coarseKeepThresholdPct}% × ${s.refinedIterations} iter)`,
-            );
-            try {
-              const r = await runGearRerankScan({
-                paths: runnerPaths,
-                baseProfile: args.baseProfile,
-                combos: refinedSurvivors,
-                iterations: s.refinedIterations,
-                label: `Gear ladder — refined stage (${s.refinedIterations} iter)`,
-                prefix: 'r',
-                scratchTag: `gear-refined-${Date.now()}`,
-                onProgress: grProgress.onProgress,
-              });
-              grProgress.stop();
-              refinedResult = r.result;
-              refinedCombos = r.combosByName;
-              scans.gear_refined = {
-                status: 'done',
-                started_at: grStarted,
-                finished_at: Math.floor(Date.now() / 1000),
-                data: r.result,
-              };
-              const rw = r.result.winner;
-              console.log(
-                `[sim] gear_refined: winner ${rw?.combo_id} @ ${Math.round(rw?.mean_dps ?? 0)} dps`,
-              );
-
-              // Catalog update from refined — tightens deltas for the
-              // top items, keeps coarse-stage data for items that
-              // didn't survive.
-              if (this.gearCatalog && args.parsedExport) {
-                try {
-                  const prior = this.gearCatalog.get(args.characterKey, args.scenario);
-                  const updated = updateCatalogFromGearScan({
-                    prior,
-                    character_key: args.characterKey,
-                    scenario: args.scenario,
-                    pool_signature: fullPoolSignature(args.parsedExport),
-                    combos: r.result.combos,
-                    parsedExport: args.parsedExport,
-                  });
-                  this.gearCatalog.put(updated);
-                } catch (err) {
-                  console.warn('[catalog] refined write failed:', (err as Error).message);
-                }
-              }
-            } catch (err) {
-              grProgress.stop();
-              console.error('[sim] gear_refined failed:', (err as Error).message);
-              scans.gear_refined = {
-                status: 'failed',
-                started_at: grStarted,
-                finished_at: Math.floor(Date.now() / 1000),
-                error: (err as Error).message,
-              };
-            }
-          } else {
-            console.log(
-              `[sim] gear_refined: skipped (${refinedSurvivors.size} survivor${refinedSurvivors.size === 1 ? '' : 's'} within threshold — coarse winner is decisive)`,
-            );
-          }
-
-          // Final stage — only if refined produced something to refine
-          // further. Within REFINED_KEEP_THRESHOLD_PCT of refined
-          // winner.
-          if (refinedResult && refinedCombos) {
-            const finalSurvivors = selectSurvivors(
-              refinedResult.combos,
-              refinedCombos,
-              s.refinedKeepThresholdPct,
-            );
-            if (finalSurvivors.size >= 2) {
-              const gfStarted = Math.floor(Date.now() / 1000);
-              const gfProgress = makeStageProgressLogger(
-                `gear_final (${finalSurvivors.size} combos)`,
-                args.characterKey,
-              );
-              console.log(
-                `[sim] gear_final: starting (${finalSurvivors.size} combos within ${s.refinedKeepThresholdPct}% × ${s.finalIterations} iter)`,
-              );
-              try {
-                const f = await runGearRerankScan({
-                  paths: runnerPaths,
-                  baseProfile: args.baseProfile,
-                  combos: finalSurvivors,
-                  iterations: s.finalIterations,
-                  label: `Gear ladder — final stage (${s.finalIterations} iter)`,
-                  prefix: 'f',
-                  scratchTag: `gear-final-${Date.now()}`,
-                  onProgress: gfProgress.onProgress,
-                });
-                gfProgress.stop();
-                scans.gear_final = {
-                  status: 'done',
-                  started_at: gfStarted,
-                  finished_at: Math.floor(Date.now() / 1000),
-                  data: f.result,
-                };
-                const fw = f.result.winner;
-                console.log(
-                  `[sim] gear_final: winner ${fw?.combo_id} @ ${Math.round(fw?.mean_dps ?? 0)} dps`,
-                );
-
-                // Final catalog update — sets best_loadout from the
-                // most accurate stage's winner.
-                if (this.gearCatalog && args.parsedExport) {
-                  try {
-                    const prior = this.gearCatalog.get(args.characterKey, args.scenario);
-                    const updated = updateCatalogFromGearScan({
-                      prior,
-                      character_key: args.characterKey,
-                      scenario: args.scenario,
-                      pool_signature: fullPoolSignature(args.parsedExport),
-                      combos: f.result.combos,
-                      parsedExport: args.parsedExport,
-                    });
-                    this.gearCatalog.put(updated);
-                    console.log(
-                      `[catalog] best loadout dps=${Math.round(updated.best_loadout_dps ?? 0)} (final stage)`,
-                    );
-                  } catch (err) {
-                    console.warn('[catalog] final write failed:', (err as Error).message);
-                  }
-                }
-              } catch (err) {
-                gfProgress.stop();
-                console.error('[sim] gear_final failed:', (err as Error).message);
-                scans.gear_final = {
-                  status: 'failed',
-                  started_at: gfStarted,
-                  finished_at: Math.floor(Date.now() / 1000),
-                  error: (err as Error).message,
-                };
-              }
-            } else {
-              console.log(
-                `[sim] gear_final: skipped (${finalSurvivors.size} survivor${finalSurvivors.size === 1 ? '' : 's'} within threshold — refined winner is decisive)`,
-              );
-            }
-          }
         } catch (err) {
           gcProgress.stop();
           console.error('[sim] gear_coarse failed:', (err as Error).message);
