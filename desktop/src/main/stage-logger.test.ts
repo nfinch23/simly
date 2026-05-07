@@ -3,6 +3,7 @@ import {
   formatRelative,
   isInterestingSimcLine,
   INTERESTING_SIMC_PATTERNS,
+  terminalTitle,
 } from './stage-logger';
 
 describe('formatRelative', () => {
@@ -82,5 +83,23 @@ describe('isInterestingSimcLine', () => {
   it('exposes the pattern array for inspection', () => {
     expect(INTERESTING_SIMC_PATTERNS.length).toBeGreaterThan(0);
     expect(INTERESTING_SIMC_PATTERNS[0]).toBeInstanceOf(RegExp);
+  });
+});
+
+describe('terminalTitle', () => {
+  it('returns "Up to date" for ok outcome', () => {
+    expect(terminalTitle('ok', 'Felfriend-Zuljin')).toBe(
+      'Simly — Up to date (Felfriend-Zuljin)',
+    );
+  });
+
+  it('returns "Scan failed" for failed outcome', () => {
+    expect(terminalTitle('failed', 'Felfriend-Zuljin')).toBe(
+      'Simly — Scan failed (Felfriend-Zuljin)',
+    );
+  });
+
+  it('handles empty character key (unhandled-throw degenerate case)', () => {
+    expect(terminalTitle('failed', '')).toBe('Simly — Scan failed ()');
   });
 });
