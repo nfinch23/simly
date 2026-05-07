@@ -74,7 +74,7 @@ describe('generateCombos', () => {
     const combos = generateCombos([
       makeItem('chest', 'A'),
       makeItem('legs', 'B'),
-      makeItem('gloves', 'C'),
+      makeItem('hands', 'C'),
     ]);
     // C(3,2)=3 pairs + C(3,3)=1 triple = 4 total
     expect(combos.filter((c) => c.id.startsWith('bp2_'))).toHaveLength(3);
@@ -108,7 +108,7 @@ describe('applyComboToLoadout', () => {
     const loadout: Record<string, ParsedItem> = {
       chest: makeItem('chest', 'EQ_C', 270),
       legs: makeItem('legs', 'EQ_L', 270),
-      gloves: makeItem('gloves', 'EQ_G', 270),
+      hands: makeItem('hands', 'EQ_G', 270),
     };
     const combo = {
       id: 'bp2_xyz',
@@ -120,7 +120,7 @@ describe('applyComboToLoadout', () => {
     const out = applyComboToLoadout(loadout, combo);
     expect(out['chest']!.identity).toBe('NEW_C');
     expect(out['legs']!.identity).toBe('NEW_L');
-    expect(out['gloves']!.identity).toBe('EQ_G'); // untouched
+    expect(out['hands']!.identity).toBe('EQ_G'); // untouched
   });
 
   it('does not mutate the input loadout', () => {

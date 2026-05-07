@@ -20,12 +20,12 @@
 
 import type { StatWeights } from '@simly/shared';
 
-const SECONDARY_STATS: ReadonlyArray<keyof StatWeights> = [
+const SECONDARY_STATS = [
   'haste',
   'crit',
   'mastery',
   'versatility',
-];
+] as const;
 
 export interface DetectLiveStatsOptions {
   weightsOriginal: StatWeights;
