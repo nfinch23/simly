@@ -9,7 +9,7 @@ See [DESIGN.md](DESIGN.md) for the why and [SCOPE.md](SCOPE.md) for the what.
 
 ## Status
 
-Phase 0 — repo bootstrap. Not usable yet.
+Phases 4–6 shipped (core sim pipeline, desktop UI, scenario selector). Usable end-to-end on retail WoW for Demonology Warlock; other specs work via SimC export but haven't been live-tested. See [SCOPE.md](SCOPE.md) for full status and [CLAUDE.md](CLAUDE.md) for per-phase commit detail.
 
 ## Repo layout
 
