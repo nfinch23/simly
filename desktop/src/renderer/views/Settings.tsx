@@ -154,6 +154,66 @@ function IgnoreListPanel({ characterKey }: { characterKey: string | null }): JSX
 }
 
 // ---------------------------------------------------------------------------
+// Dev tools panel
+// ---------------------------------------------------------------------------
+
+function DevToolsPanel(): JSX.Element {
+  const [busy, setBusy] = useState(false);
+  const [lastResult, setLastResult] = useState<string | null>(null);
+
+  async function clearSimCache(): Promise<void> {
+    if (
+      !confirm(
+        'Wipe ALL persisted sim state?\n\n' +
+          '• Gear catalog (every item ever simmed)\n' +
+          '• Trinket pair cache\n' +
+          '• Ignore list (including manual re-includes)\n' +
+          '• SimlyResults.lua (the addon will show "no results" until next sim)\n\n' +
+          'The next "Update sims" click will run the full pipeline from scratch.',
+      )
+    ) {
+      return;
+    }
+    setBusy(true);
+    setLastResult(null);
+    try {
+      const r = await window.simly.clearSimCache();
+      if (r.inFlight) {
+        setLastResult('Refused — a scan is currently in flight. Wait for it to finish and try again.');
+        return;
+      }
+      const parts: string[] = [];
+      if (r.catalogCleared) parts.push('catalog');
+      if (r.trinketCleared) parts.push('trinket cache');
+      if (r.ignoreCleared) parts.push('ignore list');
+      if (r.resultsLuaDeleted) parts.push('SimlyResults.lua');
+      setLastResult(parts.length === 0 ? 'Nothing to clear.' : `Cleared: ${parts.join(', ')}.`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div style={card}>
+      <div style={{ padding: '6px 0' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <span style={{ color: '#a0a0a8', minWidth: 240, flexShrink: 0 }}>Clear sim cache</span>
+          <button style={dangerBtn} disabled={busy} onClick={() => void clearSimCache()}>
+            {busy ? 'Clearing…' : 'Wipe everything'}
+          </button>
+        </div>
+        <p style={{ color: '#5a5a64', fontSize: 11, margin: '2px 0 0 252px' }}>
+          Forget every previous sim so the next run starts from scratch. Useful for testing the pipeline by re-adding gear from the bank one piece at a time.
+        </p>
+        {lastResult && (
+          <p style={{ color: '#4caf50', fontSize: 12, margin: '6px 0 0 252px' }}>{lastResult}</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Main Settings view
 // ---------------------------------------------------------------------------
 
@@ -322,6 +382,9 @@ export function Settings(): JSX.Element {
 
       <h2 style={{ ...heading, marginTop: 32 }}>Ignore list</h2>
       <IgnoreListPanel characterKey={state.characterKey} />
+
+      <h2 style={{ ...heading, marginTop: 32 }}>Dev tools</h2>
+      <DevToolsPanel />
     </div>
   );
 }

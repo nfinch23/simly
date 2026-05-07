@@ -29,6 +29,7 @@ export const IPC_SETTINGS_SET = 'settings:set';
 export const IPC_IGNORE_LIST_LIST = 'ignore-list:list';
 export const IPC_IGNORE_LIST_REMOVE = 'ignore-list:remove';
 export const IPC_IGNORE_LIST_CLEAR = 'ignore-list:clear';
+export const IPC_DEV_CLEAR_SIM_CACHE = 'dev:clear-sim-cache';
 
 // ---------------------------------------------------------------------------
 // Payload types
@@ -63,4 +64,14 @@ export interface RemoveIgnoreEntryArgs {
   characterKey: string;
   scenario: string;
   itemIdentity: string;
+}
+
+/** Result of a dev "Clear sim cache" invocation. */
+export interface ClearSimCacheResult {
+  /** True if the clear was refused because a scan is in flight. */
+  inFlight: boolean;
+  catalogCleared: boolean;
+  trinketCleared: boolean;
+  ignoreCleared: boolean;
+  resultsLuaDeleted: boolean;
 }

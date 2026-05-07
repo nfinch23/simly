@@ -20,6 +20,7 @@ import {
   IPC_IGNORE_LIST_LIST,
   IPC_IGNORE_LIST_REMOVE,
   IPC_IGNORE_LIST_CLEAR,
+  IPC_DEV_CLEAR_SIM_CACHE,
   type QueueState,
   type PasteProfileArgs,
   type IgnoreListFilter,
@@ -91,6 +92,21 @@ function registerIpcHandlers(): void {
     ignoreListStore.markManuallyRemoved(args.characterKey, args.scenario, args.itemIdentity),
   );
   ipcMain.handle(IPC_IGNORE_LIST_CLEAR, () => ignoreListStore.clear());
+
+  // Dev tools — full sim cache wipe
+  ipcMain.handle(IPC_DEV_CLEAR_SIM_CACHE, async () => {
+    if (!queue) {
+      return {
+        inFlight: false,
+        catalogCleared: false,
+        trinketCleared: false,
+        ignoreCleared: false,
+        resultsLuaDeleted: false,
+      };
+    }
+    return queue.clearAllCaches();
+  });
+
   void resetSettings; // available but not wired to IPC in Phase 5 — Settings UI uses setSettings
 }
 
