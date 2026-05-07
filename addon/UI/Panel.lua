@@ -208,25 +208,47 @@ end
 -- desktop right now, wait for the notification."
 local function statusBlock()
 	local req = (SimlyDB and SimlyDB.update_requested_at) or 0
-	-- v3 schema: generated_at lives inside scenarios[active_scenario].
-	-- v2 fallback kept for results files written before Phase 6b.
 	local activeScenario = (SimlyDB and SimlyDB.active_scenario) or "single_target_patchwerk"
-	local gen = 0
+
+	-- "Is the desktop running a scan right now?" is global state — there's
+	-- only one update_requested_at, and the desktop processes one scan at
+	-- a time regardless of which scenario the user was on when they clicked.
+	-- A request is satisfied when ANY scenario completes after it. So we
+	-- compare the request stamp to the max generated_at across all
+	-- scenarios — not the active scenario's own (otherwise switching to
+	-- a scenario that wasn't recently scanned would falsely show "running").
+	local globalMaxGen = 0
+	-- The active scenario's own last-scanned time (shown when desktop is idle).
+	local activeGen = 0
 	if SimlyResults then
-		if SimlyResults.scenarios and SimlyResults.scenarios[activeScenario] then
-			gen = SimlyResults.scenarios[activeScenario].generated_at or 0
+		if SimlyResults.scenarios then
+			for _, bucket in pairs(SimlyResults.scenarios) do
+				if bucket.generated_at and bucket.generated_at > globalMaxGen then
+					globalMaxGen = bucket.generated_at
+				end
+			end
+			if SimlyResults.scenarios[activeScenario] then
+				activeGen = SimlyResults.scenarios[activeScenario].generated_at or 0
+			end
 		elseif SimlyResults.generated_at then
-			gen = SimlyResults.generated_at
+			-- v2 fallback for legacy results files (pre-Phase-6b).
+			globalMaxGen = SimlyResults.generated_at
+			activeGen = SimlyResults.generated_at
 		end
 	end
-	if req == 0 and gen == 0 then
+
+	if req == 0 and globalMaxGen == 0 then
 		return "|cffaaaaaaStatus:|r |cffaaaaaaIdle (no sims have run yet — click Update sims to start one)|r"
 	end
-	if req > gen then
+	if req > globalMaxGen then
 		local age = formatAge(req)
 		return "|cffaaaaaaStatus:|r |cffffff00\226\151\143 Scan running on desktop|r |cffaaaaaa(started " .. age .. " — wait for desktop notification, then /reload)|r"
 	end
-	return "|cffaaaaaaStatus:|r |cff00ff00\226\151\143 Up to date|r |cffaaaaaa(results " .. formatAge(gen) .. ")|r"
+	-- Desktop is idle. Surface this scenario's own freshness.
+	if activeGen == 0 then
+		return "|cffaaaaaaStatus:|r |cffff8c00\226\151\143 No results for this scenario yet|r |cffaaaaaa(click Update sims while on this scenario)|r"
+	end
+	return "|cffaaaaaaStatus:|r |cff00ff00\226\151\143 Up to date|r |cffaaaaaa(results " .. formatAge(activeGen) .. ")|r"
 end
 
 -- Human-readable labels for the scenario key (shown in the status block).
