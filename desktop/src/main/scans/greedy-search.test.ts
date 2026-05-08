@@ -3,6 +3,7 @@ import {
   candidatesNotInLoadout,
   filterTrashFromBag,
   loadoutToBestLoadout,
+  preFilterCandidates,
   runGreedyGearSearch,
   selectBestUpgrade,
   type SwapTestRunner,
@@ -146,6 +147,85 @@ describe('filterTrashFromBag', () => {
       last_pool_signature: '', last_full_sim_at: 0, best_ilvl_by_slot: {},
     };
     expect(filterTrashFromBag(bag, catalog)).toHaveLength(1);
+  });
+});
+
+describe('preFilterCandidates', () => {
+  it('keeps candidates whose predicted delta is above the hard floor', () => {
+    // 285 vs 270 incumbent = +15 ilvl × 0.3 = +4.5%. Above -3%.
+    const r = preFilterCandidates({
+      candidates: [makeItem({ slot: 'chest', identity: 'A', ilvl: 285 })],
+      loadout: { chest: makeItem({ slot: 'chest', identity: 'EQ', ilvl: 270 }) },
+      dpsPerIlvlPct: 0.3,
+      hardFloorPct: 3.0,
+    });
+    expect(r.kept).toHaveLength(1);
+    expect(r.dropped).toHaveLength(0);
+  });
+
+  it('drops candidates predicted to lose by more than the hard floor', () => {
+    // 250 vs 290 incumbent = -40 ilvl × 0.3 = -12%. Below -3% → drop.
+    const r = preFilterCandidates({
+      candidates: [makeItem({ slot: 'chest', identity: 'B', ilvl: 250 })],
+      loadout: { chest: makeItem({ slot: 'chest', identity: 'EQ', ilvl: 290 }) },
+      dpsPerIlvlPct: 0.3,
+      hardFloorPct: 3.0,
+    });
+    expect(r.kept).toEqual([]);
+    expect(r.dropped).toHaveLength(1);
+    expect(r.dropped[0]!.predictedPct).toBeCloseTo(-12, 1);
+  });
+
+  it('disables the filter when dpsPerIlvlPct is 0 (no stat weights yet)', () => {
+    const r = preFilterCandidates({
+      candidates: [
+        makeItem({ slot: 'chest', identity: 'A', ilvl: 100 }),
+        makeItem({ slot: 'chest', identity: 'B', ilvl: 280 }),
+      ],
+      loadout: { chest: makeItem({ slot: 'chest', identity: 'EQ', ilvl: 290 }) },
+      dpsPerIlvlPct: 0,
+    });
+    expect(r.kept).toHaveLength(2);
+    expect(r.dropped).toHaveLength(0);
+  });
+
+  it('keeps a candidate for an empty slot unconditionally', () => {
+    const r = preFilterCandidates({
+      candidates: [makeItem({ slot: 'chest', identity: 'A', ilvl: 100 })],
+      loadout: {}, // no incumbent in chest
+      dpsPerIlvlPct: 0.3,
+      hardFloorPct: 3.0,
+    });
+    expect(r.kept).toHaveLength(1);
+  });
+
+  it('uses the worse-ilvl finger as the bar for ring candidates', () => {
+    // f1=290, f2=270. Worse bar = 270. Candidate 280 → +10 ilvl × 0.3 = +3% above floor → kept.
+    const loadout = {
+      finger1: makeItem({ slot: 'finger1', identity: 'F1', ilvl: 290 }),
+      finger2: makeItem({ slot: 'finger2', identity: 'F2', ilvl: 270 }),
+    };
+    const r = preFilterCandidates({
+      candidates: [makeItem({ slot: 'finger1', identity: 'NEW', ilvl: 280 })],
+      loadout,
+      dpsPerIlvlPct: 0.3,
+      hardFloorPct: 3.0,
+    });
+    expect(r.kept).toHaveLength(1);
+  });
+
+  it('drops a ring candidate that loses to BOTH finger positions by hard floor', () => {
+    const loadout = {
+      finger1: makeItem({ slot: 'finger1', identity: 'F1', ilvl: 290 }),
+      finger2: makeItem({ slot: 'finger2', identity: 'F2', ilvl: 285 }),
+    };
+    const r = preFilterCandidates({
+      candidates: [makeItem({ slot: 'finger1', identity: 'NEW', ilvl: 250 })],
+      loadout,
+      dpsPerIlvlPct: 0.3,
+      hardFloorPct: 3.0,
+    });
+    expect(r.dropped).toHaveLength(1);
   });
 });
 
