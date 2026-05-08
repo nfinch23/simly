@@ -1007,21 +1007,32 @@ export class ScanQueue {
             : `(no combos)`;
           console.log(`[sim] greedy gear search (${dt}s): ${winnerStr}`);
 
+          // Skip catalog + scans.gear_final writes when greedy ran zero
+          // sims (no bag candidates after the trash filter). The
+          // synthetic winner has dps=0 in that case and writing it
+          // would corrupt the catalog's best_loadout_dps baseline.
+          const greedyRanSims = greedyResult.finalDps > 0;
+          if (!greedyRanSims) {
+            console.log(`[sim] greedy: no bag candidates — skipping catalog update`);
+          }
+
           // Write to scans.gear_final so the composer (gear_final >
           // gear_refined > gear_coarse) picks up the new pipeline's
           // result without changes.
-          scans.gear_final = {
-            status: 'done',
-            started_at: gcStarted,
-            finished_at: Math.floor(Date.now() / 1000),
-            data: result,
-          };
+          if (greedyRanSims) {
+            scans.gear_final = {
+              status: 'done',
+              started_at: gcStarted,
+              finished_at: Math.floor(Date.now() / 1000),
+              data: result,
+            };
+          }
 
           // Update catalog from synthetic combos (winner + greedy-iter-1
           // rejects). The winner sets best_loadout; rejects populate
           // seen_items so the next run's bank-and-add-back workflow
           // skips items already classified.
-          if (this.gearCatalog && args.parsedExport) {
+          if (greedyRanSims && this.gearCatalog && args.parsedExport) {
             try {
               const prior = this.gearCatalog.get(args.characterKey, args.scenario);
               const updated = updateCatalogFromGearScan({
@@ -1043,7 +1054,7 @@ export class ScanQueue {
           }
 
           // Ignore-list observations from greedy-iter-1 rejects.
-          if (this.ignoreList) {
+          if (greedyRanSims && this.ignoreList) {
             try {
               const observations = computeItemObservations(result.combos);
               this.ignoreList.recordObservations(

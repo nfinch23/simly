@@ -29,6 +29,7 @@ import {
   predictItemSwapDps,
   type DiagnosticEntry,
 } from './pruner-diagnostic';
+import { HARD_FLOOR_PCT } from './gear-pruner';
 
 /**
  * Runtime callback the greedy loop uses to evaluate a batch of
@@ -52,6 +53,8 @@ export interface GreedyOptions {
   tieWindowPct?: number;
   /** Hard cap on iterations to prevent runaway. Default 20 (more than enough — typical convergence is 3-6). */
   maxIterations?: number;
+  /** Stat-weight pre-filter floor. Items predicted to lose by more than this %  vs their slot incumbent are dropped before any sim runs. Default HARD_FLOOR_PCT (3%). */
+  hardFloorPct?: number;
   /** Injected SimC roundtrip. */
   runSwapTest: SwapTestRunner;
 }
@@ -97,10 +100,35 @@ export async function runGreedyGearSearch(
     const candidates = candidatesNotInLoadout(opts.bagItems, converged);
     if (candidates.length === 0) break;
 
+    // Stat-weight hard-floor pre-filter: drop candidates whose predicted
+    // delta vs their slot incumbent is so negative they can't be an
+    // upgrade. Saves a SimC profileset per dropped item.
+    const filtered = preFilterCandidates({
+      candidates,
+      loadout: converged,
+      dpsPerIlvlPct: opts.dpsPerIlvlPct,
+      hardFloorPct: opts.hardFloorPct ?? HARD_FLOOR_PCT,
+    });
+    for (const d of filtered.dropped) {
+      diagnostics.push({
+        label: `greedy iter ${iterations}: ${d.item.slot}=${d.item.name}`,
+        predicted_delta_dps: 0,
+        actual_delta_dps: 0,
+        predicted_pct: d.predictedPct,
+        actual_pct: 0,
+        error_pp: 0,
+        outcome: 'rejected',
+      });
+    }
+    if (filtered.kept.length === 0) {
+      // All remaining candidates pre-filtered — converged.
+      break;
+    }
+
     const result = await opts.runSwapTest({
       bestLoadout: loadoutToBestLoadout(converged),
       baselineItemBySlot: converged,
-      newItems: candidates,
+      newItems: filtered.kept,
     });
 
     convergedDps = result.baseline_dps;
@@ -247,6 +275,67 @@ function pickIncumbentForSlot(
   // 'finger2' the candidate was tested in; the loadout has both fingers
   // distinct. Same for trinkets. For non-paired slots, direct lookup.
   return loadout[slot];
+}
+
+/**
+ * Stat-weight hard-floor pre-filter. For each candidate, compute its
+ * predicted delta_pct vs the slot incumbent using the linear stat-
+ * weight model. Drop any candidate predicted to lose by more than
+ * `hardFloorPct` (default 3%) — they cannot recover via DR or noise to
+ * become an upgrade, so simming them is wasted work.
+ *
+ * Special cases:
+ *   - Empty slot in the loadout → keep candidate unconditionally.
+ *   - Rings: compare to the WORSE of finger1/finger2 (the easier bar
+ *     since the better-ilvl ring stays).
+ *   - dpsPerIlvlPct ≤ 0 (no stat weights yet on first run): disable
+ *     filter, keep everything.
+ */
+export function preFilterCandidates(args: {
+  candidates: readonly ParsedItem[];
+  loadout: Record<string, ParsedItem>;
+  dpsPerIlvlPct: number;
+  hardFloorPct?: number;
+}): { kept: ParsedItem[]; dropped: Array<{ item: ParsedItem; predictedPct: number }> } {
+  const floor = -(args.hardFloorPct ?? 3.0);
+  if (args.dpsPerIlvlPct <= 0) {
+    return { kept: [...args.candidates], dropped: [] };
+  }
+  const kept: ParsedItem[] = [];
+  const dropped: Array<{ item: ParsedItem; predictedPct: number }> = [];
+  for (const item of args.candidates) {
+    const incumbentIlvl = getIncumbentIlvlForCandidate(item, args.loadout);
+    if (incumbentIlvl === null) {
+      kept.push(item);
+      continue;
+    }
+    const predictedPct = (item.ilvl - incumbentIlvl) * args.dpsPerIlvlPct;
+    if (predictedPct < floor) {
+      dropped.push({ item, predictedPct });
+    } else {
+      kept.push(item);
+    }
+  }
+  return { kept, dropped };
+}
+
+function getIncumbentIlvlForCandidate(
+  candidate: ParsedItem,
+  loadout: Record<string, ParsedItem>,
+): number | null {
+  if (candidate.slot === 'finger1' || candidate.slot === 'finger2') {
+    const f1 = loadout['finger1']?.ilvl;
+    const f2 = loadout['finger2']?.ilvl;
+    const ilvls = [f1, f2].filter((x): x is number => x !== undefined);
+    return ilvls.length > 0 ? Math.min(...ilvls) : null;
+  }
+  if (candidate.slot === 'trinket1' || candidate.slot === 'trinket2') {
+    const t1 = loadout['trinket1']?.ilvl;
+    const t2 = loadout['trinket2']?.ilvl;
+    const ilvls = [t1, t2].filter((x): x is number => x !== undefined);
+    return ilvls.length > 0 ? Math.min(...ilvls) : null;
+  }
+  return loadout[candidate.slot]?.ilvl ?? null;
 }
 
 /**
