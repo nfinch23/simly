@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildDiagnosticEntry,
+  buildStatVectorDiagnosticEntry,
   formatDiagnosticLine,
   formatDiagnosticSummary,
   predictComboDps,
+  predictDpsFromStatDelta,
   predictItemSwapDps,
   summarizeDiagnostics,
 } from './pruner-diagnostic';
@@ -142,6 +144,110 @@ describe('formatDiagnosticLine', () => {
     expect(line).toContain('actual=-1.00%');
     expect(line).toContain('predicted=-0.50%');
     expect(line).toContain('REJECTED');
+  });
+});
+
+describe('predictDpsFromStatDelta', () => {
+  const incumbent = {
+    intellect: 234, strength: 0, agility: 0,
+    haste_rating: 180, crit_rating: 120, mastery_rating: 95, versatility_rating: 60,
+  };
+
+  it('multiplies stat deltas by their weights and sums', () => {
+    // candidate: +20 int, +50 haste. Weights: int=33, haste=15.
+    // Expected: 20*33 + 50*15 = 660 + 750 = 1410.
+    const candidate = { ...incumbent, intellect: 254, haste_rating: 230 };
+    const r = predictDpsFromStatDelta({
+      incumbent, candidate,
+      weights: { intellect: 33, haste: 15 },
+    });
+    expect(r.predicted_delta_dps).toBeCloseTo(1410, 1);
+    expect(r.per_stat_contributions['intellect']).toBeCloseTo(660, 1);
+    expect(r.per_stat_contributions['haste']).toBeCloseTo(750, 1);
+  });
+
+  it('returns negative DPS when stats decrease', () => {
+    const candidate = { ...incumbent, intellect: 200, haste_rating: 100 };
+    const r = predictDpsFromStatDelta({
+      incumbent, candidate,
+      weights: { intellect: 33, haste: 15 },
+    });
+    // Δint=-34, Δhaste=-80. Expected: -34*33 + -80*15 = -1122 - 1200 = -2322.
+    expect(r.predicted_delta_dps).toBeCloseTo(-2322, 1);
+  });
+
+  it('returns 0 when candidate stats are identical to incumbent', () => {
+    expect(predictDpsFromStatDelta({
+      incumbent, candidate: { ...incumbent },
+      weights: { intellect: 33, haste: 15 },
+    }).predicted_delta_dps).toBe(0);
+  });
+
+  it('treats missing weights as zero', () => {
+    const candidate = { ...incumbent, intellect: 254, mastery_rating: 200 };
+    const r = predictDpsFromStatDelta({
+      incumbent, candidate,
+      weights: { intellect: 33 }, // no mastery weight
+    });
+    // mastery delta ignored. Δint=20, weight=33 → 660.
+    expect(r.predicted_delta_dps).toBeCloseTo(660, 1);
+  });
+});
+
+describe('buildStatVectorDiagnosticEntry', () => {
+  it('exposes positive unexplained_pp when sim exceeds stat-vector prediction (Elderoot Spire pattern)', () => {
+    const entry = buildStatVectorDiagnosticEntry({
+      label: 'main_hand=Elderoot Spire',
+      baseline_dps: 71_326,
+      candidate_dps: 75_233, // +5.48% ≈ +3907 dps actual
+      predicted_delta_dps_ilvl: -735, // legacy ilvl-proxy said -1.03%
+      predicted_delta_dps_stat_vector: 654, // stat-vector says +0.92%
+      outcome: 'accepted',
+    });
+    expect(entry.actual_pct).toBeCloseTo(5.48, 1);
+    expect(entry.predicted_pct_stat_vector).toBeCloseTo(0.92, 1);
+    expect(entry.unexplained_pp).toBeGreaterThan(4); // structural gap
+    expect(entry.unexplained_dps).toBeGreaterThan(3000);
+    // Legacy fields still populated:
+    expect(entry.error_pp).toBeCloseTo(-6.51, 1);
+  });
+
+  it('shows near-zero unexplained_pp on a clean armor swap', () => {
+    const entry = buildStatVectorDiagnosticEntry({
+      label: 'chest=Plain',
+      baseline_dps: 100_000,
+      candidate_dps: 102_000,
+      predicted_delta_dps_ilvl: 1_800,
+      predicted_delta_dps_stat_vector: 1_950,
+      outcome: 'accepted',
+    });
+    expect(Math.abs(entry.unexplained_pp ?? 999)).toBeLessThan(0.5);
+  });
+
+  it('handles zero baseline gracefully', () => {
+    const entry = buildStatVectorDiagnosticEntry({
+      label: 'edge', baseline_dps: 0, candidate_dps: 100,
+      predicted_delta_dps_ilvl: 50, predicted_delta_dps_stat_vector: 75,
+      outcome: 'accepted',
+    });
+    expect(entry.predicted_pct_stat_vector).toBe(0);
+    expect(entry.unexplained_pp).toBe(0);
+  });
+});
+
+describe('formatDiagnosticLine (stat-vector mode)', () => {
+  it('renders the stat-vector format when entry has stat-vector fields', () => {
+    const entry = buildStatVectorDiagnosticEntry({
+      label: 'main_hand=Elderoot Spire',
+      baseline_dps: 71_326, candidate_dps: 75_233,
+      predicted_delta_dps_ilvl: -735, predicted_delta_dps_stat_vector: 654,
+      outcome: 'accepted',
+    });
+    const line = formatDiagnosticLine(entry);
+    expect(line).toContain('predicted (stat-vector)=+0.92%');
+    expect(line).toContain('actual=+5.48%');
+    expect(line).toContain('unexplained=+');
+    expect(line).toContain('ACCEPTED');
   });
 });
 
