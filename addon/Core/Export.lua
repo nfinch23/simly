@@ -45,7 +45,7 @@ function Export.BuildProfile()
 		return NO_PROFILE, "GetSimcProfile returned empty"
 	end
 
-	return Export.AnnotateEquipLoc(Export.StripJunkBagItems(profile))
+	return Export.AnnotateItemStats(Export.AnnotateEquipLoc(Export.StripJunkBagItems(profile)))
 end
 
 -- Quality 0 = Poor (gray) per Enum.ItemQuality. These are vendor trash
@@ -170,6 +170,198 @@ function Export.AnnotateEquipLoc(profile)
 		-- when the user is debugging.
 		-- Uncomment if needed:
 		-- DEFAULT_CHAT_FRAME:AddMessage("|cff888888Simly:|r annotated " .. annotated .. " items with equip_loc.")
+	end
+
+	return table.concat(lines, "\n")
+end
+
+--- INVSLOT_ constant for each SimC slot name. Used to fetch
+-- `GetInventoryItemLink("player", N)` so we can call GetItemStats with
+-- the FULL bonus-id-aware itemLink (item IDs alone return wrong stats
+-- for upgraded gear).
+local SIMC_SLOT_TO_INVSLOT = {
+	head      = 1,
+	neck      = 2,
+	shoulder  = 3,
+	shirt     = 4,
+	chest     = 5,
+	waist     = 6,
+	legs      = 7,
+	feet      = 8,
+	wrist     = 9,
+	hands     = 10,
+	finger1   = 11,
+	finger2   = 12,
+	trinket1  = 13,
+	trinket2  = 14,
+	back      = 15,
+	main_hand = 16,
+	off_hand  = 17,
+	tabard    = 19,
+}
+
+--- Map of GetItemStats key → short stat name we emit in simly_stats=.
+-- Versatility's rating key changed across WoW versions; we accept both
+-- ITEM_MOD_VERSATILITY and ITEM_MOD_VERSATILITY_RATING_SHORT.
+local STAT_KEY_MAP = {
+	ITEM_MOD_INTELLECT_SHORT          = "int",
+	ITEM_MOD_STRENGTH_SHORT           = "str",
+	ITEM_MOD_AGILITY_SHORT            = "agi",
+	ITEM_MOD_HASTE_RATING_SHORT       = "haste",
+	ITEM_MOD_CRIT_RATING_SHORT        = "crit",
+	ITEM_MOD_MASTERY_RATING_SHORT     = "mast",
+	ITEM_MOD_VERSATILITY              = "vers",
+	ITEM_MOD_VERSATILITY_RATING_SHORT = "vers",
+}
+
+local STAT_ORDER = { "int", "str", "agi", "haste", "crit", "mast", "vers" }
+
+--- Build a "simly_stats=int=N,str=N,..." string from a GetItemStats result.
+-- Missing keys are coerced to 0 so the format is fixed-width per item.
+-- Returns nil when stats is nil/empty (so the caller can decide to skip).
+local function formatItemStats(stats)
+	if type(stats) ~= "table" then return nil end
+
+	local out = {}
+	for _, short in ipairs(STAT_ORDER) do
+		out[short] = 0
+	end
+
+	local sawAnything = false
+	for k, v in pairs(stats) do
+		local short = STAT_KEY_MAP[k]
+		if short and type(v) == "number" then
+			-- Multiple keys may map to the same short (e.g. versatility);
+			-- prefer non-zero values.
+			if v ~= 0 or out[short] == 0 then
+				out[short] = v
+			end
+			sawAnything = true
+		end
+	end
+
+	if not sawAnything then return nil end
+
+	-- Inner delimiter is '/' so SimC's comma-as-field-separator doesn't
+	-- chop our value at the first internal comma. SimC treats the whole
+	-- "int=N/str=N/..." string as one opaque value (which it then ignores
+	-- as an unknown option, intentionally — the desktop parser reads it).
+	local parts = {}
+	for _, short in ipairs(STAT_ORDER) do
+		table.insert(parts, short .. "=" .. tostring(out[short]))
+	end
+	return table.concat(parts, "/")
+end
+
+--- Try to fetch item stats for a SimC slot via GetInventoryItemLink.
+-- Returns the formatted simly_stats string, or nil if the item link
+-- isn't available (slot empty, cache miss).
+--- Resolve the WoW client's GetItemStats function. The global form was
+-- removed in WoW 12.0 (Midnight); current code lives at `C_Item.GetItemStats`.
+-- Defensive fall-throughs let the addon work on older clients too.
+local function resolveGetItemStats()
+	if C_Item and type(C_Item.GetItemStats) == "function" then
+		return C_Item.GetItemStats
+	end
+	if type(GetItemStats) == "function" then
+		return GetItemStats
+	end
+	return nil
+end
+
+local function getEquippedStatsString(simcSlot)
+	local invslot = SIMC_SLOT_TO_INVSLOT[simcSlot]
+	if not invslot then return nil end
+	local link = GetInventoryItemLink("player", invslot)
+	if not link then return nil end
+	local fn = resolveGetItemStats()
+	if not fn then return nil end
+	local ok, stats = pcall(fn, link)
+	if not ok or not stats then return nil end
+	return formatItemStats(stats)
+end
+
+--- Walk every bag, indexing items by item ID → first found itemLink.
+-- Used to look up bag-item stats during AnnotateItemStats. Returns a
+-- map { [itemID] = link, ... }.
+local function buildBagItemLinkMap()
+	local out = {}
+	-- Modern API: C_Container.GetContainerItemLink (10.0+).
+	local C = C_Container
+	if not C or type(C.GetContainerItemLink) ~= "function" then
+		-- Pre-Dragonflight fallback (kept for safety; modern WoW always has C_Container).
+		for bag = 0, 4 do
+			local slots = GetContainerNumSlots and GetContainerNumSlots(bag) or 0
+			for slot = 1, slots do
+				local link = GetContainerItemLink and GetContainerItemLink(bag, slot)
+				if link then
+					local id = tonumber(link:match("item:(%d+)"))
+					if id and not out[id] then out[id] = link end
+				end
+			end
+		end
+		return out
+	end
+
+	for bag = 0, NUM_BAG_SLOTS or 4 do
+		local slots = C.GetContainerNumSlots(bag) or 0
+		for slot = 1, slots do
+			local link = C.GetContainerItemLink(bag, slot)
+			if link then
+				local id = tonumber(link:match("item:(%d+)"))
+				if id and not out[id] then out[id] = link end
+			end
+		end
+	end
+	return out
+end
+
+--- Append `simly_stats=int=N,str=N,agi=N,haste=N,crit=N,mast=N,vers=N`
+-- to every equipped + bag item line in the profile.
+--
+-- Same trailing-key pattern as AnnotateEquipLoc — SimC ignores fields
+-- it doesn't know, so the export remains valid. Our desktop parser
+-- reads `simly_stats` to compute exact stat-vector × stat-weight
+-- predictions for greedy candidates without needing a SimC item-DB.
+--
+-- Equipped lines: looked up via GetInventoryItemLink(player, INVSLOT_*).
+-- Bag lines: looked up via a one-pass bag scan (built once for all bag
+-- annotations).
+function Export.AnnotateItemStats(profile)
+	if not profile or profile == "" then return profile end
+
+	local lines = {}
+	for line in (profile .. "\n"):gmatch("([^\n]*)\n") do
+		table.insert(lines, line)
+	end
+
+	local bagLinks
+	local annotated = 0
+	for i, line in ipairs(lines) do
+		-- Capture: leading prefix (equipped: empty; bag: "# "), slot name, id.
+		local prefix, slot, id, body = line:match("^(#?%s*)(%a[%a_0-9]*)=,id=(%d+)(.*)$")
+		if slot and id and not (body or ""):find("simly_stats=", 1, true) then
+			local statsStr
+			if prefix == "" then
+				-- Equipped line — look up via inventory.
+				statsStr = getEquippedStatsString(slot)
+			else
+				-- Bag line — look up via bag scan.
+				if not bagLinks then bagLinks = buildBagItemLinkMap() end
+				local link = bagLinks[tonumber(id)]
+				if link then
+					local fn = resolveGetItemStats()
+					if fn then
+						local ok, stats = pcall(fn, link)
+						if ok and stats then statsStr = formatItemStats(stats) end
+					end
+				end
+			end
+			if statsStr then
+				lines[i] = (prefix or "") .. slot .. "=,id=" .. id .. (body or "") .. ",simly_stats=" .. statsStr
+				annotated = annotated + 1
+			end
+		end
 	end
 
 	return table.concat(lines, "\n")

@@ -100,6 +100,29 @@ export interface ParsedItem {
   identity: string;
   /** Other key=value pairs we don't yet model, kept for round-trip-ish completeness. */
   extras: Record<string, string>;
+  /**
+   * Per-item raw stat block, parsed from the addon-emitted `simly_stats=`
+   * line. Raw = pre-buff (the values shown in the WoW item tooltip).
+   * SimC's stat-weights are computed at the buffed-actor level by adding
+   * +1 to a raw stat and measuring the DPS change, so `raw_delta × weight`
+   * is a precise DPS-gain prediction without needing to convert to buffed.
+   * Undefined when the addon didn't emit stats (older addon version, cache miss).
+   */
+  raw_stats?: ItemRawStats;
+}
+
+/**
+ * Per-item raw stats parsed from the addon's `simly_stats=` annotation.
+ * Pre-buff values; matches what GetItemStats() returns in the WoW client.
+ */
+export interface ItemRawStats {
+  intellect: number;
+  strength: number;
+  agility: number;
+  haste_rating: number;
+  crit_rating: number;
+  mastery_rating: number;
+  versatility_rating: number;
 }
 
 export interface ParsedCharacter {
@@ -243,11 +266,12 @@ function tryParseItemLine(
   const rest = m[3]!;
 
   const extras: Record<string, string> = {};
-  const known = new Set(['bonus_id', 'crafted_stats', 'crafting_quality', 'drop_level']);
+  const known = new Set(['bonus_id', 'crafted_stats', 'crafting_quality', 'drop_level', 'simly_stats']);
   let bonus_ids: number[] = [];
   let crafted_stats: number[] | undefined;
   let crafting_quality: number | undefined;
   let drop_level: number | undefined;
+  let raw_stats: ItemRawStats | undefined;
 
   // Split on `,` — the rest looks like `,key=value,key=value,...`. The
   // very first char is the leading comma when present; ignore empty
@@ -272,6 +296,9 @@ function tryParseItemLine(
           break;
         case 'drop_level':
           drop_level = Number(value);
+          break;
+        case 'simly_stats':
+          raw_stats = parseSimlyStats(value);
           break;
       }
     } else {
@@ -303,7 +330,52 @@ function tryParseItemLine(
     is_equipped: !expectComment,
     identity: makeItemIdentity(item_id, bonus_ids, crafted_stats),
     extras,
+    raw_stats,
   };
+}
+
+/**
+ * Parse the addon's `simly_stats=int=N/str=N/agi=N/haste=N/crit=N/mast=N/vers=N`
+ * value into an ItemRawStats. Missing fields default to 0. Returns
+ * undefined if the value is malformed.
+ *
+ * Inner delimiter is `/` (not `,`) so SimC's comma-as-field-separator
+ * doesn't chop the value at the first internal comma — same convention
+ * `bonus_id=` uses. Falls back to comma-split for backward compat with
+ * the original (broken) format if any old exports linger.
+ */
+export function parseSimlyStats(value: string): ItemRawStats | undefined {
+  const out: ItemRawStats = {
+    intellect: 0,
+    strength: 0,
+    agility: 0,
+    haste_rating: 0,
+    crit_rating: 0,
+    mastery_rating: 0,
+    versatility_rating: 0,
+  };
+  let sawAny = false;
+  // Prefer slash-delimited (current); fall back to comma-delimited (legacy).
+  const tokens = value.includes('/') ? value.split('/') : value.split(',');
+  for (const token of tokens) {
+    const t = token.trim();
+    if (t.length === 0) continue;
+    const eq = t.indexOf('=');
+    if (eq < 0) continue;
+    const key = t.slice(0, eq);
+    const num = Number(t.slice(eq + 1));
+    if (!Number.isFinite(num)) continue;
+    switch (key) {
+      case 'int': out.intellect = num; sawAny = true; break;
+      case 'str': out.strength = num; sawAny = true; break;
+      case 'agi': out.agility = num; sawAny = true; break;
+      case 'haste': out.haste_rating = num; sawAny = true; break;
+      case 'crit': out.crit_rating = num; sawAny = true; break;
+      case 'mast': out.mastery_rating = num; sawAny = true; break;
+      case 'vers': out.versatility_rating = num; sawAny = true; break;
+    }
+  }
+  return sawAny ? out : undefined;
 }
 
 /**

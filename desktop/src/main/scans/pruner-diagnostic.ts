@@ -38,6 +38,21 @@ export interface DiagnosticEntry {
   error_pp: number;
   /** Status tag the formatter renders, e.g. "ACCEPTED", "REJECTED", "WINNER". */
   outcome: 'accepted' | 'rejected' | 'winner' | 'loser' | 'baseline';
+  /**
+   * Precise stat-vector × stat-weights prediction in DPS. Populated when
+   * the addon-supplied raw_stats are available for both incumbent + candidate.
+   * Different from `predicted_delta_dps` (which uses the ilvl-proxy fallback
+   * when raw_stats are missing). When both are present, exposes
+   * `unexplained_dps` = actual - stat_vector_predicted as the "structural gap"
+   * — weapon damage / procs / set bonuses that stat weights can't see.
+   */
+  predicted_delta_dps_stat_vector?: number;
+  /** Stat-vector prediction as a percentage of baseline DPS. */
+  predicted_pct_stat_vector?: number;
+  /** actual_delta_dps - predicted_delta_dps_stat_vector. Positive = unexplained gain. */
+  unexplained_dps?: number;
+  /** unexplained_dps as percentage points of baseline_dps. */
+  unexplained_pp?: number;
 }
 
 /**
@@ -109,6 +124,108 @@ export function predictComboDps(args: {
 }
 
 /**
+ * Stat-vector × stat-weights DPS prediction. Used when the addon
+ * supplied raw_stats per item via the `simly_stats=` annotation.
+ *
+ * Math: sum over each stat of (delta × weight). The "delta" is RAW
+ * stat delta (pre-buff), but SimC's --scale_factors weights are
+ * computed by adding +1 RAW stat to the buffed actor and measuring
+ * DPS change, so `raw_delta × weight` is correct DPS — no buff
+ * multiplier needed.
+ *
+ * The "structural gap" the caller computes (actual - predicted) is the
+ * always-sim signal: large gap → weapon damage / proc / set bonus /
+ * embellishment that isn't expressible as a stat.
+ */
+export interface ItemRawStatsLike {
+  intellect: number;
+  strength: number;
+  agility: number;
+  haste_rating: number;
+  crit_rating: number;
+  mastery_rating: number;
+  versatility_rating: number;
+}
+
+export interface StatWeightsLike {
+  intellect?: number;
+  strength?: number;
+  agility?: number;
+  haste?: number;
+  crit?: number;
+  mastery?: number;
+  versatility?: number;
+}
+
+export function predictDpsFromStatDelta(args: {
+  incumbent: ItemRawStatsLike;
+  candidate: ItemRawStatsLike;
+  weights: StatWeightsLike;
+}): {
+  predicted_delta_dps: number;
+  per_stat_contributions: Record<string, number>;
+} {
+  const dInt = args.candidate.intellect - args.incumbent.intellect;
+  const dStr = args.candidate.strength - args.incumbent.strength;
+  const dAgi = args.candidate.agility - args.incumbent.agility;
+  const dHaste = args.candidate.haste_rating - args.incumbent.haste_rating;
+  const dCrit = args.candidate.crit_rating - args.incumbent.crit_rating;
+  const dMastery = args.candidate.mastery_rating - args.incumbent.mastery_rating;
+  const dVers = args.candidate.versatility_rating - args.incumbent.versatility_rating;
+  const c_int = dInt * (args.weights.intellect ?? 0);
+  const c_str = dStr * (args.weights.strength ?? 0);
+  const c_agi = dAgi * (args.weights.agility ?? 0);
+  const c_haste = dHaste * (args.weights.haste ?? 0);
+  const c_crit = dCrit * (args.weights.crit ?? 0);
+  const c_mastery = dMastery * (args.weights.mastery ?? 0);
+  const c_vers = dVers * (args.weights.versatility ?? 0);
+  return {
+    predicted_delta_dps: c_int + c_str + c_agi + c_haste + c_crit + c_mastery + c_vers,
+    per_stat_contributions: {
+      intellect: c_int, strength: c_str, agility: c_agi,
+      haste: c_haste, crit: c_crit, mastery: c_mastery, versatility: c_vers,
+    },
+  };
+}
+
+/**
+ * Build a DiagnosticEntry that includes both the legacy ilvl-proxy
+ * prediction AND a precise stat-vector prediction. Exposes `unexplained_pp`
+ * — the structural gap, the always-sim signal.
+ */
+export function buildStatVectorDiagnosticEntry(args: {
+  label: string;
+  baseline_dps: number;
+  candidate_dps: number;
+  predicted_delta_dps_ilvl: number;
+  predicted_delta_dps_stat_vector: number;
+  outcome: DiagnosticEntry['outcome'];
+}): DiagnosticEntry {
+  const actual_delta_dps = args.candidate_dps - args.baseline_dps;
+  const pct = (n: number): number =>
+    args.baseline_dps > 0 ? (n / args.baseline_dps) * 100 : 0;
+  const predicted_pct = pct(args.predicted_delta_dps_ilvl);
+  const actual_pct = pct(actual_delta_dps);
+  const predicted_pct_stat_vector = pct(args.predicted_delta_dps_stat_vector);
+  // Unexplained: positive = sim found gain stat-vector couldn't account for.
+  const unexplained_dps = actual_delta_dps - args.predicted_delta_dps_stat_vector;
+  const unexplained_pp = actual_pct - predicted_pct_stat_vector;
+  return {
+    label: args.label,
+    predicted_delta_dps: args.predicted_delta_dps_ilvl,
+    actual_delta_dps,
+    predicted_pct,
+    actual_pct,
+    error_pp: predicted_pct - actual_pct,
+    outcome: args.outcome,
+    predicted_delta_dps_stat_vector: args.predicted_delta_dps_stat_vector,
+    predicted_pct_stat_vector,
+    unexplained_dps,
+    unexplained_pp,
+  };
+}
+
+/**
  * Format a single diagnostic entry as a one-line console string with
  * the [diagnostic] prefix. Matches the format in the slice plan:
  *   [diagnostic] {label}  predicted={X%} ({+N dps})  actual={Y%} ({+M dps})  error={Z}pp  →  {OUTCOME}
@@ -121,6 +238,16 @@ export function formatDiagnosticLine(entry: DiagnosticEntry): string {
   const fmt_pp = (n: number): string =>
     `${n >= 0 ? '+' : ''}${n.toFixed(2)}pp`;
   const outcome_tag = entry.outcome.toUpperCase();
+
+  if (entry.predicted_pct_stat_vector !== undefined && entry.unexplained_pp !== undefined) {
+    return (
+      `[diagnostic] ${entry.label}  ` +
+      `predicted (stat-vector)=${fmt_pct(entry.predicted_pct_stat_vector)} (${fmt_dps(entry.predicted_delta_dps_stat_vector ?? 0)})  ` +
+      `actual=${fmt_pct(entry.actual_pct)} (${fmt_dps(entry.actual_delta_dps)})  ` +
+      `unexplained=${fmt_pp(entry.unexplained_pp)} (${fmt_dps(entry.unexplained_dps ?? 0)})  →  ${outcome_tag}`
+    );
+  }
+
   return (
     `[diagnostic] ${entry.label}  ` +
     `predicted=${fmt_pct(entry.predicted_pct)} (${fmt_dps(entry.predicted_delta_dps)})  ` +

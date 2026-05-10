@@ -24,8 +24,11 @@
 import type { ParsedItem } from '../simc-export-parser';
 import type { SwapTestResult, SwapResult } from '../swap-test';
 import type { BestLoadoutSlot, GearCatalogEntry } from '../gear-catalog';
+import type { StatWeights } from '@simly/shared';
 import {
   buildDiagnosticEntry,
+  buildStatVectorDiagnosticEntry,
+  predictDpsFromStatDelta,
   predictItemSwapDps,
   type DiagnosticEntry,
 } from './pruner-diagnostic';
@@ -57,6 +60,21 @@ export interface GreedyOptions {
   hardFloorPct?: number;
   /** Injected SimC roundtrip. */
   runSwapTest: SwapTestRunner;
+  /**
+   * Stat weights for stat-vector prediction. When provided AND the
+   * candidate + incumbent both have raw_stats (from the addon's
+   * simly_stats= annotation), the diagnostic AND the pre-filter use
+   * precise stat-vector × stat-weights as the predicted delta. Falls
+   * back to ilvl-proxy when missing.
+   */
+  statWeights?: StatWeights;
+  /**
+   * Baseline DPS used to convert predicted_delta_dps → predicted_pct
+   * for the pre-filter's stat-vector path. Typically the catalog's
+   * best_loadout_dps for this character + scenario. When 0 or missing,
+   * pre-filter falls back to ilvl-proxy.
+   */
+  baselineDps?: number;
 }
 
 export interface GreedyResult {
@@ -102,16 +120,25 @@ export async function runGreedyGearSearch(
 
     // Stat-weight hard-floor pre-filter: drop candidates whose predicted
     // delta vs their slot incumbent is so negative they can't be an
-    // upgrade. Saves a SimC profileset per dropped item.
+    // upgrade. Saves a SimC profileset per dropped item. Uses precise
+    // stat-vector prediction when raw_stats are available; falls back
+    // to ilvl-proxy otherwise.
+    //
+    // After iter 1, prefer the just-measured convergedDps as the
+    // baseline (most accurate); for iter 1, use the catalog/options
+    // baselineDps.
+    const preFilterBaselineDps = convergedDps > 0 ? convergedDps : (opts.baselineDps ?? 0);
     const filtered = preFilterCandidates({
       candidates,
       loadout: converged,
       dpsPerIlvlPct: opts.dpsPerIlvlPct,
       hardFloorPct: opts.hardFloorPct ?? HARD_FLOOR_PCT,
+      statWeights: opts.statWeights,
+      baselineDps: preFilterBaselineDps,
     });
     for (const d of filtered.dropped) {
       diagnostics.push({
-        label: `greedy iter ${iterations}: ${d.item.slot}=${d.item.name}`,
+        label: `greedy iter ${iterations}: ${d.item.slot}=${d.item.name} (pre-filter, source: ${d.source})`,
         predicted_delta_dps: 0,
         actual_delta_dps: 0,
         predicted_pct: d.predictedPct,
@@ -137,22 +164,50 @@ export async function runGreedyGearSearch(
     const best = selectBestUpgrade(result.results, tieWindowPct);
     for (const r of result.results) {
       const incumbent = pickIncumbentForSlot(converged, r.slot);
-      const predicted_delta_dps = predictItemSwapDps({
+      const predicted_delta_dps_ilvl = predictItemSwapDps({
         candidate_ilvl: r.item.ilvl,
         incumbent_ilvl: incumbent?.ilvl ?? r.item.ilvl,
         baseline_dps: result.baseline_dps,
         dps_per_ilvl_pct: opts.dpsPerIlvlPct,
       });
       const isAccepted = best !== null && r.item.identity === best.item.identity;
-      diagnostics.push(
-        buildDiagnosticEntry({
-          label: `greedy iter ${iterations}: ${r.slot}=${r.item.name}`,
-          baseline_dps: result.baseline_dps,
-          candidate_dps: r.mean_dps,
-          predicted_delta_dps,
-          outcome: isAccepted ? 'accepted' : 'rejected',
-        }),
-      );
+      const label = `greedy iter ${iterations}: ${r.slot}=${r.item.name}`;
+      const outcome: DiagnosticEntry['outcome'] = isAccepted ? 'accepted' : 'rejected';
+
+      // Look up the full ParsedItem (with raw_stats) for the candidate.
+      const candidateItem = opts.bagItems.find((i) => i.identity === r.item.identity);
+
+      if (
+        opts.statWeights &&
+        candidateItem?.raw_stats &&
+        incumbent?.raw_stats
+      ) {
+        const predicted = predictDpsFromStatDelta({
+          incumbent: incumbent.raw_stats,
+          candidate: candidateItem.raw_stats,
+          weights: opts.statWeights,
+        });
+        diagnostics.push(
+          buildStatVectorDiagnosticEntry({
+            label,
+            baseline_dps: result.baseline_dps,
+            candidate_dps: r.mean_dps,
+            predicted_delta_dps_ilvl,
+            predicted_delta_dps_stat_vector: predicted.predicted_delta_dps,
+            outcome,
+          }),
+        );
+      } else {
+        diagnostics.push(
+          buildDiagnosticEntry({
+            label,
+            baseline_dps: result.baseline_dps,
+            candidate_dps: r.mean_dps,
+            predicted_delta_dps: predicted_delta_dps_ilvl,
+            outcome,
+          }),
+        );
+      }
     }
 
     if (!best) break; // converged — no upgrade found
@@ -279,39 +334,95 @@ function pickIncumbentForSlot(
 
 /**
  * Stat-weight hard-floor pre-filter. For each candidate, compute its
- * predicted delta_pct vs the slot incumbent using the linear stat-
- * weight model. Drop any candidate predicted to lose by more than
- * `hardFloorPct` (default 3%) — they cannot recover via DR or noise to
- * become an upgrade, so simming them is wasted work.
+ * predicted delta_pct vs the slot incumbent. Drop any candidate predicted
+ * to lose by more than `hardFloorPct` (default 3%) — they cannot recover
+ * via DR or noise to become an upgrade, so simming them is wasted work.
+ *
+ * Two prediction modes, picked per-candidate based on data availability:
+ *   - **stat-vector** (precise): when `statWeights` + `baselineDps` are
+ *     supplied AND both candidate and incumbent have `raw_stats` (from
+ *     the addon's `simly_stats=` annotation), predict via
+ *     Σ (candidate_stat − incumbent_stat) × weight[stat]. Same data SimC
+ *     uses, so the prediction is structurally exact for primary +
+ *     secondary stats. Misses weapon damage / procs / set bonuses (those
+ *     surface as `unexplained_pp` in the diagnostic, not the pre-filter).
+ *   - **ilvl-proxy** (legacy): when stat-vector data is missing, fall
+ *     back to (item.ilvl − incumbent.ilvl) × dpsPerIlvlPct. Less precise
+ *     but always available. Lets us keep behavior unchanged on the very
+ *     first run after install (before the addon `/reload` lands the
+ *     simly_stats= annotation).
  *
  * Special cases:
  *   - Empty slot in the loadout → keep candidate unconditionally.
- *   - Rings: compare to the WORSE of finger1/finger2 (the easier bar
- *     since the better-ilvl ring stays).
- *   - dpsPerIlvlPct ≤ 0 (no stat weights yet on first run): disable
- *     filter, keep everything.
+ *   - Rings: predict against BOTH finger positions, take the BEST
+ *     (most-positive) prediction as the bar — that's the position the
+ *     swap-test would assign the candidate to. Conservative: only drop
+ *     if BOTH positions predict a hard-floor loss.
+ *   - dpsPerIlvlPct ≤ 0 AND no stat weights: disable filter, keep
+ *     everything (very-first-run guard).
  */
 export function preFilterCandidates(args: {
   candidates: readonly ParsedItem[];
   loadout: Record<string, ParsedItem>;
   dpsPerIlvlPct: number;
   hardFloorPct?: number;
-}): { kept: ParsedItem[]; dropped: Array<{ item: ParsedItem; predictedPct: number }> } {
+  /** Per-stat DPS-per-+1 weights. When present + raw_stats also present, use stat-vector prediction. */
+  statWeights?: StatWeights;
+  /** Baseline DPS for converting predicted_delta_dps → predicted_pct. Required for stat-vector mode. */
+  baselineDps?: number;
+}): {
+  kept: ParsedItem[];
+  dropped: Array<{
+    item: ParsedItem;
+    predictedPct: number;
+    source: 'stat-vector' | 'ilvl';
+  }>;
+} {
   const floor = -(args.hardFloorPct ?? 3.0);
-  if (args.dpsPerIlvlPct <= 0) {
+  const canUseStatVector =
+    args.statWeights !== undefined &&
+    args.baselineDps !== undefined &&
+    args.baselineDps > 0;
+
+  // Disable filter entirely on the very-first-run case (no stat weights
+  // AND no per-stat data). With stat-vector available we keep the filter
+  // active even when dpsPerIlvlPct is 0.
+  if (args.dpsPerIlvlPct <= 0 && !canUseStatVector) {
     return { kept: [...args.candidates], dropped: [] };
   }
+
   const kept: ParsedItem[] = [];
-  const dropped: Array<{ item: ParsedItem; predictedPct: number }> = [];
+  const dropped: Array<{ item: ParsedItem; predictedPct: number; source: 'stat-vector' | 'ilvl' }> = [];
+
   for (const item of args.candidates) {
-    const incumbentIlvl = getIncumbentIlvlForCandidate(item, args.loadout);
-    if (incumbentIlvl === null) {
+    const incumbents = getIncumbentsForCandidate(item, args.loadout);
+    if (incumbents.length === 0) {
+      // Empty slot — free upgrade.
       kept.push(item);
       continue;
     }
-    const predictedPct = (item.ilvl - incumbentIlvl) * args.dpsPerIlvlPct;
-    if (predictedPct < floor) {
-      dropped.push({ item, predictedPct });
+
+    // For rings, the swap-test will pick whichever position produces the
+    // better gain. Predict against each, keep the BEST (most positive)
+    // value as the bar — the candidate gets the benefit of the doubt.
+    let bestPredictedPct = -Infinity;
+    let source: 'stat-vector' | 'ilvl' = 'ilvl';
+    for (const incumbent of incumbents) {
+      const { predictedPct, source: src } = predictPctForSwap({
+        candidate: item,
+        incumbent,
+        statWeights: args.statWeights,
+        baselineDps: args.baselineDps ?? 0,
+        dpsPerIlvlPct: args.dpsPerIlvlPct,
+      });
+      if (predictedPct > bestPredictedPct) {
+        bestPredictedPct = predictedPct;
+        source = src;
+      }
+    }
+
+    if (bestPredictedPct < floor) {
+      dropped.push({ item, predictedPct: bestPredictedPct, source });
     } else {
       kept.push(item);
     }
@@ -319,23 +430,65 @@ export function preFilterCandidates(args: {
   return { kept, dropped };
 }
 
-function getIncumbentIlvlForCandidate(
+/**
+ * Per-incumbent prediction for one candidate swap. Picks stat-vector
+ * when raw_stats + weights are available, else falls back to ilvl-proxy.
+ * Returns both the predicted_pct and which source produced it.
+ */
+function predictPctForSwap(args: {
+  candidate: ParsedItem;
+  incumbent: ParsedItem;
+  statWeights?: StatWeights;
+  baselineDps: number;
+  dpsPerIlvlPct: number;
+}): { predictedPct: number; source: 'stat-vector' | 'ilvl' } {
+  if (
+    args.statWeights &&
+    args.baselineDps > 0 &&
+    args.candidate.raw_stats &&
+    args.incumbent.raw_stats
+  ) {
+    const { predicted_delta_dps } = predictDpsFromStatDelta({
+      incumbent: args.incumbent.raw_stats,
+      candidate: args.candidate.raw_stats,
+      weights: args.statWeights,
+    });
+    return {
+      predictedPct: (predicted_delta_dps / args.baselineDps) * 100,
+      source: 'stat-vector',
+    };
+  }
+  // ilvl-proxy fallback.
+  return {
+    predictedPct: (args.candidate.ilvl - args.incumbent.ilvl) * args.dpsPerIlvlPct,
+    source: 'ilvl',
+  };
+}
+
+/**
+ * Return the list of incumbent items relevant for pre-filtering this
+ * candidate. For paired slots (rings, trinkets), both positions are
+ * returned so the caller can predict against each. For non-paired slots,
+ * a single-element list. Empty list when the slot is empty.
+ */
+function getIncumbentsForCandidate(
   candidate: ParsedItem,
   loadout: Record<string, ParsedItem>,
-): number | null {
+): ParsedItem[] {
   if (candidate.slot === 'finger1' || candidate.slot === 'finger2') {
-    const f1 = loadout['finger1']?.ilvl;
-    const f2 = loadout['finger2']?.ilvl;
-    const ilvls = [f1, f2].filter((x): x is number => x !== undefined);
-    return ilvls.length > 0 ? Math.min(...ilvls) : null;
+    const out: ParsedItem[] = [];
+    if (loadout['finger1']) out.push(loadout['finger1']);
+    if (loadout['finger2']) out.push(loadout['finger2']);
+    return out;
   }
   if (candidate.slot === 'trinket1' || candidate.slot === 'trinket2') {
-    const t1 = loadout['trinket1']?.ilvl;
-    const t2 = loadout['trinket2']?.ilvl;
-    const ilvls = [t1, t2].filter((x): x is number => x !== undefined);
-    return ilvls.length > 0 ? Math.min(...ilvls) : null;
+    const out: ParsedItem[] = [];
+    if (loadout['trinket1']) out.push(loadout['trinket1']);
+    if (loadout['trinket2']) out.push(loadout['trinket2']);
+    return out;
   }
-  return loadout[candidate.slot]?.ilvl ?? null;
+  const incumbent = loadout[candidate.slot];
+  return incumbent ? [incumbent] : [];
 }
 
 /**

@@ -18,6 +18,7 @@ function makeItem(opts: {
   name?: string;
   ilvl?: number;
   item_id?: number;
+  raw_stats?: ParsedItem['raw_stats'];
 }): ParsedItem {
   return {
     slot: opts.slot,
@@ -28,6 +29,19 @@ function makeItem(opts: {
     is_equipped: false,
     identity: opts.identity,
     extras: {},
+    ...(opts.raw_stats ? { raw_stats: opts.raw_stats } : {}),
+  };
+}
+
+function rawStats(opts: Partial<NonNullable<ParsedItem['raw_stats']>>): NonNullable<ParsedItem['raw_stats']> {
+  return {
+    intellect: opts.intellect ?? 0,
+    strength: opts.strength ?? 0,
+    agility: opts.agility ?? 0,
+    haste_rating: opts.haste_rating ?? 0,
+    crit_rating: opts.crit_rating ?? 0,
+    mastery_rating: opts.mastery_rating ?? 0,
+    versatility_rating: opts.versatility_rating ?? 0,
   };
 }
 
@@ -226,6 +240,169 @@ describe('preFilterCandidates', () => {
       hardFloorPct: 3.0,
     });
     expect(r.dropped).toHaveLength(1);
+  });
+
+  // -------------------------------------------------------------------------
+  // Stat-vector mode (precise prediction from per-item raw_stats)
+  // -------------------------------------------------------------------------
+
+  it('uses stat-vector prediction when raw_stats + statWeights + baselineDps all available', () => {
+    // Candidate has BAD secondaries despite higher ilvl; ilvl-proxy would keep
+    // it but stat-vector correctly predicts a loss.
+    // Δint = +5, Δhaste = -200 (loses 200 haste rating)
+    // weights: int=33, haste=15
+    // predicted_dps = 5*33 + (-200)*15 = 165 - 3000 = -2835
+    // baselineDps = 70000 → pct = -4.05% → BELOW -3% floor → drop.
+    const r = preFilterCandidates({
+      candidates: [
+        makeItem({
+          slot: 'chest', identity: 'BAD', ilvl: 285,
+          raw_stats: rawStats({ intellect: 235, haste_rating: 100 }),
+        }),
+      ],
+      loadout: {
+        chest: makeItem({
+          slot: 'chest', identity: 'EQ', ilvl: 270,
+          raw_stats: rawStats({ intellect: 230, haste_rating: 300 }),
+        }),
+      },
+      dpsPerIlvlPct: 0.3, // ilvl proxy would predict +4.5% (false positive)
+      hardFloorPct: 3.0,
+      statWeights: { intellect: 33, haste: 15 },
+      baselineDps: 70_000,
+    });
+    expect(r.kept).toEqual([]);
+    expect(r.dropped).toHaveLength(1);
+    expect(r.dropped[0]!.source).toBe('stat-vector');
+    expect(r.dropped[0]!.predictedPct).toBeCloseTo(-4.05, 1);
+  });
+
+  it('keeps a low-ilvl candidate that ilvl-proxy would wrongly drop (good secondaries)', () => {
+    // ilvl 250 vs 290 incumbent (-40 ilvl × 0.3 = -12% via ilvl proxy → would drop)
+    // BUT the candidate has way more haste at the right stat.
+    // Δint = -5, Δhaste = +500 (huge stat upgrade)
+    // weights: int=33, haste=15
+    // predicted_dps = -5*33 + 500*15 = -165 + 7500 = +7335
+    // baselineDps=70k → pct = +10.48% → KEEP (ilvl proxy would have dropped).
+    const r = preFilterCandidates({
+      candidates: [
+        makeItem({
+          slot: 'chest', identity: 'GOOD', ilvl: 250,
+          raw_stats: rawStats({ intellect: 200, haste_rating: 800 }),
+        }),
+      ],
+      loadout: {
+        chest: makeItem({
+          slot: 'chest', identity: 'EQ', ilvl: 290,
+          raw_stats: rawStats({ intellect: 205, haste_rating: 300 }),
+        }),
+      },
+      dpsPerIlvlPct: 0.3,
+      hardFloorPct: 3.0,
+      statWeights: { intellect: 33, haste: 15 },
+      baselineDps: 70_000,
+    });
+    expect(r.kept).toHaveLength(1);
+    expect(r.dropped).toEqual([]);
+  });
+
+  it('falls back to ilvl-proxy when candidate raw_stats are missing', () => {
+    // Candidate has no raw_stats — fall back to ilvl proxy.
+    // 250 vs 290 = -40 ilvl × 0.3 = -12% → drop via ilvl-proxy.
+    const r = preFilterCandidates({
+      candidates: [makeItem({ slot: 'chest', identity: 'B', ilvl: 250 })],
+      loadout: {
+        chest: makeItem({
+          slot: 'chest', identity: 'EQ', ilvl: 290,
+          raw_stats: rawStats({ intellect: 230, haste_rating: 300 }),
+        }),
+      },
+      dpsPerIlvlPct: 0.3,
+      hardFloorPct: 3.0,
+      statWeights: { intellect: 33, haste: 15 },
+      baselineDps: 70_000,
+    });
+    expect(r.dropped).toHaveLength(1);
+    expect(r.dropped[0]!.source).toBe('ilvl');
+  });
+
+  it('falls back to ilvl-proxy when statWeights is omitted', () => {
+    const r = preFilterCandidates({
+      candidates: [
+        makeItem({
+          slot: 'chest', identity: 'B', ilvl: 250,
+          raw_stats: rawStats({ intellect: 200 }),
+        }),
+      ],
+      loadout: {
+        chest: makeItem({
+          slot: 'chest', identity: 'EQ', ilvl: 290,
+          raw_stats: rawStats({ intellect: 230 }),
+        }),
+      },
+      dpsPerIlvlPct: 0.3,
+      hardFloorPct: 3.0,
+      // no statWeights, no baselineDps
+    });
+    expect(r.dropped).toHaveLength(1);
+    expect(r.dropped[0]!.source).toBe('ilvl');
+  });
+
+  it('keeps stat-vector mode active even when dpsPerIlvlPct is 0 (no calibration but raw_stats available)', () => {
+    // dpsPerIlvlPct=0 alone would disable filter (legacy guard), but with
+    // statWeights+raw_stats we have a precise prediction so the filter stays on.
+    const r = preFilterCandidates({
+      candidates: [
+        makeItem({
+          slot: 'chest', identity: 'BAD', ilvl: 250,
+          raw_stats: rawStats({ intellect: 50, haste_rating: 50 }),
+        }),
+      ],
+      loadout: {
+        chest: makeItem({
+          slot: 'chest', identity: 'EQ', ilvl: 290,
+          raw_stats: rawStats({ intellect: 250, haste_rating: 300 }),
+        }),
+      },
+      dpsPerIlvlPct: 0,
+      hardFloorPct: 3.0,
+      statWeights: { intellect: 33, haste: 15 },
+      baselineDps: 70_000,
+    });
+    // Δint=-200, Δhaste=-250. predicted = -200*33 + -250*15 = -6600 - 3750 = -10350.
+    // pct = -14.79% → drop via stat-vector.
+    expect(r.dropped).toHaveLength(1);
+    expect(r.dropped[0]!.source).toBe('stat-vector');
+  });
+
+  it('ring stat-vector: keeps candidate that wins against the WORSE finger position', () => {
+    // f1 has 300 haste, f2 has 100 haste. Candidate has 200 haste.
+    // vs f1: Δhaste = -100, predicted = -100*15 = -1500 dps = -2.14% (above floor)
+    // vs f2: Δhaste = +100, predicted = +100*15 = +1500 dps = +2.14% (clearly upgrade-ish)
+    // Best of two = +2.14%. Above -3% floor → keep.
+    const r = preFilterCandidates({
+      candidates: [
+        makeItem({
+          slot: 'finger1', identity: 'NEW', ilvl: 280,
+          raw_stats: rawStats({ haste_rating: 200 }),
+        }),
+      ],
+      loadout: {
+        finger1: makeItem({
+          slot: 'finger1', identity: 'F1', ilvl: 280,
+          raw_stats: rawStats({ haste_rating: 300 }),
+        }),
+        finger2: makeItem({
+          slot: 'finger2', identity: 'F2', ilvl: 280,
+          raw_stats: rawStats({ haste_rating: 100 }),
+        }),
+      },
+      dpsPerIlvlPct: 0.3,
+      hardFloorPct: 3.0,
+      statWeights: { haste: 15 },
+      baselineDps: 70_000,
+    });
+    expect(r.kept).toHaveLength(1);
   });
 });
 

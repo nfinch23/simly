@@ -200,6 +200,8 @@ export async function runGreedyGearPipeline(
     dpsPerIlvlPct,
     tieWindowPct,
     runSwapTest: swapTestRunner,
+    statWeights: opts.weights,
+    baselineDps: opts.bestLoadoutDps,
   });
 
   // Log per-step diagnostic + summary.
