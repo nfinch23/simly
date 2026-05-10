@@ -5,6 +5,7 @@
   "description": "Simly desktop companion app.",
   "main": "out/main/index.js",
   "scripts": {
+    "predev": "node scripts/check-wow-symlink.mjs",
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "start": "electron-vite preview",
