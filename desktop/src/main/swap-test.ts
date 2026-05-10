@@ -46,6 +46,22 @@ export interface SwapCandidate {
   profileset_names: string[];
 }
 
+/**
+ * Weapon-aware swap candidate. Tests a `(main_hand, off_hand)` tuple as
+ * a single profileset so the slot-lockout semantics are correct:
+ *   - `oh: null` → 2H weapon. Profileset emits `off_hand=` (empty value)
+ *     to clear the slot, matching WoW's actual behavior.
+ *   - `oh: ParsedItem` → 1H + OH pair. Profileset emits both slots.
+ *
+ * Reported back as a SwapResult keyed on the MH item's identity. The
+ * paired OH is recorded in `paired_off_hand` for greedy to fold into
+ * its converged loadout when this candidate wins.
+ */
+export interface WeaponSwap {
+  mh: ParsedItem;
+  oh: ParsedItem | null;
+}
+
 export interface BuildSwapScriptResult {
   script: string;
   candidates: SwapCandidate[];
@@ -67,6 +83,7 @@ export function buildSwapTestScript(
   bestLoadout: Record<string, BestLoadoutSlot>,
   baselineItemBySlot: Record<string, ParsedItem>,
   newItems: readonly ParsedItem[],
+  weaponSwaps: readonly WeaponSwap[] = [],
 ): BuildSwapScriptResult {
   const lines: string[] = [];
 
@@ -106,6 +123,30 @@ export function buildSwapTestScript(
       }
     }
     candidates.push({ slot: item.slot, item, profileset_names });
+  }
+
+  // Weapon-aware swaps: emit a single profileset per (mh, oh) tuple
+  // that re-spells the entire baseline EXCEPT main_hand AND off_hand,
+  // then writes those two slots based on the tuple. For 2H (oh=null),
+  // emit `off_hand=` empty to clear the slot — matching WoW's lockout.
+  for (const ws of weaponSwaps) {
+    const name = `swap_weapon_${shortHash(ws.mh.identity + (ws.oh?.identity ?? '_2h'))}`;
+    for (const [slot, slotInfo] of Object.entries(bestLoadout)) {
+      void slotInfo;
+      if (slot === 'main_hand' || slot === 'off_hand') continue;
+      const baseItem = baselineItemBySlot[slot];
+      if (!baseItem) continue;
+      lines.push(`profileset."${name}"+="${formatItemLine(baseItem, slot as SlotName)}"`);
+    }
+    // main_hand: always the candidate.
+    lines.push(`profileset."${name}"+="${formatItemLine(ws.mh, 'main_hand')}"`);
+    // off_hand: paired item, or empty value to clear the slot.
+    if (ws.oh) {
+      lines.push(`profileset."${name}"+="${formatItemLine(ws.oh, 'off_hand')}"`);
+    } else {
+      lines.push(`profileset."${name}"+="off_hand="`);
+    }
+    candidates.push({ slot: 'main_hand', item: ws.mh, profileset_names: [name] });
   }
 
   return {
@@ -220,6 +261,14 @@ export interface RunSwapTestOptions {
   bestLoadout: Record<string, BestLoadoutSlot>;
   baselineItemBySlot: Record<string, ParsedItem>;
   newItems: readonly ParsedItem[];
+  /**
+   * Weapon-aware swap candidates: each entry is an explicit
+   * (main_hand, off_hand) pair. Pass these instead of a raw weapon item
+   * in `newItems` whenever the swap involves the 2H/1H slot lockout.
+   * The greedy loop builds these via `oh-pairing.ts` so each MH gets
+   * its best OH partner.
+   */
+  weaponSwaps?: readonly WeaponSwap[];
   iterations?: number;
   tie_window_pct?: number;
   onProgress?: Parameters<typeof runSimc>[0]['onProgress'];
@@ -230,7 +279,12 @@ export async function runSwapTest(
   opts: RunSwapTestOptions,
 ): Promise<{ result: SwapTestResult; build: BuildSwapScriptResult }> {
   const iterations = opts.iterations ?? SWAP_TEST_ITERATIONS;
-  const build = buildSwapTestScript(opts.bestLoadout, opts.baselineItemBySlot, opts.newItems);
+  const build = buildSwapTestScript(
+    opts.bestLoadout,
+    opts.baselineItemBySlot,
+    opts.newItems,
+    opts.weaponSwaps,
+  );
   const profileScript = [opts.baseProfile.trim(), '', build.script].join('\n');
   const run = await runSimc({
     paths: opts.paths,

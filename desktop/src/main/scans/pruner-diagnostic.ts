@@ -165,13 +165,63 @@ export function predictDpsFromStatDelta(args: {
   predicted_delta_dps: number;
   per_stat_contributions: Record<string, number>;
 } {
-  const dInt = args.candidate.intellect - args.incumbent.intellect;
-  const dStr = args.candidate.strength - args.incumbent.strength;
-  const dAgi = args.candidate.agility - args.incumbent.agility;
-  const dHaste = args.candidate.haste_rating - args.incumbent.haste_rating;
-  const dCrit = args.candidate.crit_rating - args.incumbent.crit_rating;
-  const dMastery = args.candidate.mastery_rating - args.incumbent.mastery_rating;
-  const dVers = args.candidate.versatility_rating - args.incumbent.versatility_rating;
+  return predictDpsFromAggregatedStatDelta({
+    incumbents: [args.incumbent],
+    candidates: [args.candidate],
+    weights: args.weights,
+  });
+}
+
+/**
+ * Multi-item version of `predictDpsFromStatDelta` for swaps that lose
+ * AND/OR gain more than one item simultaneously. The two cases that
+ * actually matter today:
+ *   - 2H weapon replacing 1H + OH:    incumbents=[mh, oh], candidates=[2h]
+ *   - 1H + OH replacing 2H weapon:    incumbents=[2h], candidates=[mh, oh]
+ *
+ * Sums raw_stats across each side, then runs the same per-stat
+ * (delta × weight) math as the single-item path. An incumbent set with
+ * length 1 and candidate set with length 1 is exactly equivalent to
+ * `predictDpsFromStatDelta` (which now delegates here).
+ *
+ * Empty input arrays are valid (treated as zero-stat sets), so e.g.
+ * "remove an off-hand without replacement" can be expressed as
+ * incumbents=[oh], candidates=[].
+ */
+export function predictDpsFromAggregatedStatDelta(args: {
+  incumbents: readonly ItemRawStatsLike[];
+  candidates: readonly ItemRawStatsLike[];
+  weights: StatWeightsLike;
+}): {
+  predicted_delta_dps: number;
+  per_stat_contributions: Record<string, number>;
+} {
+  const sumStats = (items: readonly ItemRawStatsLike[]): ItemRawStatsLike => {
+    const acc: ItemRawStatsLike = {
+      intellect: 0, strength: 0, agility: 0,
+      haste_rating: 0, crit_rating: 0, mastery_rating: 0, versatility_rating: 0,
+    };
+    for (const i of items) {
+      acc.intellect += i.intellect;
+      acc.strength += i.strength;
+      acc.agility += i.agility;
+      acc.haste_rating += i.haste_rating;
+      acc.crit_rating += i.crit_rating;
+      acc.mastery_rating += i.mastery_rating;
+      acc.versatility_rating += i.versatility_rating;
+    }
+    return acc;
+  };
+
+  const inc = sumStats(args.incumbents);
+  const cand = sumStats(args.candidates);
+  const dInt = cand.intellect - inc.intellect;
+  const dStr = cand.strength - inc.strength;
+  const dAgi = cand.agility - inc.agility;
+  const dHaste = cand.haste_rating - inc.haste_rating;
+  const dCrit = cand.crit_rating - inc.crit_rating;
+  const dMastery = cand.mastery_rating - inc.mastery_rating;
+  const dVers = cand.versatility_rating - inc.versatility_rating;
   const c_int = dInt * (args.weights.intellect ?? 0);
   const c_str = dStr * (args.weights.strength ?? 0);
   const c_agi = dAgi * (args.weights.agility ?? 0);
