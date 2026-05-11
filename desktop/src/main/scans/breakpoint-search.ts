@@ -22,8 +22,11 @@ import type { BestLoadoutSlot } from '../gear-catalog';
 import { runSimc, type RunnerPaths, type SimcRunResult } from '../simc-runner';
 import {
   buildDiagnosticEntry,
+  buildStatVectorDiagnosticEntry,
   predictComboDps,
+  predictDpsFromAggregatedStatDelta,
   type DiagnosticEntry,
+  type StatWeightsLike,
 } from './pruner-diagnostic';
 
 const BASELINE_NAME = 'bp_baseline';
@@ -64,6 +67,13 @@ export interface RunBreakpointSearchOptions {
   /** Tie window for "is_winner" determination; default 0.1 %. */
   tieWindowPct?: number;
   dpsPerIlvlPct: number;
+  /**
+   * Per-stat DPS-per-+1 weights. When present AND every item involved in
+   * a combo (incumbents + candidates) carries `raw_stats`, the diagnostic
+   * line uses the precise stat-vector prediction (matching greedy). Falls
+   * back to ilvl-proxy on a per-combo basis when stats are missing.
+   */
+  weights?: StatWeightsLike;
   onProgress?: Parameters<typeof runSimc>[0]['onProgress'];
 }
 
@@ -285,26 +295,14 @@ export async function runBreakpointSearch(
 
   const parsed = parseBreakpointResult({ run, build, tieWindowPct });
 
-  // Build diagnostic entries.
-  const diagnostics: DiagnosticEntry[] = parsed.combos.map((entry) => {
-    const swapsForPredict = Object.entries(entry.combo.swaps).map(([slot, item]) => ({
-      candidate_ilvl: item.ilvl,
-      incumbent_ilvl: opts.converged[slot]?.ilvl ?? item.ilvl,
-    }));
-    const predicted_delta_dps = predictComboDps({
-      swaps: swapsForPredict,
-      baseline_dps: parsed.baseline_dps,
-      dps_per_ilvl_pct: opts.dpsPerIlvlPct,
-    });
-    const isWinner = parsed.winner?.id === entry.combo.id;
-    const isUpgrade = entry.delta_pct > tieWindowPct;
-    return buildDiagnosticEntry({
-      label: `breakpoint ${labelForCombo(entry.combo)}`,
-      baseline_dps: parsed.baseline_dps,
-      candidate_dps: entry.mean_dps,
-      predicted_delta_dps,
-      outcome: isWinner ? 'winner' : isUpgrade ? 'accepted' : 'loser',
-    });
+  const diagnostics = buildBreakpointDiagnostics({
+    combos: parsed.combos,
+    baseline_dps: parsed.baseline_dps,
+    winnerId: parsed.winner?.id,
+    converged: opts.converged,
+    weights: opts.weights,
+    dpsPerIlvlPct: opts.dpsPerIlvlPct,
+    tieWindowPct,
   });
 
   return {
@@ -313,6 +311,84 @@ export async function runBreakpointSearch(
     winner: parsed.winner,
     diagnostics,
   };
+}
+
+/**
+ * Pure helper: build per-combo diagnostic entries from a breakpoint sim's
+ * parsed results. Mirrors greedy-search's stat-vector path — when every
+ * item involved in a combo (incumbents AND candidates) has `raw_stats`
+ * AND weights are supplied, emits a `buildStatVectorDiagnosticEntry`
+ * with `unexplained_pp` populated. Otherwise falls back to the legacy
+ * ilvl-proxy entry. Decision is per-combo, not per-batch.
+ *
+ * Extracted from runBreakpointSearch so it can be unit-tested without
+ * mocking SimC.
+ */
+export function buildBreakpointDiagnostics(args: {
+  combos: BreakpointResult['combos'];
+  baseline_dps: number;
+  winnerId: string | undefined;
+  converged: Record<string, ParsedItem>;
+  weights?: StatWeightsLike;
+  dpsPerIlvlPct: number;
+  tieWindowPct: number;
+}): DiagnosticEntry[] {
+  return args.combos.map((entry) => {
+    const swapsForPredict = Object.entries(entry.combo.swaps).map(([slot, item]) => ({
+      candidate_ilvl: item.ilvl,
+      incumbent_ilvl: args.converged[slot]?.ilvl ?? item.ilvl,
+    }));
+    const predicted_delta_dps_ilvl = predictComboDps({
+      swaps: swapsForPredict,
+      baseline_dps: args.baseline_dps,
+      dps_per_ilvl_pct: args.dpsPerIlvlPct,
+    });
+    const isWinner = args.winnerId === entry.combo.id;
+    const isUpgrade = entry.delta_pct > args.tieWindowPct;
+    const outcome: DiagnosticEntry['outcome'] = isWinner ? 'winner' : isUpgrade ? 'accepted' : 'loser';
+    const label = `breakpoint ${labelForCombo(entry.combo)}`;
+
+    // Stat-vector path: every involved item (both sides) needs raw_stats
+    // AND we need weights. Otherwise fall back to ilvl-proxy for this
+    // combo. The fallback is per-combo, not per-batch — mixed batches
+    // are fine.
+    const incRaw: NonNullable<ParsedItem['raw_stats']>[] = [];
+    const candRaw: NonNullable<ParsedItem['raw_stats']>[] = [];
+    let allHaveStats = !!args.weights;
+    for (const [slot, candItem] of Object.entries(entry.combo.swaps)) {
+      const incItem = args.converged[slot];
+      if (!candItem.raw_stats || !incItem?.raw_stats) {
+        allHaveStats = false;
+        break;
+      }
+      candRaw.push(candItem.raw_stats);
+      incRaw.push(incItem.raw_stats);
+    }
+
+    if (allHaveStats && args.weights) {
+      const { predicted_delta_dps } = predictDpsFromAggregatedStatDelta({
+        incumbents: incRaw,
+        candidates: candRaw,
+        weights: args.weights,
+      });
+      return buildStatVectorDiagnosticEntry({
+        label,
+        baseline_dps: args.baseline_dps,
+        candidate_dps: entry.mean_dps,
+        predicted_delta_dps_ilvl,
+        predicted_delta_dps_stat_vector: predicted_delta_dps,
+        outcome,
+      });
+    }
+
+    return buildDiagnosticEntry({
+      label,
+      baseline_dps: args.baseline_dps,
+      candidate_dps: entry.mean_dps,
+      predicted_delta_dps: predicted_delta_dps_ilvl,
+      outcome,
+    });
+  });
 }
 
 function labelForCombo(combo: BreakpointCombo): string {

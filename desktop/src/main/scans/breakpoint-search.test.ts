@@ -1,12 +1,20 @@
 import { describe, expect, it } from 'vitest';
 import {
   applyComboToLoadout,
+  buildBreakpointDiagnostics,
   generateCombos,
   loadoutToBestLoadoutSlots,
+  type BreakpointCombo,
 } from './breakpoint-search';
 import type { ParsedItem, SlotName } from '../simc-export-parser';
+import type { StatWeightsLike } from './pruner-diagnostic';
 
-function makeItem(slot: SlotName, identity: string, ilvl = 270): ParsedItem {
+function makeItem(
+  slot: SlotName,
+  identity: string,
+  ilvl = 270,
+  raw_stats?: NonNullable<ParsedItem['raw_stats']>,
+): ParsedItem {
   return {
     slot,
     item_id: 1,
@@ -16,6 +24,20 @@ function makeItem(slot: SlotName, identity: string, ilvl = 270): ParsedItem {
     is_equipped: false,
     identity,
     extras: {},
+    raw_stats,
+  };
+}
+
+function rawStats(over: Partial<NonNullable<ParsedItem['raw_stats']>> = {}): NonNullable<ParsedItem['raw_stats']> {
+  return {
+    intellect: 0,
+    strength: 0,
+    agility: 0,
+    haste_rating: 0,
+    crit_rating: 0,
+    mastery_rating: 0,
+    versatility_rating: 0,
+    ...over,
   };
 }
 
@@ -133,6 +155,164 @@ describe('applyComboToLoadout', () => {
     };
     applyComboToLoadout(loadout, combo);
     expect(loadout['chest']!.identity).toBe('EQ_C');
+  });
+});
+
+describe('buildBreakpointDiagnostics', () => {
+  // Helpers to assemble the shape buildBreakpointDiagnostics expects:
+  // a list of { combo, mean_dps, delta_pct } entries from a parsed sim,
+  // plus a converged baseline loadout.
+  function makeComboEntry(swaps: BreakpointCombo['swaps'], mean_dps: number, baseline_dps: number) {
+    const id = `bp_${Object.keys(swaps).sort().join('+')}`;
+    const delta_pct = ((mean_dps - baseline_dps) / baseline_dps) * 100;
+    return { combo: { id, swaps }, mean_dps, delta_pct };
+  }
+
+  const WEIGHTS: StatWeightsLike = { intellect: 5, haste: 1.2 };
+
+  it('emits stat-vector diagnostic when weights + raw_stats are present everywhere', () => {
+    const baseline_dps = 100_000;
+    const inc = makeItem('chest', 'EQ_C', 270, rawStats({ intellect: 100, haste_rating: 50 }));
+    const cand = makeItem('chest', 'NEW_C', 280, rawStats({ intellect: 150, haste_rating: 80 }));
+    const incL = makeItem('legs', 'EQ_L', 270, rawStats({ intellect: 100, haste_rating: 0 }));
+    const candL = makeItem('legs', 'NEW_L', 280, rawStats({ intellect: 140, haste_rating: 30 }));
+    const entry = makeComboEntry({ chest: cand, legs: candL }, 102_000, baseline_dps);
+
+    const diags = buildBreakpointDiagnostics({
+      combos: [entry],
+      baseline_dps,
+      winnerId: undefined,
+      converged: { chest: inc, legs: incL },
+      weights: WEIGHTS,
+      dpsPerIlvlPct: 0.3,
+      tieWindowPct: 0.1,
+    });
+
+    expect(diags).toHaveLength(1);
+    expect(diags[0]!.predicted_pct_stat_vector).toBeDefined();
+    expect(diags[0]!.unexplained_pp).toBeDefined();
+    // Stat-vector prediction: (50+40)*5 + (30+30)*1.2 = 450 + 72 = 522 dps → +0.522pp
+    expect(diags[0]!.predicted_delta_dps_stat_vector).toBeCloseTo(522, 0);
+    // actual = +2000 dps = +2pp; unexplained_pp = actual - stat_vector = +2 - +0.522 ≈ +1.478
+    expect(diags[0]!.unexplained_pp).toBeCloseTo(1.478, 2);
+    expect(diags[0]!.outcome).toBe('accepted');
+    expect(diags[0]!.label).toContain('breakpoint pair');
+  });
+
+  it('falls back to ilvl-proxy when weights are not provided', () => {
+    const baseline_dps = 100_000;
+    const inc = makeItem('chest', 'EQ_C', 270, rawStats({ intellect: 100 }));
+    const cand = makeItem('chest', 'NEW_C', 280, rawStats({ intellect: 150 }));
+    const incL = makeItem('legs', 'EQ_L', 270, rawStats({ intellect: 100 }));
+    const candL = makeItem('legs', 'NEW_L', 280, rawStats({ intellect: 140 }));
+    const entry = makeComboEntry({ chest: cand, legs: candL }, 102_000, baseline_dps);
+
+    const diags = buildBreakpointDiagnostics({
+      combos: [entry],
+      baseline_dps,
+      winnerId: undefined,
+      converged: { chest: inc, legs: incL },
+      // weights omitted on purpose
+      dpsPerIlvlPct: 0.3,
+      tieWindowPct: 0.1,
+    });
+
+    expect(diags[0]!.predicted_pct_stat_vector).toBeUndefined();
+    expect(diags[0]!.unexplained_pp).toBeUndefined();
+    // ilvl proxy: total_ilvl_delta=20, predicted_pct=6%, predicted_delta_dps=6000
+    expect(diags[0]!.predicted_delta_dps).toBeCloseTo(6_000, 0);
+  });
+
+  it('falls back to ilvl-proxy when any candidate is missing raw_stats', () => {
+    const baseline_dps = 100_000;
+    const inc = makeItem('chest', 'EQ_C', 270, rawStats({ intellect: 100 }));
+    const cand = makeItem('chest', 'NEW_C', 280); // no raw_stats
+    const incL = makeItem('legs', 'EQ_L', 270, rawStats({ intellect: 100 }));
+    const candL = makeItem('legs', 'NEW_L', 280, rawStats({ intellect: 140 }));
+    const entry = makeComboEntry({ chest: cand, legs: candL }, 102_000, baseline_dps);
+
+    const diags = buildBreakpointDiagnostics({
+      combos: [entry],
+      baseline_dps,
+      winnerId: undefined,
+      converged: { chest: inc, legs: incL },
+      weights: WEIGHTS,
+      dpsPerIlvlPct: 0.3,
+      tieWindowPct: 0.1,
+    });
+
+    expect(diags[0]!.predicted_pct_stat_vector).toBeUndefined();
+  });
+
+  it('falls back to ilvl-proxy when any incumbent is missing raw_stats', () => {
+    const baseline_dps = 100_000;
+    const inc = makeItem('chest', 'EQ_C', 270); // no raw_stats
+    const cand = makeItem('chest', 'NEW_C', 280, rawStats({ intellect: 150 }));
+    const incL = makeItem('legs', 'EQ_L', 270, rawStats({ intellect: 100 }));
+    const candL = makeItem('legs', 'NEW_L', 280, rawStats({ intellect: 140 }));
+    const entry = makeComboEntry({ chest: cand, legs: candL }, 102_000, baseline_dps);
+
+    const diags = buildBreakpointDiagnostics({
+      combos: [entry],
+      baseline_dps,
+      winnerId: undefined,
+      converged: { chest: inc, legs: incL },
+      weights: WEIGHTS,
+      dpsPerIlvlPct: 0.3,
+      tieWindowPct: 0.1,
+    });
+
+    expect(diags[0]!.predicted_pct_stat_vector).toBeUndefined();
+  });
+
+  it('decides per-combo: mixed batch keeps stat-vector where available, ilvl elsewhere', () => {
+    const baseline_dps = 100_000;
+    // Combo A: full raw_stats coverage → stat-vector
+    const incA = makeItem('chest', 'EQ_C', 270, rawStats({ intellect: 100 }));
+    const candA = makeItem('chest', 'NEW_C', 280, rawStats({ intellect: 150 }));
+    const incAL = makeItem('legs', 'EQ_L', 270, rawStats({ intellect: 100 }));
+    const candAL = makeItem('legs', 'NEW_L', 280, rawStats({ intellect: 140 }));
+    // Combo B: missing raw_stats on one item → ilvl proxy
+    const candB = makeItem('hands', 'NEW_H', 280); // no raw_stats
+    const incB = makeItem('hands', 'EQ_H', 270, rawStats({ intellect: 100 }));
+
+    const entryA = makeComboEntry({ chest: candA, legs: candAL }, 102_000, baseline_dps);
+    const entryB = makeComboEntry({ hands: candB }, 101_500, baseline_dps);
+
+    const diags = buildBreakpointDiagnostics({
+      combos: [entryA, entryB],
+      baseline_dps,
+      winnerId: undefined,
+      converged: { chest: incA, legs: incAL, hands: incB },
+      weights: WEIGHTS,
+      dpsPerIlvlPct: 0.3,
+      tieWindowPct: 0.1,
+    });
+
+    expect(diags).toHaveLength(2);
+    expect(diags[0]!.predicted_pct_stat_vector).toBeDefined(); // A: stat-vector
+    expect(diags[1]!.predicted_pct_stat_vector).toBeUndefined(); // B: ilvl proxy
+  });
+
+  it('marks the winning combo with outcome=winner', () => {
+    const baseline_dps = 100_000;
+    const incA = makeItem('chest', 'EQ_C', 270, rawStats());
+    const candA = makeItem('chest', 'NEW_C', 280, rawStats({ intellect: 100 }));
+    const incAL = makeItem('legs', 'EQ_L', 270, rawStats());
+    const candAL = makeItem('legs', 'NEW_L', 280, rawStats({ intellect: 80 }));
+    const entry = makeComboEntry({ chest: candA, legs: candAL }, 102_000, baseline_dps);
+
+    const diags = buildBreakpointDiagnostics({
+      combos: [entry],
+      baseline_dps,
+      winnerId: entry.combo.id,
+      converged: { chest: incA, legs: incAL },
+      weights: WEIGHTS,
+      dpsPerIlvlPct: 0.3,
+      tieWindowPct: 0.1,
+    });
+
+    expect(diags[0]!.outcome).toBe('winner');
   });
 });
 

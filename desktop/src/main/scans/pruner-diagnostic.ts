@@ -320,6 +320,15 @@ export interface DiagnosticSummary {
  * Used to print a one-line summary at the end of greedy / breakpoint
  * stages so the user gets a trend at a glance without scrolling through
  * every combo.
+ *
+ * Metric source: prefers `unexplained_pp` (stat-vector prediction error)
+ * over `error_pp` (legacy ilvl-proxy error) on a per-entry basis. The
+ * field names on the returned summary keep the legacy `_error_pp` suffix
+ * for back-compat, but their *meaning* tracks whichever signal each
+ * entry made available — stat-vector when the addon supplied raw_stats
+ * + weights are known, ilvl-proxy otherwise. For weapon swaps the ilvl
+ * proxy is structurally wrong (sums ilvls across slots), inflating
+ * `max_abs` to ~13pp; the truth lives in unexplained_pp.
  */
 export function summarizeDiagnostics(
   entries: readonly DiagnosticEntry[],
@@ -335,7 +344,9 @@ export function summarizeDiagnostics(
       max_abs_error_pp: 0,
     };
   }
-  const errors = entries.map((e) => e.error_pp);
+  const errors = entries.map((e) =>
+    e.unexplained_pp !== undefined ? e.unexplained_pp : e.error_pp,
+  );
   const sorted_errors = [...errors].sort((a, b) => a - b);
   const sorted_abs = [...errors].map(Math.abs).sort((a, b) => a - b);
   const mean = errors.reduce((a, b) => a + b, 0) / errors.length;

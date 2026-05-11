@@ -366,4 +366,65 @@ describe('summarizeDiagnostics', () => {
     expect(line).toContain('1 sims');
     expect(line).toContain('mean_error=+1.00pp');
   });
+
+  // Metric source: when stat-vector data is available on an entry, the
+  // summary tracks unexplained_pp (truth) rather than error_pp (legacy
+  // ilvl-proxy, structurally wrong for weapon swaps). Fields keep their
+  // legacy names for back-compat; only the meaning changes per entry.
+  it('prefers unexplained_pp over error_pp when stat-vector data is present', () => {
+    // Build a stat-vector entry where ilvl prediction is way off but
+    // stat-vector prediction is on-the-nose: actual=+1.00pp,
+    // ilvl-prediction=+8.00pp (error_pp=+7), stat-vector-prediction=+1.00pp
+    // (unexplained_pp=0). The summary should reflect unexplained_pp.
+    const sv = buildStatVectorDiagnosticEntry({
+      label: 'sv',
+      baseline_dps: 100_000,
+      candidate_dps: 101_000,            // actual = +1.00pp
+      predicted_delta_dps_ilvl: 8_000,   // ilvl-proxy = +8.00pp → error_pp = +7
+      predicted_delta_dps_stat_vector: 1_000, // stat-vector = +1.00pp → unexplained_pp = 0
+      outcome: 'accepted',
+    });
+    const s = summarizeDiagnostics([sv], 'breakpoint');
+    expect(s.mean_error_pp).toBeCloseTo(0, 2);
+    expect(s.max_abs_error_pp).toBeCloseTo(0, 2);
+  });
+
+  it('falls back to error_pp when no entry carries unexplained_pp', () => {
+    const entries = [
+      buildDiagnosticEntry({
+        label: 'a', baseline_dps: 100_000, candidate_dps: 102_000,
+        predicted_delta_dps: 3_000, outcome: 'accepted',
+      }),
+      buildDiagnosticEntry({
+        label: 'b', baseline_dps: 100_000, candidate_dps: 99_000,
+        predicted_delta_dps: -500, outcome: 'rejected',
+      }),
+    ];
+    // a: predicted=+3, actual=+2 → error_pp=+1
+    // b: predicted=-0.5, actual=-1 → error_pp=+0.5
+    const s = summarizeDiagnostics(entries, 'greedy');
+    expect(s.max_abs_error_pp).toBeCloseTo(1, 2);
+  });
+
+  it('per-entry decision: mixed batch uses stat-vector where present, ilvl elsewhere', () => {
+    // Stat-vector entry: actual=+0.50pp, stat-vector predicts +0.40pp → unexplained=+0.10pp
+    const svEntry = buildStatVectorDiagnosticEntry({
+      label: 'sv',
+      baseline_dps: 100_000,
+      candidate_dps: 100_500,
+      predicted_delta_dps_ilvl: 5_000,       // legacy proxy is way off; ignored by the summary
+      predicted_delta_dps_stat_vector: 400,
+      outcome: 'accepted',
+    });
+    // Ilvl-only entry: actual=+2.00pp, predicted=+3.00pp → error_pp=+1.00pp
+    const ilvlEntry = buildDiagnosticEntry({
+      label: 'ilvl', baseline_dps: 100_000, candidate_dps: 102_000,
+      predicted_delta_dps: 3_000, outcome: 'accepted',
+    });
+    const s = summarizeDiagnostics([svEntry, ilvlEntry], 'mixed');
+    // Source values used by the summary: +0.10pp (sv unexplained) and +1.00pp (ilvl error).
+    // max_abs should be +1.00pp; mean ≈ +0.55pp.
+    expect(s.max_abs_error_pp).toBeCloseTo(1.0, 2);
+    expect(s.mean_error_pp).toBeCloseTo(0.55, 2);
+  });
 });
