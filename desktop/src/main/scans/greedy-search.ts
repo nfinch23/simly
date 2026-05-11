@@ -22,17 +22,20 @@
  */
 
 import type { ParsedItem } from '../simc-export-parser';
-import type { SwapTestResult, SwapResult } from '../swap-test';
+import type { SwapTestResult, SwapResult, WeaponSwap } from '../swap-test';
 import type { BestLoadoutSlot, GearCatalogEntry } from '../gear-catalog';
 import type { StatWeights } from '@simly/shared';
 import {
   buildDiagnosticEntry,
   buildStatVectorDiagnosticEntry,
+  predictDpsFromAggregatedStatDelta,
   predictDpsFromStatDelta,
   predictItemSwapDps,
   type DiagnosticEntry,
 } from './pruner-diagnostic';
 import { HARD_FLOOR_PCT } from './gear-pruner';
+import { canPairAsMH, canPairAsOH, classifyWeapon, locksOffHand } from './weapon-config';
+import { pickBestOHForMH } from './oh-pairing';
 
 /**
  * Runtime callback the greedy loop uses to evaluate a batch of
@@ -43,6 +46,14 @@ export type SwapTestRunner = (args: {
   bestLoadout: Record<string, BestLoadoutSlot>;
   baselineItemBySlot: Record<string, ParsedItem>;
   newItems: readonly ParsedItem[];
+  /**
+   * Weapon-aware (MH, OH) tuples. Tested as one profileset each — the
+   * builder emits `off_hand=` empty for 2H tuples (oh=null) and
+   * `off_hand=<oh>` for 1H+OH tuples. Greedy partitions weapon
+   * candidates into this list before calling the runner so the
+   * profileset correctly models the WoW slot lockout.
+   */
+  weaponSwaps?: readonly WeaponSwap[];
 }) => Promise<SwapTestResult>;
 
 export interface GreedyOptions {
@@ -152,10 +163,23 @@ export async function runGreedyGearSearch(
       break;
     }
 
+    // Partition kept candidates: non-weapon items go through the
+    // existing single-slot swap path; weapon items (MH or pure OH) go
+    // through the new (mh, oh) tuple path so the profileset correctly
+    // models the 2H/1H slot lockout.
+    const { nonWeaponItems, weaponSwaps, weaponSwapByMHIdentity } =
+      partitionWeaponCandidates({
+        candidates: filtered.kept,
+        bagItems: opts.bagItems,
+        converged,
+        statWeights: opts.statWeights,
+      });
+
     const result = await opts.runSwapTest({
       bestLoadout: loadoutToBestLoadout(converged),
       baselineItemBySlot: converged,
-      newItems: filtered.kept,
+      newItems: nonWeaponItems,
+      weaponSwaps,
     });
 
     convergedDps = result.baseline_dps;
@@ -163,6 +187,62 @@ export async function runGreedyGearSearch(
     // Build diagnostic entries for every candidate this iteration.
     const best = selectBestUpgrade(result.results, tieWindowPct);
     for (const r of result.results) {
+      const isAccepted = best !== null && r.item.identity === best.item.identity;
+      const outcome: DiagnosticEntry['outcome'] = isAccepted ? 'accepted' : 'rejected';
+
+      // Weapon-aware path: if this result came from a WeaponSwap tuple
+      // (MH ± OH together), use aggregated stat-delta math so the
+      // prediction accounts for both slots changing at once.
+      const weaponSwap = weaponSwapByMHIdentity.get(r.item.identity);
+      if (weaponSwap) {
+        const ohName = weaponSwap.oh ? ` + off_hand=${weaponSwap.oh.name}` : ' (off_hand cleared)';
+        const label = `greedy iter ${iterations}: main_hand=${weaponSwap.mh.name}${ohName}`;
+        // Sum the ilvl deltas across both slots for the legacy ilvl-proxy line.
+        const incIlvlSum =
+          (converged['main_hand']?.ilvl ?? 0) + (converged['off_hand']?.ilvl ?? 0);
+        const candIlvlSum = weaponSwap.mh.ilvl + (weaponSwap.oh?.ilvl ?? 0);
+        const predicted_delta_dps_ilvl =
+          (candIlvlSum - incIlvlSum) * opts.dpsPerIlvlPct * (result.baseline_dps / 100);
+
+        // Stat-vector aggregated math.
+        const incRaw: NonNullable<ParsedItem['raw_stats']>[] = [];
+        if (converged['main_hand']?.raw_stats) incRaw.push(converged['main_hand'].raw_stats);
+        if (converged['off_hand']?.raw_stats) incRaw.push(converged['off_hand'].raw_stats);
+        const candRaw: NonNullable<ParsedItem['raw_stats']>[] = [];
+        if (weaponSwap.mh.raw_stats) candRaw.push(weaponSwap.mh.raw_stats);
+        if (weaponSwap.oh?.raw_stats) candRaw.push(weaponSwap.oh.raw_stats);
+
+        if (opts.statWeights && (incRaw.length > 0 || candRaw.length > 0)) {
+          const predicted = predictDpsFromAggregatedStatDelta({
+            incumbents: incRaw,
+            candidates: candRaw,
+            weights: opts.statWeights,
+          });
+          diagnostics.push(
+            buildStatVectorDiagnosticEntry({
+              label,
+              baseline_dps: result.baseline_dps,
+              candidate_dps: r.mean_dps,
+              predicted_delta_dps_ilvl,
+              predicted_delta_dps_stat_vector: predicted.predicted_delta_dps,
+              outcome,
+            }),
+          );
+        } else {
+          diagnostics.push(
+            buildDiagnosticEntry({
+              label,
+              baseline_dps: result.baseline_dps,
+              candidate_dps: r.mean_dps,
+              predicted_delta_dps: predicted_delta_dps_ilvl,
+              outcome,
+            }),
+          );
+        }
+        continue;
+      }
+
+      // Non-weapon path (existing behavior).
       const incumbent = pickIncumbentForSlot(converged, r.slot);
       const predicted_delta_dps_ilvl = predictItemSwapDps({
         candidate_ilvl: r.item.ilvl,
@@ -170,18 +250,10 @@ export async function runGreedyGearSearch(
         baseline_dps: result.baseline_dps,
         dps_per_ilvl_pct: opts.dpsPerIlvlPct,
       });
-      const isAccepted = best !== null && r.item.identity === best.item.identity;
       const label = `greedy iter ${iterations}: ${r.slot}=${r.item.name}`;
-      const outcome: DiagnosticEntry['outcome'] = isAccepted ? 'accepted' : 'rejected';
-
-      // Look up the full ParsedItem (with raw_stats) for the candidate.
       const candidateItem = opts.bagItems.find((i) => i.identity === r.item.identity);
 
-      if (
-        opts.statWeights &&
-        candidateItem?.raw_stats &&
-        incumbent?.raw_stats
-      ) {
+      if (opts.statWeights && candidateItem?.raw_stats && incumbent?.raw_stats) {
         const predicted = predictDpsFromStatDelta({
           incumbent: incumbent.raw_stats,
           candidate: candidateItem.raw_stats,
@@ -211,12 +283,27 @@ export async function runGreedyGearSearch(
     }
 
     if (!best) break; // converged — no upgrade found
-    // Fold best into converged. For rings/trinkets we honor the
-    // position the swap-test picked as winning (best.position_deltas[0]
-    // when sorted, but parseSwapTestResult already collapses to the best
-    // position and we re-derive the slot here).
-    const targetSlot = bestPositionSlot(best);
-    converged[targetSlot] = candidateAsParsedItem(best, opts.bagItems);
+
+    // Fold the winner into the converged loadout. Weapon winners need
+    // special handling: the WeaponSwap that produced this winner also
+    // determines the off_hand state.
+    const weaponSwap = weaponSwapByMHIdentity.get(best.item.identity);
+    if (weaponSwap) {
+      // Weapon winner. Apply MH + (OH or clear).
+      converged['main_hand'] = weaponSwap.mh;
+      if (weaponSwap.oh) {
+        converged['off_hand'] = weaponSwap.oh;
+      } else {
+        // 2H winner — clear off-hand. Use `delete` so subsequent iters
+        // see the slot as empty (rather than a stale ParsedItem).
+        delete converged['off_hand'];
+      }
+    } else {
+      // Non-weapon winner. Existing behavior — honor ring/trinket
+      // best-position selection.
+      const targetSlot = bestPositionSlot(best);
+      converged[targetSlot] = candidateAsParsedItem(best, opts.bagItems);
+    }
   }
 
   if (iterations >= maxIterations) hitIterationCap = true;
@@ -489,6 +576,88 @@ function getIncumbentsForCandidate(
   }
   const incumbent = loadout[candidate.slot];
   return incumbent ? [incumbent] : [];
+}
+
+/**
+ * Partition a kept-candidate list into:
+ *   - `nonWeaponItems`: non-weapon slots (chest, legs, ring, trinket, etc.).
+ *     Tested via the existing single-slot swap path.
+ *   - `weaponSwaps`: explicit (MH, OH) tuples — one per weapon candidate
+ *     this iter. Each MH candidate gets its best OH via `pickBestOHForMH`;
+ *     each pure-OH candidate gets paired with the converged main_hand
+ *     (skipped if main_hand is 2H, since the slot is locked out).
+ *   - `weaponSwapByMHIdentity`: lookup map so the post-iter accept logic
+ *     can recover which OH was paired with the winning MH.
+ *
+ * `1H_DUAL` items appear in MH candidate processing only — when paired
+ * with another MH as that MH's OH, they show up in the OH pool through
+ * the same bag scan.
+ */
+function partitionWeaponCandidates(args: {
+  candidates: readonly ParsedItem[];
+  bagItems: readonly ParsedItem[];
+  converged: Record<string, ParsedItem>;
+  statWeights?: StatWeights;
+}): {
+  nonWeaponItems: ParsedItem[];
+  weaponSwaps: WeaponSwap[];
+  weaponSwapByMHIdentity: Map<string, WeaponSwap>;
+} {
+  const nonWeaponItems: ParsedItem[] = [];
+  const weaponSwaps: WeaponSwap[] = [];
+  const weaponSwapByMHIdentity = new Map<string, WeaponSwap>();
+
+  // OH pool = bag's OH-eligible items + currently-equipped OH (a 1H_DUAL
+  // or dedicated OH item that's in converged.off_hand).
+  const ohPool: ParsedItem[] = args.bagItems.filter(canPairAsOH);
+  const currentOH = args.converged['off_hand'];
+  if (currentOH && canPairAsOH(currentOH)) {
+    ohPool.push(currentOH);
+  }
+
+  const currentMH = args.converged['main_hand'];
+
+  for (const candidate of args.candidates) {
+    const cls = classifyWeapon(candidate);
+
+    // Non-weapon slot → existing path.
+    if (cls === 'NON_WEAPON') {
+      nonWeaponItems.push(candidate);
+      continue;
+    }
+
+    // Pure off-hand candidate → pair with current main_hand IF main_hand
+    // isn't a 2H (the slot is locked out otherwise).
+    if (cls === 'OH') {
+      if (currentMH && !locksOffHand(currentMH)) {
+        const ws: WeaponSwap = { mh: currentMH, oh: candidate };
+        weaponSwaps.push(ws);
+        // Note: the SwapResult is keyed by candidate.identity (which is
+        // the OH here, NOT the MH). Map by candidate.identity so the
+        // accept lookup uses the right key.
+        weaponSwapByMHIdentity.set(candidate.identity, ws);
+      }
+      // If current MH is 2H, OH candidates can't be tested without
+      // changing weapon config — skip silently. They'd compete only via
+      // a 1H MH winning first, then re-running greedy.
+      continue;
+    }
+
+    // Main-hand candidate (2H, 1H_MH, 1H_DUAL): pick the best OH and
+    // queue a (mh, oh) tuple. For 2H, `pickBestOHForMH` returns null OH.
+    if (canPairAsMH(candidate)) {
+      const pick = args.statWeights
+        ? pickBestOHForMH({ mh: candidate, ohCandidates: ohPool, weights: args.statWeights })
+        : { bestOH: ohPool[0] ?? null, rankedScores: [] };
+      // For 2H: pick.bestOH will be null even if ohPool has items.
+      const oh = locksOffHand(candidate) ? null : pick.bestOH;
+      const ws: WeaponSwap = { mh: candidate, oh };
+      weaponSwaps.push(ws);
+      weaponSwapByMHIdentity.set(candidate.identity, ws);
+    }
+  }
+
+  return { nonWeaponItems, weaponSwaps, weaponSwapByMHIdentity };
 }
 
 /**

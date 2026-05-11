@@ -120,6 +120,65 @@ describe('buildSwapTestScript', () => {
     // No "head=,id=1" inside the candidate's profileset (only in baseline).
     expect(build.script).not.toMatch(new RegExp(`profileset\\."${swapName}"\\+="head=,id=1`));
   });
+
+  it('weapon swap with 2H clears the off_hand slot', () => {
+    const equippedMH = fakeItem({ slot: 'main_hand', item_id: 1 });
+    const equippedOH = fakeItem({ slot: 'off_hand', item_id: 2 });
+    const new2H = fakeItem({ slot: 'main_hand', item_id: 3 });
+    const build = buildSwapTestScript(
+      { main_hand: bestSlot(equippedMH), off_hand: bestSlot(equippedOH) },
+      { main_hand: equippedMH, off_hand: equippedOH },
+      [], // no non-weapon candidates
+      [{ mh: new2H, oh: null }],
+    );
+    expect(build.candidates).toHaveLength(1);
+    const psName = build.candidates[0]!.profileset_names[0]!;
+    expect(build.script).toContain(`profileset."${psName}"+="main_hand=,id=3"`);
+    // Off-hand cleared via empty value.
+    expect(build.script).toContain(`profileset."${psName}"+="off_hand="`);
+    // The original off_hand=,id=2 line MUST NOT appear in this profileset.
+    expect(build.script).not.toMatch(new RegExp(`profileset\\."${psName}"\\+="off_hand=,id=2`));
+  });
+
+  it('weapon swap with 1H+OH paired emits both slot overrides', () => {
+    const equippedMH = fakeItem({ slot: 'main_hand', item_id: 1 });
+    const equippedOH = fakeItem({ slot: 'off_hand', item_id: 2 });
+    const new1H = fakeItem({ slot: 'main_hand', item_id: 3 });
+    const newOH = fakeItem({ slot: 'off_hand', item_id: 4 });
+    const build = buildSwapTestScript(
+      { main_hand: bestSlot(equippedMH), off_hand: bestSlot(equippedOH) },
+      { main_hand: equippedMH, off_hand: equippedOH },
+      [],
+      [{ mh: new1H, oh: newOH }],
+    );
+    const psName = build.candidates[0]!.profileset_names[0]!;
+    expect(build.script).toContain(`profileset."${psName}"+="main_hand=,id=3"`);
+    expect(build.script).toContain(`profileset."${psName}"+="off_hand=,id=4"`);
+    // Empty off_hand= must NOT appear.
+    expect(build.script).not.toMatch(new RegExp(`profileset\\."${psName}"\\+="off_hand="(\\s|$)`));
+  });
+
+  it('weapon swaps coexist with non-weapon candidates in the same script', () => {
+    const equippedMH = fakeItem({ slot: 'main_hand', item_id: 1 });
+    const equippedOH = fakeItem({ slot: 'off_hand', item_id: 2 });
+    const head = fakeItem({ slot: 'head', item_id: 5 });
+    const newHead = fakeItem({ slot: 'head', item_id: 6 });
+    const new2H = fakeItem({ slot: 'main_hand', item_id: 7 });
+    const build = buildSwapTestScript(
+      {
+        main_hand: bestSlot(equippedMH),
+        off_hand: bestSlot(equippedOH),
+        head: bestSlot(head),
+      },
+      { main_hand: equippedMH, off_hand: equippedOH, head },
+      [newHead],
+      [{ mh: new2H, oh: null }],
+    );
+    expect(build.candidates).toHaveLength(2);
+    // One is the head swap, one is the weapon swap.
+    const slots = build.candidates.map((c) => c.slot).sort();
+    expect(slots).toEqual(['head', 'main_hand']);
+  });
 });
 
 describe('parseSwapTestResult', () => {

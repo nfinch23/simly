@@ -27,6 +27,7 @@ import {
   type SwapTestRunner,
 } from './greedy-search';
 import { runBreakpointSearch, applyComboToLoadout } from './breakpoint-search';
+import { classifyWeapon } from './weapon-config';
 import {
   computeDpsPerIlvlPct,
 } from './gear-pruner';
@@ -187,6 +188,7 @@ export async function runGreedyGearPipeline(
       bestLoadout: args.bestLoadout,
       baselineItemBySlot: args.baselineItemBySlot,
       newItems: args.newItems,
+      weaponSwaps: args.weaponSwaps,
       iterations: opts.greedyIterations,
       tie_window_pct: tieWindowPct,
       onProgress: opts.onProgress,
@@ -219,16 +221,34 @@ export async function runGreedyGearPipeline(
   let breakpointCombos = 0;
 
   // 2. Breakpoint phase — exhaustive 2-and-3 cartesian over rejects.
-  if (greedy.rejected.length >= 2) {
+  // Filter weapon items out of the breakpoint pool: the breakpoint
+  // phase doesn't have weapon-aware profileset emission yet, so a 2H
+  // candidate combined with anything else would inflate its DPS by
+  // also counting the equipped off-hand's stats (the same bug the
+  // greedy fix closes). Greedy already made the weapon decision —
+  // breakpoint focuses on non-weapon synergies (haste-breakpoint pairs,
+  // set-bonus completers, etc.). Weapon-aware breakpoint is a follow-up.
+  const breakpointPool = greedy.rejected.filter(
+    (i) => classifyWeapon(i) === 'NON_WEAPON',
+  );
+  const weaponSkipped = greedy.rejected.length - breakpointPool.length;
+  if (weaponSkipped > 0) {
     console.log(
-      `[gear] breakpoint phase starting: ${greedy.rejected.length} rejected items → ` +
+      `[gear] breakpoint phase: skipped ${weaponSkipped} weapon item(s) — ` +
+      `breakpoint not yet weapon-aware (greedy already decided weapons)`,
+    );
+  }
+
+  if (breakpointPool.length >= 2) {
+    console.log(
+      `[gear] breakpoint phase starting: ${breakpointPool.length} rejected items → ` +
       `up to C(n,2)+C(n,3) combos`,
     );
     const bp = await runBreakpointSearch({
       paths: opts.paths,
       baseProfile: opts.baseProfile,
       converged: greedy.converged,
-      rejected: greedy.rejected,
+      rejected: breakpointPool,
       iterations: opts.breakpointIterations,
       tieWindowPct,
       dpsPerIlvlPct,
@@ -253,7 +273,7 @@ export async function runGreedyGearPipeline(
     allDiagnostics.push(...bp.diagnostics);
   } else {
     console.log(
-      `[gear] breakpoint phase: skipped (${greedy.rejected.length} rejected — need 2+)`,
+      `[gear] breakpoint phase: skipped (${breakpointPool.length} non-weapon rejected — need 2+)`,
     );
   }
 

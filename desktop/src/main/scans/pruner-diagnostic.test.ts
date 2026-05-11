@@ -5,6 +5,7 @@ import {
   formatDiagnosticLine,
   formatDiagnosticSummary,
   predictComboDps,
+  predictDpsFromAggregatedStatDelta,
   predictDpsFromStatDelta,
   predictItemSwapDps,
   summarizeDiagnostics,
@@ -191,6 +192,78 @@ describe('predictDpsFromStatDelta', () => {
     });
     // mastery delta ignored. Δint=20, weight=33 → 660.
     expect(r.predicted_delta_dps).toBeCloseTo(660, 1);
+  });
+});
+
+describe('predictDpsFromAggregatedStatDelta', () => {
+  const item = (overrides: Partial<{
+    intellect: number; haste_rating: number; crit_rating: number;
+    mastery_rating: number; versatility_rating: number;
+  }>) => ({
+    intellect: 0, strength: 0, agility: 0,
+    haste_rating: 0, crit_rating: 0, mastery_rating: 0, versatility_rating: 0,
+    ...overrides,
+  });
+
+  it('reduces to predictDpsFromStatDelta when each side has exactly one item', () => {
+    const inc = item({ intellect: 200, haste_rating: 100 });
+    const cand = item({ intellect: 250, haste_rating: 150 });
+    const result = predictDpsFromAggregatedStatDelta({
+      incumbents: [inc],
+      candidates: [cand],
+      weights: { intellect: 33, haste: 15 },
+    });
+    // Δint=50, Δhaste=50. 50*33 + 50*15 = 2400.
+    expect(result.predicted_delta_dps).toBeCloseTo(2400, 1);
+  });
+
+  it('handles 2H replacing 1H+OH (incumbents=2, candidates=1)', () => {
+    // Equipped: 1H (int=200, haste=100) + OH (int=120, haste=60). Sum: int=320, haste=160.
+    // Candidate: 2H (int=350, haste=200).
+    // Δint=+30, Δhaste=+40. weights int=33, haste=15.
+    // Predicted: 30*33 + 40*15 = 990 + 600 = 1590.
+    const result = predictDpsFromAggregatedStatDelta({
+      incumbents: [
+        item({ intellect: 200, haste_rating: 100 }),
+        item({ intellect: 120, haste_rating: 60 }),
+      ],
+      candidates: [item({ intellect: 350, haste_rating: 200 })],
+      weights: { intellect: 33, haste: 15 },
+    });
+    expect(result.predicted_delta_dps).toBeCloseTo(1590, 1);
+  });
+
+  it('handles 1H+OH replacing 2H (incumbents=1, candidates=2)', () => {
+    // 2H (int=350, haste=200) → 1H (int=180, haste=80) + OH (int=140, haste=120).
+    // Sum candidates: int=320, haste=200. Δint=-30, Δhaste=0. Predicted: -30*33 = -990.
+    const result = predictDpsFromAggregatedStatDelta({
+      incumbents: [item({ intellect: 350, haste_rating: 200 })],
+      candidates: [
+        item({ intellect: 180, haste_rating: 80 }),
+        item({ intellect: 140, haste_rating: 120 }),
+      ],
+      weights: { intellect: 33, haste: 15 },
+    });
+    expect(result.predicted_delta_dps).toBeCloseTo(-990, 1);
+  });
+
+  it('handles "remove without replacement" (candidates empty)', () => {
+    const result = predictDpsFromAggregatedStatDelta({
+      incumbents: [item({ intellect: 100, haste_rating: 50 })],
+      candidates: [],
+      weights: { intellect: 33, haste: 15 },
+    });
+    // 0 - (100*33 + 50*15) = -3300 - 750 = -4050.
+    expect(result.predicted_delta_dps).toBeCloseTo(-4050, 1);
+  });
+
+  it('handles "add without replacement" (incumbents empty)', () => {
+    const result = predictDpsFromAggregatedStatDelta({
+      incumbents: [],
+      candidates: [item({ intellect: 100, haste_rating: 50 })],
+      weights: { intellect: 33, haste: 15 },
+    });
+    expect(result.predicted_delta_dps).toBeCloseTo(4050, 1);
   });
 });
 
