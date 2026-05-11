@@ -252,6 +252,7 @@ export async function runGreedyGearPipeline(
       iterations: opts.breakpointIterations,
       tieWindowPct,
       dpsPerIlvlPct,
+      weights: opts.weights,
       onProgress: opts.onProgress,
     });
     breakpointCombos = bp.combos.length;
