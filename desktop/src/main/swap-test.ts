@@ -44,6 +44,16 @@ export interface SwapCandidate {
   /** Profileset names for this candidate, one per slot we're testing in.
    * For non-ring slots: 1 entry. For rings: 2 (finger1, finger2). */
   profileset_names: string[];
+  /**
+   * For weapon-aware swap candidates (rendered from a `WeaponSwap`):
+   * identity of the off_hand item paired with this MH in the profileset.
+   * - `string` → 1H + this specific OH; lets greedy distinguish two
+   *   `(mh, oh_A) / (mh, oh_B)` profilesets that share the same MH
+   *   identity (the OH-sub-sim case).
+   * - `null` → 2H weapon (off_hand cleared).
+   * - `undefined` → non-weapon candidate.
+   */
+  weapon_oh_identity?: string | null;
 }
 
 /**
@@ -146,7 +156,12 @@ export function buildSwapTestScript(
     } else {
       lines.push(`profileset."${name}"+="off_hand="`);
     }
-    candidates.push({ slot: 'main_hand', item: ws.mh, profileset_names: [name] });
+    candidates.push({
+      slot: 'main_hand',
+      item: ws.mh,
+      profileset_names: [name],
+      weapon_oh_identity: ws.oh ? ws.oh.identity : null,
+    });
   }
 
   return {
@@ -185,6 +200,12 @@ export interface SwapResult {
   is_upgrade: boolean;
   /** Per-position results — useful for debugging ring-slot asymmetry. */
   position_deltas: Array<{ position_slot: string; delta_pct: number; mean_dps: number }>;
+  /**
+   * Mirror of `SwapCandidate.weapon_oh_identity`. Used by greedy-search
+   * to disambiguate two SwapResults that share the same MH identity but
+   * came from different `(mh, oh)` sub-sim profilesets.
+   */
+  weapon_oh_identity?: string | null;
 }
 
 export interface SwapTestResult {
@@ -245,6 +266,9 @@ export function parseSwapTestResult(
       mean_dps: best.mean_dps,
       is_upgrade: best.delta_pct > tie_window_pct,
       position_deltas: positions,
+      ...(candidate.weapon_oh_identity !== undefined
+        ? { weapon_oh_identity: candidate.weapon_oh_identity }
+        : {}),
     });
   }
 

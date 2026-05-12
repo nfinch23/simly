@@ -35,7 +35,17 @@ import {
 } from './pruner-diagnostic';
 import { HARD_FLOOR_PCT } from './gear-pruner';
 import { canPairAsMH, canPairAsOH, classifyWeapon, locksOffHand } from './weapon-config';
-import { pickBestOHForMH } from './oh-pairing';
+import { pickBestOHForMH, pickCloseOHsForMH } from './oh-pairing';
+
+/**
+ * Composite key joining MH identity with its paired OH identity.
+ * `null` OH (2H weapon) is encoded as the literal `'_2h'` token so the
+ * key space cleanly partitions 2H winners from 1H+OH winners with the
+ * same MH item id.
+ */
+function weaponSwapKey(mhIdentity: string, ohIdentity: string | null): string {
+  return `${mhIdentity}|${ohIdentity ?? '_2h'}`;
+}
 
 /**
  * Runtime callback the greedy loop uses to evaluate a batch of
@@ -167,7 +177,7 @@ export async function runGreedyGearSearch(
     // existing single-slot swap path; weapon items (MH or pure OH) go
     // through the new (mh, oh) tuple path so the profileset correctly
     // models the 2H/1H slot lockout.
-    const { nonWeaponItems, weaponSwaps, weaponSwapByMHIdentity } =
+    const { nonWeaponItems, weaponSwaps, weaponSwapByKey } =
       partitionWeaponCandidates({
         candidates: filtered.kept,
         bagItems: opts.bagItems,
@@ -192,8 +202,12 @@ export async function runGreedyGearSearch(
 
       // Weapon-aware path: if this result came from a WeaponSwap tuple
       // (MH ± OH together), use aggregated stat-delta math so the
-      // prediction accounts for both slots changing at once.
-      const weaponSwap = weaponSwapByMHIdentity.get(r.item.identity);
+      // prediction accounts for both slots changing at once. The OH
+      // identity on the result discriminates between OH sub-sim
+      // siblings that share the same MH.
+      const weaponSwap = weaponSwapByKey.get(
+        weaponSwapKey(r.item.identity, r.weapon_oh_identity ?? null),
+      );
       if (weaponSwap) {
         const ohName = weaponSwap.oh ? ` + off_hand=${weaponSwap.oh.name}` : ' (off_hand cleared)';
         const label = `greedy iter ${iterations}: main_hand=${weaponSwap.mh.name}${ohName}`;
@@ -286,8 +300,11 @@ export async function runGreedyGearSearch(
 
     // Fold the winner into the converged loadout. Weapon winners need
     // special handling: the WeaponSwap that produced this winner also
-    // determines the off_hand state.
-    const weaponSwap = weaponSwapByMHIdentity.get(best.item.identity);
+    // determines the off_hand state. Use the composite (mh, oh) key
+    // so OH-sub-sim winners resolve to the exact pair that won.
+    const weaponSwap = weaponSwapByKey.get(
+      weaponSwapKey(best.item.identity, best.weapon_oh_identity ?? null),
+    );
     if (weaponSwap) {
       // Weapon winner. Apply MH + (OH or clear).
       converged['main_hand'] = weaponSwap.mh;
@@ -601,11 +618,19 @@ function partitionWeaponCandidates(args: {
 }): {
   nonWeaponItems: ParsedItem[];
   weaponSwaps: WeaponSwap[];
-  weaponSwapByMHIdentity: Map<string, WeaponSwap>;
+  /**
+   * Composite-keyed lookup: `weaponSwapKey(mh.identity, oh?.identity)`
+   * → the WeaponSwap that produced that profileset. Composite keys are
+   * required because OH sub-sim can emit two `(mh, oh_A) / (mh, oh_B)`
+   * profilesets that share an MH identity; the OH identity is the
+   * discriminator the caller uses (via SwapResult.weapon_oh_identity)
+   * to map a winning result back to the exact (MH, OH) pair.
+   */
+  weaponSwapByKey: Map<string, WeaponSwap>;
 } {
   const nonWeaponItems: ParsedItem[] = [];
   const weaponSwaps: WeaponSwap[] = [];
-  const weaponSwapByMHIdentity = new Map<string, WeaponSwap>();
+  const weaponSwapByKey = new Map<string, WeaponSwap>();
 
   // OH pool = bag's OH-eligible items + currently-equipped OH (a 1H_DUAL
   // or dedicated OH item that's in converged.off_hand).
@@ -632,10 +657,7 @@ function partitionWeaponCandidates(args: {
       if (currentMH && !locksOffHand(currentMH)) {
         const ws: WeaponSwap = { mh: currentMH, oh: candidate };
         weaponSwaps.push(ws);
-        // Note: the SwapResult is keyed by candidate.identity (which is
-        // the OH here, NOT the MH). Map by candidate.identity so the
-        // accept lookup uses the right key.
-        weaponSwapByMHIdentity.set(candidate.identity, ws);
+        weaponSwapByKey.set(weaponSwapKey(currentMH.identity, candidate.identity), ws);
       }
       // If current MH is 2H, OH candidates can't be tested without
       // changing weapon config — skip silently. They'd compete only via
@@ -643,21 +665,52 @@ function partitionWeaponCandidates(args: {
       continue;
     }
 
-    // Main-hand candidate (2H, 1H_MH, 1H_DUAL): pick the best OH and
-    // queue a (mh, oh) tuple. For 2H, `pickBestOHForMH` returns null OH.
+    // Main-hand candidate (2H, 1H_MH, 1H_DUAL): emit one (mh, oh) tuple
+    // per close OH partner so the sim can resolve stat-vector close
+    // calls instead of trusting the dot-product winner. For 2H, the
+    // close-OH picker returns no partners and we emit a single
+    // (mh, null) swap to clear the off-hand slot.
     if (canPairAsMH(candidate)) {
-      const pick = args.statWeights
-        ? pickBestOHForMH({ mh: candidate, ohCandidates: ohPool, weights: args.statWeights })
-        : { bestOH: ohPool[0] ?? null, rankedScores: [] };
-      // For 2H: pick.bestOH will be null even if ohPool has items.
-      const oh = locksOffHand(candidate) ? null : pick.bestOH;
-      const ws: WeaponSwap = { mh: candidate, oh };
-      weaponSwaps.push(ws);
-      weaponSwapByMHIdentity.set(candidate.identity, ws);
+      if (locksOffHand(candidate)) {
+        // 2H weapon — single swap, OH cleared.
+        const ws: WeaponSwap = { mh: candidate, oh: null };
+        weaponSwaps.push(ws);
+        weaponSwapByKey.set(weaponSwapKey(candidate.identity, null), ws);
+        continue;
+      }
+
+      // 1H MH: sub-sim top close OHs when stat weights are available;
+      // fall back to "first OH in the pool" with no sub-sim when not.
+      let partners: ParsedItem[];
+      if (args.statWeights) {
+        const pick = pickCloseOHsForMH({
+          mh: candidate,
+          ohCandidates: ohPool,
+          weights: args.statWeights,
+        });
+        partners = pick.partners;
+      } else {
+        partners = ohPool.length > 0 ? [ohPool[0]!] : [];
+      }
+
+      if (partners.length === 0) {
+        // No eligible OH — emit a (mh, null) swap so the MH still gets
+        // tested. Matches prior behaviour when ohPool was empty.
+        const ws: WeaponSwap = { mh: candidate, oh: null };
+        weaponSwaps.push(ws);
+        weaponSwapByKey.set(weaponSwapKey(candidate.identity, null), ws);
+        continue;
+      }
+
+      for (const oh of partners) {
+        const ws: WeaponSwap = { mh: candidate, oh };
+        weaponSwaps.push(ws);
+        weaponSwapByKey.set(weaponSwapKey(candidate.identity, oh.identity), ws);
+      }
     }
   }
 
-  return { nonWeaponItems, weaponSwaps, weaponSwapByMHIdentity };
+  return { nonWeaponItems, weaponSwaps, weaponSwapByKey };
 }
 
 /**
