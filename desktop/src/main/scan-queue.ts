@@ -2,6 +2,7 @@ import {
   RESULTS_SCHEMA_VERSION,
   type ComposedLoadout,
   type GearScanResult,
+  type PassHistoryEntry,
   type ScanCollection,
   type ScanRecord,
   type ScenarioResults,
@@ -11,6 +12,11 @@ import {
   type StatWeights,
   type TrinketPreScanResult,
 } from '@simly/shared';
+import { hashGearContext, replaceGearInProfile } from './profile-builder';
+import {
+  formatReconvergeReason,
+  shouldTriggerPass2,
+} from './scans/reconverge-gate';
 import { writeLuaFile } from './lua-writer';
 import { parseResultsFile } from './lua-parser';
 import { readFile, unlink } from 'node:fs/promises';
@@ -55,6 +61,7 @@ import {
   getTrinketPool,
   parseSimcExport,
   type ParsedExport,
+  type ParsedItem,
 } from './simc-export-parser';
 import { STATIC_DESTRO_WARLOCK_PROFILE } from './static-profile';
 import { scenarioProfileLines } from './scenario-config';
@@ -815,6 +822,13 @@ export class ScanQueue {
       }
 
       let trinketLock: TrinketLock | undefined;
+      // Captured by the gear-pipeline block when greedy ran successfully
+      // and made it through with real sims. Used by the end-of-pass-1
+      // reconverge-gate diagnostic below to build the converged-actor
+      // baseProfile for the stat-weights re-run. Undefined when gear
+      // search didn't run or produced zero combos.
+      let pass1Gear: Record<string, ParsedItem> | undefined;
+
       // Stage 1.5: trinket pre-scan. Only when we have a real parsed
       // export (need actual bag trinkets) AND at least 2 unique trinkets
       // in the pool. Now cache-aware: pool unchanged ⇒ skip sim entirely
@@ -1014,6 +1028,10 @@ export class ScanQueue {
           const greedyRanSims = greedyResult.finalDps > 0;
           if (!greedyRanSims) {
             console.log(`[sim] greedy: no bag candidates — skipping catalog update`);
+          } else {
+            // Capture the converged loadout for the end-of-pass-1
+            // diagnostic (stat-weights re-run against the new actor).
+            pass1Gear = greedyResult.finalLoadout;
           }
 
           // Write to scans.gear_final so the composer (gear_final >
@@ -1088,6 +1106,78 @@ export class ScanQueue {
           ? 'no trinket pre-scan winner'
           : 'unknown gating';
         console.log(`[sim] gear_coarse: skipped (${why})`);
+      }
+
+      // ─── END OF PASS 1: STAT-WEIGHTS RE-RUN + RECONVERGE GATE ───
+      //
+      // After greedy + breakpoint converge, re-run stat-weights against
+      // the converged actor. If the marginal value of any secondary
+      // stat shifted past WEIGHT_SHIFT_THRESHOLD (25%) between baseline
+      // (weights_v1) and converged (weights_v2), the actor crossed a
+      // structural threshold (classic case: GCD floor) and pass-1's
+      // search was guided by stale weights.
+      //
+      // Slice 2a: diagnostic only — log the comparison and what would
+      // trigger pass 2. Slice 2b will dispatch the actual re-run.
+      const passHistory: PassHistoryEntry[] = [];
+      const weightsV1 = scans.stat_weights?.data as StatWeights | undefined;
+      if (
+        args.useRealExport &&
+        pass1Gear !== undefined &&
+        weightsV1 !== undefined &&
+        scans.stat_weights?.status === 'done'
+      ) {
+        const convergedProfile = replaceGearInProfile(args.baseProfile, pass1Gear);
+        const gearContextHash = hashGearContext(pass1Gear);
+        let weightsV2: StatWeights | undefined;
+        const swReStarted = Math.floor(Date.now() / 1000);
+        const swReProgress = makeStageProgressLogger(
+          'stat_weights (post-pass-1)',
+          args.characterKey,
+        );
+        try {
+          const sw2 = await runStatWeightsScan({
+            paths: runnerPaths,
+            baseProfile: convergedProfile,
+            onProgress: swReProgress.onProgress,
+          });
+          weightsV2 = sw2.weights;
+          swReProgress.stop();
+          const summary = Object.entries(weightsV2)
+            .map(([k, v]) => `${k}=${v?.toFixed(2)}`)
+            .join(' ');
+          console.log(
+            `[sim] stat_weights (post-pass-1 re-run, ${(sw2.durationMs / 1000).toFixed(1)}s): ${summary}`,
+          );
+        } catch (err) {
+          swReProgress.stop();
+          console.error(
+            '[sim] post-pass-1 stat_weights re-run failed:',
+            (err as Error).message,
+          );
+        }
+
+        const gate = shouldTriggerPass2({
+          weights_v1: weightsV1,
+          weights_v2: weightsV2,
+        });
+        if (gate.shouldTrigger) {
+          console.log(
+            `[gear] pass-2 WOULD trigger (slice 2a diagnostic; dispatch is slice 2b): ${gate.reasons.map(formatReconvergeReason).join(' | ')}`,
+          );
+        } else if (weightsV2 !== undefined) {
+          console.log(
+            `[gear] pass-2 not needed (weights stable post-pass-1; gear_context_hash=${gearContextHash})`,
+          );
+        }
+
+        passHistory.push({
+          pass: 1,
+          finished_at: Math.floor(Date.now() / 1000),
+          weights: weightsV2 ?? weightsV1,
+          triggers: gate.reasons.map((r) => r.kind),
+          trigger_details: gate.reasons.map(formatReconvergeReason),
+        });
       }
 
       // Stage 2: consumables (flask + food) via profileset sim.
@@ -1165,6 +1255,12 @@ export class ScanQueue {
         catalog_summary: buildCatalogSummary(
           this.gearCatalog?.get(args.characterKey, args.scenario),
         ),
+        // Slice 2a: pass_history captures end-of-pass-1 weights snapshot
+        // and which reconverge triggers would fire. Empty array (skipped
+        // entirely) when the diagnostic gate couldn't run (no real
+        // export, gear pipeline failed, etc.). Schema is optional so
+        // older readers ignore it.
+        pass_history: passHistory.length > 0 ? passHistory : undefined,
       };
 
       const mergedResults: SimlyResults = {
