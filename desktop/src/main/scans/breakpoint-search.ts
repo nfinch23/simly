@@ -29,6 +29,7 @@ import {
   type DiagnosticEntry,
   type StatWeightsLike,
 } from './pruner-diagnostic';
+import { canPairAsOH, classifyWeapon, locksOffHand } from './weapon-config';
 
 const BASELINE_NAME = 'bp_baseline';
 const MAX_REJECTED_FOR_TRIPLES = 15;
@@ -40,8 +41,32 @@ export interface BreakpointCombo {
   /**
    * The items that swap into the converged loadout for this combo.
    * Map from physical slot (the combo's swap target) to item.
+   *
+   * Weapon-aware combos:
+   *   - 1H main_hand + paired OH: `swaps` includes BOTH `main_hand` and
+   *     `off_hand` entries. The OH is resolved from the converged
+   *     loadout (or the bag pool — extension point).
+   *   - 2H main_hand: `swaps` includes `main_hand` only, and
+   *     `clearOffHand` is set true. The converged off_hand's stats are
+   *     lost; `applyComboToLoadout` and the predictor both account for
+   *     this.
+   *   - Pure off_hand: `swaps` includes `off_hand` only; the converged
+   *     main_hand stays put. Only emitted when the converged MH is 1H.
    */
   swaps: Record<string, ParsedItem>;
+  /**
+   * Set to `true` when the combo swaps in a 2H main_hand and the
+   * converged off_hand needs to be cleared (WoW's 2H slot lockout).
+   * Defaults to undefined (= false) for non-weapon combos.
+   *
+   * `buildBreakpointScript` honors this by emitting `off_hand=` with an
+   * empty value — same pattern swap-test already uses for 2H weapon
+   * swaps. `applyComboToLoadout` deletes the off_hand slot from the
+   * returned loadout. `predictComboScore` adds the converged off_hand's
+   * stats to the incumbent side so the predicted delta reflects the
+   * stats LOST by clearing the slot.
+   */
+  clearOffHand?: boolean;
 }
 
 export interface BreakpointResult {
@@ -104,8 +129,24 @@ export interface RunBreakpointSearchOptions {
  *   - Pairs are capped at MAX_REJECTED_FOR_PAIRS — items beyond that
  *     are dropped entirely (call site should top-K by ilvl first if
  *     this matters).
+ *
+ * Weapon-aware emission (requires `converged` to resolve OH context):
+ *   - 1H main_hand → combo includes BOTH `main_hand` AND `off_hand`
+ *     (OH copied from `converged.off_hand` when OH-eligible).
+ *   - 2H main_hand → combo includes `main_hand`; `clearOffHand` flag
+ *     set so the script builder emits `off_hand=` empty (lockout).
+ *   - Pure off_hand → combo includes `off_hand`; `converged.main_hand`
+ *     must be 1H (can't pair an OH with a 2H MH).
+ *   - Combos containing two or more weapon items are dropped — greedy
+ *     already explores 1H+1H pairs via OH sub-sim; breakpoint focuses
+ *     on non-weapon × weapon synergies.
+ *   - `converged` defaults to `{}`; weapon combos that need missing
+ *     context (no MH/OH in converged) are silently skipped.
  */
-export function generateCombos(rejected: readonly ParsedItem[]): BreakpointCombo[] {
+export function generateCombos(
+  rejected: readonly ParsedItem[],
+  converged: Record<string, ParsedItem> = {},
+): BreakpointCombo[] {
   const items = rejected.slice(0, MAX_REJECTED_FOR_PAIRS);
   const combos: BreakpointCombo[] = [];
 
@@ -114,9 +155,13 @@ export function generateCombos(rejected: readonly ParsedItem[]): BreakpointCombo
     for (let j = i + 1; j < items.length; j++) {
       const a = items[i]!;
       const b = items[j]!;
-      const swaps = pairSwaps(a, b);
-      if (!swaps) continue;
-      combos.push({ id: `bp2_${comboHash([a, b])}`, swaps });
+      const built = buildComboFromItems([a, b], converged);
+      if (!built) continue;
+      combos.push({
+        id: `bp2_${comboHash([a, b])}`,
+        swaps: built.swaps,
+        ...(built.clearOffHand ? { clearOffHand: true } : {}),
+      });
     }
   }
 
@@ -128,9 +173,13 @@ export function generateCombos(rejected: readonly ParsedItem[]): BreakpointCombo
           const a = items[i]!;
           const b = items[j]!;
           const c = items[k]!;
-          const swaps = tripleSwaps(a, b, c);
-          if (!swaps) continue;
-          combos.push({ id: `bp3_${comboHash([a, b, c])}`, swaps });
+          const built = buildComboFromItems([a, b, c], converged);
+          if (!built) continue;
+          combos.push({
+            id: `bp3_${comboHash([a, b, c])}`,
+            swaps: built.swaps,
+            ...(built.clearOffHand ? { clearOffHand: true } : {}),
+          });
         }
       }
     }
@@ -169,6 +218,15 @@ export function predictComboScore(args: {
     candidate_ilvl: item.ilvl,
     incumbent_ilvl: args.converged[slot]?.ilvl ?? item.ilvl,
   }));
+  // clearOffHand combos lose the converged off_hand's ilvl entirely.
+  // Append it as a slot with candidate_ilvl=0 so predictComboDps's
+  // ilvl-proxy accounts for the LOST off_hand ilvl.
+  if (args.combo.clearOffHand && args.converged['off_hand']) {
+    swapsForPredict.push({
+      candidate_ilvl: 0,
+      incumbent_ilvl: args.converged['off_hand']!.ilvl,
+    });
+  }
   const ilvlScore = predictComboDps({
     swaps: swapsForPredict,
     baseline_dps: args.baseline_dps,
@@ -180,9 +238,20 @@ export function predictComboScore(args: {
   const candRaw: NonNullable<ParsedItem['raw_stats']>[] = [];
   for (const [slot, candItem] of Object.entries(args.combo.swaps)) {
     const incItem = args.converged[slot];
-    if (!candItem.raw_stats || !incItem?.raw_stats) return ilvlScore;
+    // Allow incumbent absent (e.g. converged had no main_hand) — that's
+    // a pure addition with zero incumbent stats. Candidate must have
+    // stats to predict via stat-vector; otherwise fall back to ilvl.
+    if (!candItem.raw_stats) return ilvlScore;
     candRaw.push(candItem.raw_stats);
-    incRaw.push(incItem.raw_stats);
+    if (incItem?.raw_stats) incRaw.push(incItem.raw_stats);
+    else if (incItem) return ilvlScore; // incumbent exists but no raw_stats → can't compare cleanly
+  }
+  // clearOffHand: the converged off_hand's stats are LOST. Add to
+  // incumbents so the aggregated-delta math subtracts them.
+  if (args.combo.clearOffHand) {
+    const oh = args.converged['off_hand'];
+    if (oh?.raw_stats) incRaw.push(oh.raw_stats);
+    else if (oh) return ilvlScore; // off_hand exists but no raw_stats — can't predict cleanly
   }
   const { predicted_delta_dps } = predictDpsFromAggregatedStatDelta({
     incumbents: incRaw,
@@ -234,56 +303,89 @@ export function prioritizeCombos(args: {
   return scored.slice(0, cap);
 }
 
-/** Returns the swap map for a 2-item combo, or null if items can't co-exist. */
-function pairSwaps(a: ParsedItem, b: ParsedItem): Record<string, ParsedItem> | null {
-  // Same physical slot, neither ring nor trinket → invalid.
-  if (a.slot === b.slot && !isPaired(a.slot)) return null;
-  // Two rings → assign one to finger1, the other to finger2.
-  if (isRing(a.slot) && isRing(b.slot)) {
-    return { finger1: a, finger2: b };
-  }
-  // Two trinkets → assign to trinket1/trinket2.
-  if (isTrinket(a.slot) && isTrinket(b.slot)) {
-    return { trinket1: a, trinket2: b };
-  }
-  // One paired + one regular OR two regulars in different slots.
-  return { [a.slot]: a, [b.slot]: b };
+interface BuiltCombo {
+  swaps: Record<string, ParsedItem>;
+  clearOffHand: boolean;
 }
 
-function tripleSwaps(
-  a: ParsedItem,
-  b: ParsedItem,
-  c: ParsedItem,
-): Record<string, ParsedItem> | null {
-  // Triple slot allocation gets messy with paired slots — be conservative.
-  // Drop triples that contain duplicate non-paired slots OR more than
-  // 2 ring/trinket instances.
-  const items = [a, b, c];
-  const ringCount = items.filter((i) => isRing(i.slot)).length;
-  const trinketCount = items.filter((i) => isTrinket(i.slot)).length;
-  if (ringCount > 2) return null;
-  if (trinketCount > 2) return null;
+/**
+ * Allocate a combo's items to physical slots, resolving weapon context
+ * from the converged loadout. Returns null when the combo isn't
+ * physically realizable (duplicate non-paired slots, multiple weapons,
+ * missing OH partner for a 1H MH in converged, etc.).
+ *
+ * Replaces the older `pairSwaps` + `tripleSwaps` helpers — the new
+ * shape handles 2 and 3 items uniformly and adds the weapon-aware
+ * branch that resolves MH+OH / 2H clear / pure-OH combos.
+ */
+function buildComboFromItems(
+  items: readonly ParsedItem[],
+  converged: Record<string, ParsedItem>,
+): BuiltCombo | null {
+  // v1 supports at most one weapon item per combo. Multi-weapon combos
+  // are dropped: greedy already explored 1H+1H tuples via OH sub-sim,
+  // and tracking two weapons' slot semantics in one breakpoint combo
+  // adds complexity for low expected value.
+  const weapons = items.filter((i) => classifyWeapon(i) !== 'NON_WEAPON');
+  if (weapons.length > 1) return null;
+  const nonWeapons = items.filter((i) => classifyWeapon(i) === 'NON_WEAPON');
 
-  const out: Record<string, ParsedItem> = {};
+  const swaps: Record<string, ParsedItem> = {};
   let ringSlotsUsed = 0;
   let trinketSlotsUsed = 0;
-  for (const it of items) {
+
+  for (const it of nonWeapons) {
     if (isRing(it.slot)) {
+      if (ringSlotsUsed >= 2) return null;
       const target = ringSlotsUsed === 0 ? 'finger1' : 'finger2';
-      if (out[target]) return null; // shouldn't happen given ringCount cap
-      out[target] = it;
+      if (swaps[target]) return null;
+      swaps[target] = it;
       ringSlotsUsed += 1;
     } else if (isTrinket(it.slot)) {
+      if (trinketSlotsUsed >= 2) return null;
       const target = trinketSlotsUsed === 0 ? 'trinket1' : 'trinket2';
-      if (out[target]) return null;
-      out[target] = it;
+      if (swaps[target]) return null;
+      swaps[target] = it;
       trinketSlotsUsed += 1;
     } else {
-      if (out[it.slot]) return null; // duplicate non-paired slot
-      out[it.slot] = it;
+      if (swaps[it.slot]) return null; // duplicate non-paired slot
+      swaps[it.slot] = it;
     }
   }
-  return out;
+
+  if (weapons.length === 0) {
+    return { swaps, clearOffHand: false };
+  }
+
+  // Resolve the weapon's slot semantics from the converged loadout.
+  const w = weapons[0]!;
+  const cls = classifyWeapon(w);
+
+  if (cls === 'OH') {
+    // Pure off_hand — pair with the converged main_hand iff that MH is
+    // 1H (a 2H MH locks out the off_hand slot entirely).
+    const mh = converged['main_hand'];
+    if (!mh || locksOffHand(mh)) return null;
+    if (swaps['off_hand']) return null; // non-weapon shouldn't collide, defensive
+    swaps['off_hand'] = w;
+    return { swaps, clearOffHand: false };
+  }
+
+  // MH (1H_MH / 1H_DUAL / 2H).
+  if (swaps['main_hand']) return null;
+  if (locksOffHand(w)) {
+    // 2H — clear off_hand. clearOffHand flag tells the script builder
+    // to emit `off_hand=` empty for this profileset.
+    swaps['main_hand'] = w;
+    return { swaps, clearOffHand: true };
+  }
+  // 1H MH — pair with converged off_hand iff OH-eligible.
+  const oh = converged['off_hand'];
+  if (!oh || !canPairAsOH(oh)) return null;
+  if (swaps['off_hand']) return null;
+  swaps['main_hand'] = w;
+  swaps['off_hand'] = oh;
+  return { swaps, clearOffHand: false };
 }
 
 function isRing(slot: string): boolean {
@@ -291,9 +393,6 @@ function isRing(slot: string): boolean {
 }
 function isTrinket(slot: string): boolean {
   return slot === 'trinket1' || slot === 'trinket2';
-}
-function isPaired(slot: string): boolean {
-  return isRing(slot) || isTrinket(slot);
 }
 
 function comboHash(items: readonly ParsedItem[]): string {
@@ -332,15 +431,32 @@ export function buildBreakpointScript(
   }
 
   for (const combo of combos) {
+    const emitted = new Set<string>();
     for (const [slot, item] of Object.entries(converged)) {
-      // Override slots that this combo replaces; pass through everything else.
+      // For 2H weapon combos: skip the off_hand slot here and emit the
+      // explicit `off_hand=` empty line below. Otherwise pass through
+      // (or override from combo.swaps when present).
+      if (slot === 'off_hand' && combo.clearOffHand) continue;
       const override = combo.swaps[slot];
       const lineItem = override ?? item;
       lines.push(`profileset."${combo.id}"+="${formatItemLine(lineItem, slot as SlotName)}"`);
+      emitted.add(slot);
     }
-    // Edge case: a combo's swap targets a slot the loadout doesn't have
-    // (e.g. converged is a 2H wielder but the combo includes an off-hand).
-    // For now we skip those slots — converged's structure wins.
+    // Combos may include slots the converged loadout doesn't have —
+    // e.g. an off_hand swap when converged was wielding a 2H, or a
+    // main_hand swap when the converged loadout had nothing equipped.
+    // Emit those slots explicitly so the profileset reflects the full
+    // combo, not just the slots the baseline already had.
+    for (const [slot, item] of Object.entries(combo.swaps)) {
+      if (emitted.has(slot)) continue;
+      if (slot === 'off_hand' && combo.clearOffHand) continue; // handled below
+      lines.push(`profileset."${combo.id}"+="${formatItemLine(item, slot as SlotName)}"`);
+    }
+    // 2H lockout: emit `off_hand=` with an empty value so SimC clears
+    // the slot. Same shape swap-test uses for its 2H weapon swaps.
+    if (combo.clearOffHand) {
+      lines.push(`profileset."${combo.id}"+="off_hand="`);
+    }
   }
 
   return { script: lines.join('\n'), combos: [...combos], baselineName: BASELINE_NAME };
@@ -381,7 +497,9 @@ export async function runBreakpointSearch(
   opts: RunBreakpointSearchOptions,
 ): Promise<BreakpointResult> {
   const tieWindowPct = opts.tieWindowPct ?? 0.1;
-  const allCombos = generateCombos(opts.rejected);
+  // Pass converged so generateCombos can resolve weapon slot semantics
+  // (1H + OH pairing, 2H clearOffHand, pure-OH MH pairing).
+  const allCombos = generateCombos(opts.rejected, opts.converged);
 
   // Empty case — nothing to test.
   if (allCombos.length === 0) {
@@ -461,6 +579,12 @@ export function buildBreakpointDiagnostics(args: {
       candidate_ilvl: item.ilvl,
       incumbent_ilvl: args.converged[slot]?.ilvl ?? item.ilvl,
     }));
+    if (entry.combo.clearOffHand && args.converged['off_hand']) {
+      swapsForPredict.push({
+        candidate_ilvl: 0,
+        incumbent_ilvl: args.converged['off_hand']!.ilvl,
+      });
+    }
     const predicted_delta_dps_ilvl = predictComboDps({
       swaps: swapsForPredict,
       baseline_dps: args.baseline_dps,
@@ -475,17 +599,38 @@ export function buildBreakpointDiagnostics(args: {
     // AND we need weights. Otherwise fall back to ilvl-proxy for this
     // combo. The fallback is per-combo, not per-batch — mixed batches
     // are fine.
+    //
+    // Weapon-aware: combos may add a slot the converged didn't have
+    // (e.g. a pure off_hand combo when converged had no off_hand). An
+    // absent incumbent is treated as zero stats for that slot — a clean
+    // "addition" delta — rather than forcing ilvl fallback.
     const incRaw: NonNullable<ParsedItem['raw_stats']>[] = [];
     const candRaw: NonNullable<ParsedItem['raw_stats']>[] = [];
     let allHaveStats = !!args.weights;
     for (const [slot, candItem] of Object.entries(entry.combo.swaps)) {
       const incItem = args.converged[slot];
-      if (!candItem.raw_stats || !incItem?.raw_stats) {
+      if (!candItem.raw_stats) {
         allHaveStats = false;
         break;
       }
       candRaw.push(candItem.raw_stats);
-      incRaw.push(incItem.raw_stats);
+      if (incItem?.raw_stats) {
+        incRaw.push(incItem.raw_stats);
+      } else if (incItem) {
+        // Incumbent exists but no raw_stats — can't compare cleanly.
+        allHaveStats = false;
+        break;
+      }
+      // incItem === undefined → no incumbent for that slot, treat as zero.
+    }
+    // clearOffHand: converged off_hand's stats are lost.
+    if (allHaveStats && entry.combo.clearOffHand) {
+      const oh = args.converged['off_hand'];
+      if (oh?.raw_stats) {
+        incRaw.push(oh.raw_stats);
+      } else if (oh) {
+        allHaveStats = false;
+      }
     }
 
     if (allHaveStats && args.weights) {
@@ -524,7 +669,9 @@ function labelForCombo(combo: BreakpointCombo): string {
 
 /**
  * Apply a winning breakpoint combo to the converged loadout, returning
- * a new loadout with the combo's swaps applied.
+ * a new loadout with the combo's swaps applied. Honors `clearOffHand`
+ * for 2H weapon swaps by deleting the off_hand slot from the result —
+ * mirrors how greedy folds a 2H winner into its converged loadout.
  */
 export function applyComboToLoadout(
   converged: Record<string, ParsedItem>,
@@ -533,6 +680,9 @@ export function applyComboToLoadout(
   const next = { ...converged };
   for (const [slot, item] of Object.entries(combo.swaps)) {
     next[slot] = item;
+  }
+  if (combo.clearOffHand) {
+    delete next['off_hand'];
   }
   return next;
 }
