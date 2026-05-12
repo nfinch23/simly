@@ -20,6 +20,7 @@ import type { ParsedItem, SlotName } from '../simc-export-parser';
 import { formatItemLine } from '../simc-export-parser';
 import type { BestLoadoutSlot } from '../gear-catalog';
 import { runSimc, type RunnerPaths, type SimcRunResult } from '../simc-runner';
+import { MAX_BREAKPOINT_COMBOS } from '../gear-config';
 import {
   buildDiagnosticEntry,
   buildStatVectorDiagnosticEntry,
@@ -74,6 +75,20 @@ export interface RunBreakpointSearchOptions {
    * back to ilvl-proxy on a per-combo basis when stats are missing.
    */
   weights?: StatWeightsLike;
+  /**
+   * Estimated converged-loadout DPS. Used by `prioritizeCombos` to
+   * convert ilvl-proxy deltas into commensurate absolute DPS for
+   * ordering. The catalog's `best_loadout_dps` is the natural source;
+   * a missing or zero value just disables ilvl-score scaling, leaving
+   * stat-vector scores intact and ilvl scores all at 0 (stable order
+   * among ilvl-only combos). Default 0.
+   */
+  estimatedBaselineDps?: number;
+  /**
+   * Override for `MAX_BREAKPOINT_COMBOS`. Tests pass a small value (e.g.
+   * 2) to force the cap to bite without generating hundreds of items.
+   */
+  maxCombos?: number;
   onProgress?: Parameters<typeof runSimc>[0]['onProgress'];
 }
 
@@ -122,6 +137,101 @@ export function generateCombos(rejected: readonly ParsedItem[]): BreakpointCombo
   }
 
   return combos;
+}
+
+/**
+ * Best-available predicted DPS delta for a combo against the converged
+ * loadout. Returns the stat-vector estimate when every involved item
+ * (both incumbents and candidates) carries `raw_stats` AND weights are
+ * supplied; otherwise falls back to the ilvl-proxy estimate. Pure
+ * function — no I/O, no SimC.
+ *
+ * Used to ORDER combos before the SimC sim runs so that:
+ *   - when a cap bites (rejected pool large), we keep the predicted
+ *     strongest combos rather than just the first ones the index
+ *     iteration produced;
+ *   - even within the cap, SimC streams progress in our chosen order,
+ *     so the early profilesets are the most likely upgrades — the user
+ *     sees DPS movement on the strongest combos first.
+ *
+ * Stat-vector predictions are an approximation (proc effects, breakpoint
+ * thresholds invisible) so the ordering is heuristic — the sim still
+ * decides the winner.
+ */
+export function predictComboScore(args: {
+  combo: BreakpointCombo;
+  converged: Record<string, ParsedItem>;
+  weights?: StatWeightsLike;
+  dpsPerIlvlPct: number;
+  baseline_dps: number;
+}): number {
+  const swapsForPredict = Object.entries(args.combo.swaps).map(([slot, item]) => ({
+    candidate_ilvl: item.ilvl,
+    incumbent_ilvl: args.converged[slot]?.ilvl ?? item.ilvl,
+  }));
+  const ilvlScore = predictComboDps({
+    swaps: swapsForPredict,
+    baseline_dps: args.baseline_dps,
+    dps_per_ilvl_pct: args.dpsPerIlvlPct,
+  });
+
+  if (!args.weights) return ilvlScore;
+  const incRaw: NonNullable<ParsedItem['raw_stats']>[] = [];
+  const candRaw: NonNullable<ParsedItem['raw_stats']>[] = [];
+  for (const [slot, candItem] of Object.entries(args.combo.swaps)) {
+    const incItem = args.converged[slot];
+    if (!candItem.raw_stats || !incItem?.raw_stats) return ilvlScore;
+    candRaw.push(candItem.raw_stats);
+    incRaw.push(incItem.raw_stats);
+  }
+  const { predicted_delta_dps } = predictDpsFromAggregatedStatDelta({
+    incumbents: incRaw,
+    candidates: candRaw,
+    weights: args.weights,
+  });
+  return predicted_delta_dps;
+}
+
+/**
+ * Score every generated combo, sort descending by predicted delta, and
+ * truncate to `maxCombos`. Returns the ordered subset SimC should sim,
+ * each annotated with the predicted score it was selected on.
+ *
+ * Used as the bridge between `generateCombos` (which produces all valid
+ * pair/triple combos from the rejected pool) and `buildBreakpointScript`
+ * (which emits profilesets for whatever it's handed). When the rejected
+ * pool is small, every combo survives and ordering becomes a pure UX
+ * win (progress bar shows strong combos first). When the pool is large,
+ * the cap drops the predicted weakest before any sim time is spent.
+ *
+ * The `baseline_dps` argument is the expected DPS of the converged
+ * loadout — used to convert ilvl-proxy deltas into absolute DPS so
+ * stat-vector and ilvl scores are roughly commensurate. Pass the
+ * catalog's `best_loadout_dps` (or any reasonable estimate) — a wrong
+ * value just shifts ilvl-proxy scores uniformly, preserving relative
+ * order between ilvl-scored combos.
+ */
+export function prioritizeCombos(args: {
+  combos: readonly BreakpointCombo[];
+  converged: Record<string, ParsedItem>;
+  weights?: StatWeightsLike;
+  dpsPerIlvlPct: number;
+  baseline_dps: number;
+  maxCombos?: number;
+}): Array<{ combo: BreakpointCombo; predicted_score: number }> {
+  const scored = args.combos.map((combo) => ({
+    combo,
+    predicted_score: predictComboScore({
+      combo,
+      converged: args.converged,
+      weights: args.weights,
+      dpsPerIlvlPct: args.dpsPerIlvlPct,
+      baseline_dps: args.baseline_dps,
+    }),
+  }));
+  scored.sort((a, b) => b.predicted_score - a.predicted_score);
+  const cap = args.maxCombos ?? MAX_BREAKPOINT_COMBOS;
+  return scored.slice(0, cap);
 }
 
 /** Returns the swap map for a 2-item combo, or null if items can't co-exist. */
@@ -271,10 +381,10 @@ export async function runBreakpointSearch(
   opts: RunBreakpointSearchOptions,
 ): Promise<BreakpointResult> {
   const tieWindowPct = opts.tieWindowPct ?? 0.1;
-  const combos = generateCombos(opts.rejected);
+  const allCombos = generateCombos(opts.rejected);
 
   // Empty case — nothing to test.
-  if (combos.length === 0) {
+  if (allCombos.length === 0) {
     return {
       baseline_dps: 0,
       combos: [],
@@ -283,7 +393,20 @@ export async function runBreakpointSearch(
     };
   }
 
-  const build = buildBreakpointScript(opts.converged, combos);
+  // Score-and-truncate: sort by best-available predicted delta, drop
+  // anything beyond the cap. Profilesets land in SimC in this order so
+  // even when no truncation happens, progress shows strong combos first.
+  const prioritized = prioritizeCombos({
+    combos: allCombos,
+    converged: opts.converged,
+    weights: opts.weights,
+    dpsPerIlvlPct: opts.dpsPerIlvlPct,
+    baseline_dps: opts.estimatedBaselineDps ?? 0,
+    maxCombos: opts.maxCombos,
+  });
+  const orderedCombos = prioritized.map((p) => p.combo);
+
+  const build = buildBreakpointScript(opts.converged, orderedCombos);
   const profileScript = [opts.baseProfile.trim(), '', build.script].join('\n');
   const run = await runSimc({
     paths: opts.paths,
