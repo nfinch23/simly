@@ -35,6 +35,18 @@ export interface TrinketCacheEntry {
   /** Sorted list of every trinket identity that was simmed. Used as the
    * change-detection signature (pool unchanged ⇒ same signature). */
   pool_signature: string;
+  /**
+   * Hash of the actor's gear context at the time of the sim. Empty
+   * string for the "baseline" context (pass-1 of the two-pass-stat-
+   * reconverge pipeline, OR any pre-reconverge orchestrator). Pass-2
+   * stores a `hashGearContext()` of the converged gear so its results
+   * cache independently from pass-1.
+   *
+   * Optional + defaulted to empty string for back-compat: orchestrators
+   * that never set a hash get the same cache slot as legacy single-pass
+   * code.
+   */
+  gear_context_hash?: string;
   /** Every pair simmed in the most recent run. Sorted desc by mean_dps. */
   pairs: TrinketPairResult[];
   /** The top N leader trinket identities, ranked by best appearance.
@@ -49,8 +61,23 @@ interface Schema {
 
 const KEY_SEP = '|';
 
-function makeCacheKey(character_key: string, scenario: string): string {
-  return `${character_key}${KEY_SEP}${scenario}`;
+/**
+ * Build the cache key tuple. `gear_context_hash` is part of the key
+ * (not just the entry payload) so pass-1 and pass-2 of the two-pass
+ * stat-reconverge pipeline cache independently — same character, same
+ * scenario, different converged actor → different entries.
+ *
+ * Back-compat: empty/undefined hash collapses to the legacy two-part
+ * key. Existing cache files keep working without invalidation.
+ */
+function makeCacheKey(
+  character_key: string,
+  scenario: string,
+  gear_context_hash?: string,
+): string {
+  const base = `${character_key}${KEY_SEP}${scenario}`;
+  if (!gear_context_hash) return base;
+  return `${base}${KEY_SEP}${gear_context_hash}`;
 }
 
 export interface TrinketCacheOptions {
@@ -85,17 +112,24 @@ export class TrinketCacheStore {
     });
   }
 
-  get(character_key: string, scenario: string): TrinketCacheEntry | undefined {
+  get(
+    character_key: string,
+    scenario: string,
+    gear_context_hash?: string,
+  ): TrinketCacheEntry | undefined {
     // electron-store's `defaults` apply on first construction but a
     // file-system-side delete (e.g., user wiping cache for testing)
     // can leave the in-memory cache with no `entries` key. Defaulting
     // here keeps callers from seeing undefined.
     const entries = this.store.get('entries') ?? {};
-    return entries[makeCacheKey(character_key, scenario)];
+    return entries[makeCacheKey(character_key, scenario, gear_context_hash)];
   }
 
   put(entry: TrinketCacheEntry): void {
-    this.store.set(`entries.${makeCacheKey(entry.character_key, entry.scenario)}`, entry);
+    this.store.set(
+      `entries.${makeCacheKey(entry.character_key, entry.scenario, entry.gear_context_hash)}`,
+      entry,
+    );
   }
 
   clear(): void {
@@ -103,17 +137,42 @@ export class TrinketCacheStore {
   }
 
   /**
-   * Invalidate one (character, scenario)'s cache. Called by the
-   * scan queue when a gear upgrade is detected — the cached trinket
-   * pairs were sim'd with the prior gear context, so even though the
-   * trinket POOL is unchanged, the relative rankings may have
-   * shifted. Removing the entry forces the next trinket_pre_scan to
-   * do a fresh full sim with the new context.
+   * Invalidate one (character, scenario, optional gear-context)'s
+   * cache. Called by the scan queue when a gear upgrade is detected —
+   * the cached trinket pairs were sim'd with the prior gear context,
+   * so even though the trinket POOL is unchanged, the relative
+   * rankings may have shifted. Removing the entry forces the next
+   * trinket_pre_scan to do a fresh full sim with the new context.
+   *
+   * When `gear_context_hash` is omitted, only the baseline-keyed entry
+   * is removed (mirrors legacy single-pass semantics). Pass-callers
+   * can clear their specific slot by supplying the hash.
    */
-  invalidate(character_key: string, scenario: string): void {
+  invalidate(
+    character_key: string,
+    scenario: string,
+    gear_context_hash?: string,
+  ): void {
     const entries = this.store.get('entries') ?? {};
     const next = { ...entries };
-    delete next[makeCacheKey(character_key, scenario)];
+    delete next[makeCacheKey(character_key, scenario, gear_context_hash)];
+    this.store.set('entries', next);
+  }
+
+  /**
+   * Invalidate EVERY entry for a (character, scenario) regardless of
+   * gear_context_hash. Used when a gear-upgrade cascade happens in the
+   * orchestrator — every cached pass's results are stale relative to
+   * the new converged actor.
+   */
+  invalidateAllContexts(character_key: string, scenario: string): void {
+    const entries = this.store.get('entries') ?? {};
+    const next: Record<string, TrinketCacheEntry> = {};
+    const baseKey = makeCacheKey(character_key, scenario);
+    for (const [k, v] of Object.entries(entries)) {
+      if (k === baseKey || k.startsWith(`${baseKey}${KEY_SEP}`)) continue;
+      next[k] = v;
+    }
     this.store.set('entries', next);
   }
 }
@@ -184,6 +243,13 @@ export interface PlanTrinketScanOptions {
   cache: TrinketCacheStore;
   character_key: string;
   scenario: string;
+  /**
+   * Optional gear-context axis on the cache key. Pass-1 of two-pass-
+   * stat-reconverge omits this (baseline equipped gear). Pass-2 sets
+   * it to `hashGearContext(converged_gear)` so its sim caches
+   * independently.
+   */
+  gear_context_hash?: string;
 }
 
 export function planTrinketScan(opts: PlanTrinketScanOptions): TrinketSimPlan {
@@ -191,7 +257,11 @@ export function planTrinketScan(opts: PlanTrinketScanOptions): TrinketSimPlan {
   if (trinkets.length < 2) {
     return { kind: 'full', trinkets, reason: 'fewer than 2 trinkets in pool' };
   }
-  const cached = opts.cache.get(opts.character_key, opts.scenario);
+  const cached = opts.cache.get(
+    opts.character_key,
+    opts.scenario,
+    opts.gear_context_hash,
+  );
   const sig = poolSignature(trinkets);
   if (!cached) {
     return { kind: 'full', trinkets, reason: 'no cache entry yet' };
