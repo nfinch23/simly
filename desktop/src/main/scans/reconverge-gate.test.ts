@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
+  computeWeightDeltas,
+  detectRankFlips,
   formatReconvergeReason,
+  RANK_FLIP_TOLERANCE,
   shouldTriggerPass2,
   WEIGHT_SHIFT_THRESHOLD,
 } from './reconverge-gate';
@@ -35,6 +38,8 @@ describe('shouldTriggerPass2', () => {
     const result = shouldTriggerPass2({
       weights_v1: baseWeights,
       // Haste's marginal value halves — classic post-GCD-floor pattern.
+      // This also flips haste vs mastery (haste 12→6, mastery 10), so
+      // the rank-flip reason fires alongside the magnitude reason.
       weights_v2: { ...baseWeights, haste: 6 },
       flask_v1_item_id: 100,
       flask_v2_item_id: 100,
@@ -43,12 +48,11 @@ describe('shouldTriggerPass2', () => {
       trinket_flip_predicted: false,
     });
     expect(result.shouldTrigger).toBe(true);
-    expect(result.reasons).toHaveLength(1);
-    const reason = result.reasons[0]!;
-    expect(reason.kind).toBe('weights');
-    if (reason.kind === 'weights') {
-      expect(reason.stat).toBe('haste');
-      expect(reason.ratio).toBeCloseTo(0.5, 2);
+    const weightsReason = result.reasons.find((r) => r.kind === 'weights');
+    expect(weightsReason).toBeDefined();
+    if (weightsReason && weightsReason.kind === 'weights') {
+      expect(weightsReason.stat).toBe('haste');
+      expect(weightsReason.ratio).toBeCloseTo(0.5, 2);
     }
   });
 
@@ -129,6 +133,10 @@ describe('shouldTriggerPass2', () => {
   });
 
   it('collects ALL fired reasons (multi-trigger run reports every cause)', () => {
+    // Haste 12→6 fires both `weights` (magnitude) and `weights_rank`
+    // (haste-vs-mastery dominance flip), plus flask change fires
+    // `consumables`, plus the trinket flip fires `trinket`. Four
+    // distinct kinds, all collected.
     const result = shouldTriggerPass2({
       weights_v1: baseWeights,
       weights_v2: { ...baseWeights, haste: 6 },
@@ -139,9 +147,9 @@ describe('shouldTriggerPass2', () => {
       trinket_flip_predicted: true,
     });
     expect(result.shouldTrigger).toBe(true);
-    expect(result.reasons).toHaveLength(3);
-    const kinds = result.reasons.map((r) => r.kind);
+    const kinds = new Set(result.reasons.map((r) => r.kind));
     expect(kinds).toContain('weights');
+    expect(kinds).toContain('weights_rank');
     expect(kinds).toContain('consumables');
     expect(kinds).toContain('trinket');
   });
@@ -212,6 +220,141 @@ describe('shouldTriggerPass2', () => {
   });
 });
 
+describe('detectRankFlips', () => {
+  it('detects a clear dominance flip between two stats', () => {
+    // v1: crit clearly above haste (15 vs 10 = 1.5x)
+    // v2: haste clearly above crit (15 vs 10 = 1.5x)
+    const flips = detectRankFlips(
+      { crit: 15, haste: 10, mastery: 11, versatility: 9 },
+      { crit: 10, haste: 15, mastery: 11, versatility: 9 },
+    );
+    const cs = flips.find(
+      (f) => (f.stat_a === 'crit' && f.stat_b === 'haste') || (f.stat_a === 'haste' && f.stat_b === 'crit'),
+    );
+    expect(cs).toBeDefined();
+    expect(cs!.stat_a).toBe('crit');
+    expect(cs!.stat_b).toBe('haste');
+  });
+
+  it('does NOT flag stats that stayed in the same relative order', () => {
+    // crit and haste both shift down but crit stays on top
+    const flips = detectRankFlips(
+      { crit: 15, haste: 10 },
+      { crit: 12, haste: 8 },
+    );
+    expect(flips.filter((f) =>
+      (f.stat_a === 'crit' && f.stat_b === 'haste') || (f.stat_a === 'haste' && f.stat_b === 'crit'),
+    )).toHaveLength(0);
+  });
+
+  it('does NOT flag stats that were tied in v1 (within tolerance)', () => {
+    // crit/haste within 10% in v1; not a clear pre-flip state.
+    const flips = detectRankFlips(
+      { crit: 10, haste: 10.5 },
+      { crit: 12, haste: 8 }, // now crit clearly dominates
+    );
+    expect(flips).toHaveLength(0);
+  });
+
+  it('does NOT flag stats that became tied in v2 (within tolerance)', () => {
+    // Clear dominance in v1, but converged actor brings them within
+    // tolerance — not a flip, just a softening.
+    const flips = detectRankFlips(
+      { crit: 15, haste: 8 },
+      { crit: 11, haste: 10.5 },
+    );
+    expect(flips).toHaveLength(0);
+  });
+
+  it('detects multiple simultaneous flips', () => {
+    // Two independent flips: crit↔haste AND mastery↔versatility
+    const flips = detectRankFlips(
+      { crit: 15, haste: 8, mastery: 14, versatility: 7 },
+      { crit: 8, haste: 15, mastery: 7, versatility: 14 },
+    );
+    expect(flips.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('handles missing or zero-weighted stats gracefully', () => {
+    // mastery zero in v1 (spec-irrelevant); should be skipped, no NaN.
+    expect(() =>
+      detectRankFlips(
+        { crit: 15, haste: 8, mastery: 0 },
+        { crit: 8, haste: 15, mastery: 12 },
+      ),
+    ).not.toThrow();
+  });
+
+  it('orders the flip output deterministically (TRIGGERED_STATS order)', () => {
+    // Flips for (crit, haste) and (mastery, versatility) should appear
+    // in that order regardless of input map iteration.
+    const flips = detectRankFlips(
+      { versatility: 14, mastery: 7, haste: 15, crit: 8 },
+      { versatility: 7, mastery: 14, haste: 8, crit: 15 },
+    );
+    // crit appears at index 0 in TRIGGERED_STATS, haste at 1, mastery at
+    // 2, versatility at 3 — so the (crit, haste) pair should come first.
+    expect(flips[0]!.stat_a === 'crit' || flips[0]!.stat_b === 'crit').toBe(true);
+  });
+
+  it('triggers WEIGHTS_RANK reason in shouldTriggerPass2 even when no magnitude trigger fires', () => {
+    // Crit and haste flip dominance, but no single stat shifts past 25%.
+    // crit: 15 → 12 (-20%) — within threshold
+    // haste: 12 → 15 (+25% exactly) — right at threshold (NOT exceeding)
+    const result = shouldTriggerPass2({
+      weights_v1: { intellect: 30, crit: 15, haste: 12, mastery: 11, versatility: 12 },
+      weights_v2: { intellect: 30, crit: 12, haste: 15, mastery: 11, versatility: 12 },
+    });
+    expect(result.shouldTrigger).toBe(true);
+    expect(result.reasons.some((r) => r.kind === 'weights_rank')).toBe(true);
+  });
+
+  it('exposes RANK_FLIP_TOLERANCE constant for transparency', () => {
+    // Pinning the tolerance constant — bumping it is a public behavior
+    // change worth flagging in code review.
+    expect(RANK_FLIP_TOLERANCE).toBe(0.10);
+  });
+});
+
+describe('computeWeightDeltas', () => {
+  it('returns per-stat ratios for every present secondary', () => {
+    const out = computeWeightDeltas(
+      { intellect: 30, crit: 15, haste: 12, mastery: 10, versatility: 11 },
+      { intellect: 32, crit: 14, haste: 13, mastery: 11, versatility: 12 },
+    );
+    expect(out.crit).toBeCloseTo(14 / 15, 4);
+    expect(out.haste).toBeCloseTo(13 / 12, 4);
+    expect(out.mastery).toBeCloseTo(11 / 10, 4);
+    expect(out.versatility).toBeCloseTo(12 / 11, 4);
+  });
+
+  it('excludes primary stats (intellect / strength / agility)', () => {
+    const out = computeWeightDeltas(
+      { intellect: 30, crit: 15 },
+      { intellect: 35, crit: 16 },
+    );
+    expect(out.intellect).toBeUndefined();
+    expect(out.crit).toBeDefined();
+  });
+
+  it('skips stats missing from either side', () => {
+    const out = computeWeightDeltas(
+      { crit: 15 },
+      { crit: 12, haste: 10 },
+    );
+    expect(out.crit).toBeDefined();
+    expect(out.haste).toBeUndefined(); // missing in v1
+  });
+
+  it('skips stats with zero v1 (divide-by-zero protection)', () => {
+    const out = computeWeightDeltas(
+      { mastery: 0 },
+      { mastery: 10 },
+    );
+    expect(out.mastery).toBeUndefined();
+  });
+});
+
 describe('formatReconvergeReason', () => {
   it('formats weights reason with sign and percent', () => {
     const out = formatReconvergeReason({
@@ -240,5 +383,18 @@ describe('formatReconvergeReason', () => {
     const out = formatReconvergeReason({ kind: 'trinket' });
     expect(out).toContain('trinket');
     expect(out).toContain('stat-vector');
+  });
+
+  it('formats weights_rank reason with both ratios', () => {
+    const out = formatReconvergeReason({
+      kind: 'weights_rank',
+      stat_a: 'crit',
+      stat_b: 'haste',
+      v1_ratio: 1.5,
+      v2_ratio: 1.3,
+    });
+    expect(out).toContain('crit vs haste flipped');
+    expect(out).toContain('1.50× haste');
+    expect(out).toContain('1.30× crit');
   });
 });
