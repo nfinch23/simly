@@ -369,7 +369,7 @@ Each phase is a checkpoint with concrete acceptance criteria. Don't move to phas
 
 ### Phase 4 — Stat Weights Scan + Top Gear Scan (the heavy lift) — ✅ COMPLETE
 
-**Status: shipped to main as PRs #1, #2, then extended through PRs #3–#6 (Phases 5 + 6).** All sub-phases (4a/4b/4c/4d-i/4d-ii/4d-iii/4e) live, plus a quick-sim gate, persistent gear catalog, weapon-aware cartesian, calibrated stat-weight pruner (Phase 6), and a stack of correctness fixes that emerged during live testing on Felfriend (Demo Warlock). <!-- AUTOSYNC: test_count_desktop -->499<!-- /AUTOSYNC --> desktop unit tests pass. See CLAUDE.md "Phase 4 sub-status" through "Phase 6 sub-status" for per-commit detail.
+**Status: shipped to main as PRs #1, #2, then extended through PRs #3–#6 (Phases 5 + 6).** All sub-phases (4a/4b/4c/4d-i/4d-ii/4d-iii/4e) live, plus a quick-sim gate, persistent gear catalog, weapon-aware cartesian, calibrated stat-weight pruner (Phase 6), and a stack of correctness fixes that emerged during live testing on Felfriend (Demo Warlock). <!-- AUTOSYNC: test_count_desktop -->513<!-- /AUTOSYNC --> desktop unit tests pass. See CLAUDE.md "Phase 4 sub-status" through "Phase 6 sub-status" for per-commit detail.
 
 **Goal:** the actual product. "Given my equipped + bag inventory, find the maximum-DPS gear combo for single-target Patchwerk." Implements the multi-stage scan model with stat-weight pruning and the persistent ignore list.
 
