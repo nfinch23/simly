@@ -24,9 +24,9 @@ Current phase: **Phases 4, 5, and 6 all shipped to main. Phase 7 (content recomm
 
 Live status (auto-synced on `/ship` — see "Auto-sync on /ship" section):
 
-- Latest main commit: <!-- AUTOSYNC: latest_main_commit -->1a46fb5<!-- /AUTOSYNC -->
-- Merged PRs: <!-- AUTOSYNC: merged_prs -->1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38<!-- /AUTOSYNC -->
-- Last synced: <!-- AUTOSYNC: last_synced_at -->2026-05-12T04:11:36Z<!-- /AUTOSYNC -->
+- Latest main commit: <!-- AUTOSYNC: latest_main_commit -->5fee022<!-- /AUTOSYNC -->
+- Merged PRs: <!-- AUTOSYNC: merged_prs -->1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40<!-- /AUTOSYNC -->
+- Last synced: <!-- AUTOSYNC: last_synced_at -->2026-05-12T04:29:23Z<!-- /AUTOSYNC -->
 
 ### Phase 3 sub-status (all done)
 
@@ -93,7 +93,7 @@ These shipped during live testing on Felfriend (Demo Warlock, Zul'jin):
 
 ### Test counts
 
-- <!-- AUTOSYNC: test_count_desktop -->525<!-- /AUTOSYNC --> desktop unit tests passing (started Phase 4 with ~100). Major suites: `composer` (20), `gear-pruner` (53 — +18 from Phase 6's calibration), `gear-rerank` (8), `gear-coarse` (4), `gear-catalog` (19), `quick-sim` (9), `swap-test` (13), `trinket-cache` (18), `trinket-pre-scan` (6), `swap-test-result-mapping`, `ignore-list` (12), `stage-logger` (12), `lua-parser` (5), `lua-writer` (9), `simc-export-parser` (20), `simc-runner`/`simc-installer`/`simc-version-source`/`simc-paths`/`simc-bootstrap`/`scan-queue`/`scans/registry`/`scans/index`/`scans/best-flask`/`scans/best-food`/`scans/stat-weights`/`wow-paths`.
+- <!-- AUTOSYNC: test_count_desktop -->532<!-- /AUTOSYNC --> desktop unit tests passing (started Phase 4 with ~100). Major suites: `composer` (20), `gear-pruner` (53 — +18 from Phase 6's calibration), `gear-rerank` (8), `gear-coarse` (4), `gear-catalog` (19), `quick-sim` (9), `swap-test` (13), `trinket-cache` (18), `trinket-pre-scan` (6), `swap-test-result-mapping`, `ignore-list` (12), `stage-logger` (12), `lua-parser` (5), `lua-writer` (9), `simc-export-parser` (20), `simc-runner`/`simc-installer`/`simc-version-source`/`simc-paths`/`simc-bootstrap`/`scan-queue`/`scans/registry`/`scans/index`/`scans/best-flask`/`scans/best-food`/`scans/stat-weights`/`wow-paths`.
 
 ## gstack
 
