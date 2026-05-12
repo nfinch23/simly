@@ -12,7 +12,9 @@ import {
   type StatWeights,
   type TrinketPreScanResult,
 } from '@simly/shared';
-import { hashGearContext, replaceGearInProfile } from './profile-builder';
+import { hashGearContext, replaceGearInProfile, setConsumablesInProfile } from './profile-builder';
+import { pickWinningFlaskSimcKey } from './scans/best-flask';
+import { pickWinningFoodSimcKey } from './scans/best-food';
 import {
   computeHerdMedian,
   computeWeightDeltas,
@@ -823,6 +825,74 @@ export class ScanQueue {
         }
       }
 
+      // ─── STAGE 1.25: CONSUMABLES PRESCAN ───
+      //
+      // Pick the winning flask + food against the BASELINE actor, lock
+      // them into the profile, then run trinket pre-scan / gear search
+      // with the lock in place. Mirrors how trinkets are handled (held
+      // constant during gear search). Without this, gear search runs
+      // flask-off / food-off and the (gear, consumable) interaction is
+      // invisible — pass-1 may pick gear that's optimal against a no-
+      // consumables actor but suboptimal once consumables are added.
+      //
+      // The corresponding post-gear consumables re-eval (further below,
+      // run against the converged actor) produces v2 winners; if they
+      // differ from v1 the reconverge-gate's `consumables` trigger fires
+      // and pass 2 re-runs gear with the new lock.
+      // Captured by whichever consumables sim runs last (prescan / re-eval
+      // / fallback) so the scenario record's `simc_version` and
+      // `finished_at` come from a real SimC run regardless of which path
+      // was taken. Always non-undefined by the time we compose results
+      // unless every consumables sim attempt failed (in which case we
+      // bail earlier).
+      let consumablesRun: import('./simc-runner').SimcRunResult | undefined;
+
+      let consumablesLock: { flask?: string; food?: string } = {};
+      let lockedBaseProfile = args.baseProfile;
+      if (args.useRealExport) {
+        const cpStarted = Math.floor(Date.now() / 1000);
+        const cp0 = Date.now();
+        const cpProgress = makeStageProgressLogger(
+          'consumables (prescan)',
+          args.characterKey,
+        );
+        try {
+          const cpRun = await runSimc({
+            paths: runnerPaths,
+            profileScript: [args.baseProfile, '', buildAllScanLines()].join('\n'),
+            iterations: 1000,
+            scratchTag: `consumables-prescan-${Date.now()}`,
+            onProgress: cpProgress.onProgress,
+          });
+          cpProgress.stop();
+          consumablesRun = cpRun;
+          const flaskKey = pickWinningFlaskSimcKey(cpRun);
+          const foodKey = pickWinningFoodSimcKey(cpRun);
+          consumablesLock = { flask: flaskKey, food: foodKey };
+          lockedBaseProfile = setConsumablesInProfile(
+            args.baseProfile,
+            consumablesLock,
+          );
+          // Surface prescan winners in scans collection so the addon
+          // panel and renderer Scans tab see them. The post-gear re-eval
+          // overwrites these with converged-actor winners; that's the
+          // intentional final answer for the composer.
+          const cpScans = parseAllScanRecords(cpRun, cpStarted, Math.floor(Date.now() / 1000));
+          Object.assign(scans, cpScans);
+          const cpDt = ((Date.now() - cp0) / 1000).toFixed(1);
+          console.log(
+            `[sim] consumables (prescan, ${cpDt}s): flask=${flaskKey ?? '(none)'}, food=${foodKey ?? '(none)'}`,
+          );
+        } catch (err) {
+          cpProgress.stop();
+          console.error(
+            '[sim] consumables prescan failed:',
+            (err as Error).message,
+          );
+          // Fall through with no lock — gear search will run flask-off.
+        }
+      }
+
       let trinketLock: TrinketLock | undefined;
       // Captured by the gear-pipeline block when greedy ran successfully
       // and made it through with real sims. Used by the end-of-pass-1
@@ -889,7 +959,7 @@ export class ScanQueue {
               if (plan.kind === 'incremental') {
                 const r = await runTrinketPairsSim({
                   paths: runnerPaths,
-                  baseProfile: args.baseProfile,
+                  baseProfile: lockedBaseProfile,
                   pairs: plan.pairsToSim,
                   iterations: s.trinketIterations,
                   onProgress: tProgress.onProgress,
@@ -901,7 +971,7 @@ export class ScanQueue {
               } else {
                 const r = await runTrinketPreScanSim({
                   paths: runnerPaths,
-                  baseProfile: args.baseProfile,
+                  baseProfile: lockedBaseProfile,
                   trinkets: plan.trinkets,
                   iterations: s.trinketIterations,
                   onProgress: tProgress.onProgress,
@@ -1003,7 +1073,7 @@ export class ScanQueue {
 
           const greedyResult = await runGreedyGearPipeline({
             paths: runnerPaths,
-            baseProfile: args.baseProfile,
+            baseProfile: lockedBaseProfile,
             parsed: args.parsedExport,
             weights: weights as StatWeights,
             trinketLock,
@@ -1129,7 +1199,12 @@ export class ScanQueue {
         weightsV1 !== undefined &&
         scans.stat_weights?.status === 'done'
       ) {
-        const convergedProfile = replaceGearInProfile(args.baseProfile, pass1Gear);
+        // Build convergedProfile from the lockedBaseProfile so the pass-1
+        // consumables lock carries through into the stat-weights re-run
+        // and the post-gear consumables re-eval. The re-eval may then
+        // overwrite flask/food when it picks new winners — that's exactly
+        // the signal the reconverge-gate's `consumables` trigger looks for.
+        const convergedProfile = replaceGearInProfile(lockedBaseProfile, pass1Gear);
         const gearContextHash = hashGearContext(pass1Gear);
         let weightsV2: StatWeights | undefined;
         const swReStarted = Math.floor(Date.now() / 1000);
@@ -1159,9 +1234,58 @@ export class ScanQueue {
           );
         }
 
+        // ─── POST-GEAR CONSUMABLES RE-EVAL ───
+        //
+        // Runs against the converged actor so flask/food are scored under
+        // the same gear context pass-1 converged on. Compared to the
+        // baseline prescan winners; if they differ, the reconverge-gate's
+        // `consumables` trigger fires below.
+        //
+        // Writes back into scans.best_flask / scans.best_food so the
+        // composer surfaces the converged-actor winners as the final
+        // answer (replacing the prescan records).
+        let flaskV2Key: string | undefined;
+        let foodV2Key: string | undefined;
+        const reStarted = Math.floor(Date.now() / 1000);
+        const re0 = Date.now();
+        const reProgress = makeStageProgressLogger(
+          'consumables (post-pass-1 re-eval)',
+          args.characterKey,
+        );
+        try {
+          const reRun = await runSimc({
+            paths: runnerPaths,
+            profileScript: [convergedProfile, '', buildAllScanLines()].join('\n'),
+            iterations: 1000,
+            scratchTag: `consumables-reeval-${Date.now()}`,
+            onProgress: reProgress.onProgress,
+          });
+          reProgress.stop();
+          consumablesRun = reRun;
+          flaskV2Key = pickWinningFlaskSimcKey(reRun);
+          foodV2Key = pickWinningFoodSimcKey(reRun);
+          const reFinished = Math.floor(Date.now() / 1000);
+          const reScans = parseAllScanRecords(reRun, reStarted, reFinished);
+          Object.assign(scans, reScans);
+          const reDt = ((Date.now() - re0) / 1000).toFixed(1);
+          console.log(
+            `[sim] consumables (post-pass-1 re-eval, ${reDt}s): flask=${flaskV2Key ?? '(none)'}, food=${foodV2Key ?? '(none)'}`,
+          );
+        } catch (err) {
+          reProgress.stop();
+          console.error(
+            '[sim] post-pass-1 consumables re-eval failed:',
+            (err as Error).message,
+          );
+        }
+
         const gate = shouldTriggerPass2({
           weights_v1: weightsV1,
           weights_v2: weightsV2,
+          flask_v1_item_id: consumablesLock.flask,
+          flask_v2_item_id: flaskV2Key,
+          food_v1_item_id: consumablesLock.food,
+          food_v2_item_id: foodV2Key,
         });
         // Debug override: `SIMLY_FORCE_PASS2=1 npm run dev` forces the
         // dispatch path regardless of gate verdict. Useful for live-
@@ -1218,6 +1342,26 @@ export class ScanQueue {
             `[gear] PASS 2 triggered: ${gate.reasons.map(formatReconvergeReason).join(' | ')}`,
           );
 
+          // Re-lock consumables for pass 2 using the post-gear winners
+          // (falling back to v1 lock when the re-eval didn't run). This
+          // matters specifically when the `consumables` trigger fired:
+          // pass-1's gear was searched under the v1 lock, so pass-2
+          // should search under the v2 lock to actually exploit the
+          // (gear, consumable) interaction. When weights flipped but
+          // consumables didn't, v1 and v2 keys match and this is a no-op.
+          const pass2Consumables = {
+            flask: flaskV2Key ?? consumablesLock.flask,
+            food: foodV2Key ?? consumablesLock.food,
+          };
+          const pass2BaseProfile = setConsumablesInProfile(
+            args.baseProfile,
+            pass2Consumables,
+          );
+          const pass2ConvergedProfile = replaceGearInProfile(
+            pass2BaseProfile,
+            pass1Gear,
+          );
+
           // P2.1: trinket re-prescan against the converged actor.
           // We always do a full pool sim (3000 iter) — the gear context
           // is new, so cache wouldn't hit anyway, and the marginal cost
@@ -1234,7 +1378,7 @@ export class ScanQueue {
             try {
               const r = await runTrinketPreScanSim({
                 paths: runnerPaths,
-                baseProfile: convergedProfile,
+                baseProfile: pass2ConvergedProfile,
                 trinkets,
                 iterations: s.trinketIterations,
                 onProgress: tp2Progress.onProgress,
@@ -1313,7 +1457,7 @@ export class ScanQueue {
                   ?.mean_dps ?? 100_000;
               const greedyResult2 = await runGreedyGearPipeline({
                 paths: runnerPaths,
-                baseProfile: convergedProfile,
+                baseProfile: pass2ConvergedProfile,
                 parsed: args.parsedExport,
                 weights: weightsV2,
                 trinketLock: p2TrinketLock,
@@ -1420,33 +1564,44 @@ export class ScanQueue {
         }
       }
 
-      // Stage 2: consumables (flask + food) via profileset sim.
-      const startedAt = Math.floor(Date.now() / 1000);
-      const t0 = Date.now();
-      const consProgress = makeStageProgressLogger('consumables', args.characterKey);
-      let run;
-      try {
-        run = await runSimc({
-          paths: runnerPaths,
-          profileScript: [args.baseProfile, '', buildAllScanLines()].join('\n'),
-          iterations: 1000,
-          scratchTag: `consumables-${Date.now()}`,
-          onProgress: consProgress.onProgress,
-        });
-        consProgress.stop();
-      } catch (err) {
-        consProgress.stop();
-        console.error('[sim] consumables sim failed:', err);
+      // Fallback consumables sim: only runs when the pass-1 prescan
+      // and post-pass-1 re-eval both didn't execute (static-fallback
+      // path with no real export). Real-export paths already populated
+      // `consumablesRun` via the prescan + re-eval and don't need this.
+      if (!consumablesRun) {
+        const startedAt = Math.floor(Date.now() / 1000);
+        const t0 = Date.now();
+        const consProgress = makeStageProgressLogger('consumables', args.characterKey);
+        try {
+          const fbRun = await runSimc({
+            paths: runnerPaths,
+            profileScript: [args.baseProfile, '', buildAllScanLines()].join('\n'),
+            iterations: 1000,
+            scratchTag: `consumables-${Date.now()}`,
+            onProgress: consProgress.onProgress,
+          });
+          consProgress.stop();
+          consumablesRun = fbRun;
+          const fbFinished = Math.floor(Date.now() / 1000);
+          const dt = ((Date.now() - t0) / 1000).toFixed(1);
+          console.log(
+            `[sim] consumables (${dt}s, simc ${fbRun.simcVersion} ${fbRun.gitRevision.slice(0, 8)}): ${fbRun.profilesets.length} profileset(s)`,
+          );
+          const fbScans = parseAllScanRecords(fbRun, startedAt, fbFinished);
+          Object.assign(scans, fbScans);
+        } catch (err) {
+          consProgress.stop();
+          console.error('[sim] consumables sim failed:', err);
+          return;
+        }
+      }
+
+      if (!consumablesRun) {
+        console.error('[sim] no consumables run produced; aborting');
         return;
       }
+      const run = consumablesRun;
       const finishedAt = Math.floor(Date.now() / 1000);
-      const dt = ((Date.now() - t0) / 1000).toFixed(1);
-      console.log(
-        `[sim] consumables (${dt}s, simc ${run.simcVersion} ${run.gitRevision.slice(0, 8)}): ${run.profilesets.length} profileset(s)`,
-      );
-
-      const consumableScans = parseAllScanRecords(run, startedAt, finishedAt);
-      Object.assign(scans, consumableScans);
 
       if (Object.keys(scans).length === 0) {
         console.error('[sim] no scan results produced');
