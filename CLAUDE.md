@@ -24,9 +24,9 @@ Current phase: **Phases 4, 5, and 6 all shipped to main. Phase 7 (content recomm
 
 Live status (auto-synced on `/ship` — see "Auto-sync on /ship" section):
 
-- Latest main commit: <!-- AUTOSYNC: latest_main_commit -->fbddee9<!-- /AUTOSYNC -->
-- Merged PRs: <!-- AUTOSYNC: merged_prs -->1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29<!-- /AUTOSYNC -->
-- Last synced: <!-- AUTOSYNC: last_synced_at -->2026-05-12T01:16:24Z<!-- /AUTOSYNC -->
+- Latest main commit: <!-- AUTOSYNC: latest_main_commit -->4558228<!-- /AUTOSYNC -->
+- Merged PRs: <!-- AUTOSYNC: merged_prs -->1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 32<!-- /AUTOSYNC -->
+- Last synced: <!-- AUTOSYNC: last_synced_at -->2026-05-12T01:51:44Z<!-- /AUTOSYNC -->
 
 ### Phase 3 sub-status (all done)
 
