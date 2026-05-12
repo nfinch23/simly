@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   applyComboToLoadout,
   buildBreakpointDiagnostics,
+  buildBreakpointScript,
   generateCombos,
   loadoutToBestLoadoutSlots,
   predictComboScore,
@@ -27,6 +28,29 @@ function makeItem(
     identity,
     extras: {},
     raw_stats,
+  };
+}
+
+/** Helper for weapon items — carries the `simly_equip_loc` extras
+ *  that classifyWeapon / canPairAsOH / locksOffHand check.
+ */
+function makeWeapon(opts: {
+  slot: 'main_hand' | 'off_hand';
+  identity: string;
+  equipLoc: string;
+  ilvl?: number;
+  raw_stats?: NonNullable<ParsedItem['raw_stats']>;
+}): ParsedItem {
+  return {
+    slot: opts.slot,
+    item_id: 1,
+    name: `Item ${opts.identity}`,
+    ilvl: opts.ilvl ?? 270,
+    bonus_ids: [],
+    is_equipped: false,
+    identity: opts.identity,
+    extras: { simly_equip_loc: opts.equipLoc },
+    raw_stats: opts.raw_stats,
   };
 }
 
@@ -127,6 +151,139 @@ describe('generateCombos', () => {
   });
 });
 
+describe('generateCombos (weapon-aware)', () => {
+  it('pairs a non-weapon with a 1H main_hand by carrying the converged off_hand', () => {
+    const converged = {
+      main_hand: makeWeapon({ slot: 'main_hand', identity: 'EQ_MH', equipLoc: 'INVTYPE_WEAPON' }),
+      off_hand: makeWeapon({ slot: 'off_hand', identity: 'EQ_OH', equipLoc: 'INVTYPE_HOLDABLE' }),
+    };
+    const combos = generateCombos(
+      [
+        makeItem('chest', 'NEW_C'),
+        makeWeapon({ slot: 'main_hand', identity: 'NEW_MH', equipLoc: 'INVTYPE_WEAPON' }),
+      ],
+      converged,
+    );
+    expect(combos).toHaveLength(1);
+    const swaps = combos[0]!.swaps;
+    expect(swaps['chest']!.identity).toBe('NEW_C');
+    expect(swaps['main_hand']!.identity).toBe('NEW_MH');
+    // OH carried from converged so the profileset reflects the real 1H+OH context.
+    expect(swaps['off_hand']!.identity).toBe('EQ_OH');
+    expect(combos[0]!.clearOffHand).toBeUndefined();
+  });
+
+  it('pairs a non-weapon with a 2H main_hand by setting clearOffHand', () => {
+    const converged = {
+      main_hand: makeWeapon({ slot: 'main_hand', identity: 'EQ_MH', equipLoc: 'INVTYPE_WEAPON' }),
+      off_hand: makeWeapon({ slot: 'off_hand', identity: 'EQ_OH', equipLoc: 'INVTYPE_HOLDABLE' }),
+    };
+    const combos = generateCombos(
+      [
+        makeItem('chest', 'NEW_C'),
+        makeWeapon({ slot: 'main_hand', identity: 'NEW_2H', equipLoc: 'INVTYPE_2HWEAPON' }),
+      ],
+      converged,
+    );
+    expect(combos).toHaveLength(1);
+    expect(combos[0]!.clearOffHand).toBe(true);
+    expect(combos[0]!.swaps['main_hand']!.identity).toBe('NEW_2H');
+    expect(combos[0]!.swaps['off_hand']).toBeUndefined();
+  });
+
+  it('pairs a non-weapon with a pure off_hand by carrying the converged main_hand context', () => {
+    const converged = {
+      main_hand: makeWeapon({ slot: 'main_hand', identity: 'EQ_MH', equipLoc: 'INVTYPE_WEAPON' }),
+      off_hand: makeWeapon({ slot: 'off_hand', identity: 'EQ_OH', equipLoc: 'INVTYPE_HOLDABLE' }),
+    };
+    const combos = generateCombos(
+      [
+        makeItem('chest', 'NEW_C'),
+        makeWeapon({ slot: 'off_hand', identity: 'NEW_OH', equipLoc: 'INVTYPE_HOLDABLE' }),
+      ],
+      converged,
+    );
+    expect(combos).toHaveLength(1);
+    expect(combos[0]!.swaps['off_hand']!.identity).toBe('NEW_OH');
+    expect(combos[0]!.swaps['main_hand']).toBeUndefined(); // MH stays in converged
+  });
+
+  it('drops 1H main_hand combos when the converged off_hand is missing or not OH-eligible', () => {
+    // converged has no off_hand → 1H MH can't be paired.
+    const converged = {
+      main_hand: makeWeapon({ slot: 'main_hand', identity: 'EQ_MH', equipLoc: 'INVTYPE_WEAPON' }),
+    };
+    const combos = generateCombos(
+      [
+        makeItem('chest', 'NEW_C'),
+        makeWeapon({ slot: 'main_hand', identity: 'NEW_1H', equipLoc: 'INVTYPE_WEAPON' }),
+      ],
+      converged,
+    );
+    expect(combos).toEqual([]);
+  });
+
+  it('drops pure-OH combos when the converged main_hand is a 2H (slot locked out)', () => {
+    const converged = {
+      main_hand: makeWeapon({ slot: 'main_hand', identity: 'EQ_2H', equipLoc: 'INVTYPE_2HWEAPON' }),
+    };
+    const combos = generateCombos(
+      [
+        makeItem('chest', 'NEW_C'),
+        makeWeapon({ slot: 'off_hand', identity: 'NEW_OH', equipLoc: 'INVTYPE_HOLDABLE' }),
+      ],
+      converged,
+    );
+    expect(combos).toEqual([]);
+  });
+
+  it('drops combos containing two weapon items (v1 scope — defer multi-weapon combos)', () => {
+    const converged = {
+      main_hand: makeWeapon({ slot: 'main_hand', identity: 'EQ_MH', equipLoc: 'INVTYPE_WEAPON' }),
+      off_hand: makeWeapon({ slot: 'off_hand', identity: 'EQ_OH', equipLoc: 'INVTYPE_HOLDABLE' }),
+    };
+    const combos = generateCombos(
+      [
+        makeWeapon({ slot: 'main_hand', identity: 'NEW_MH', equipLoc: 'INVTYPE_WEAPON' }),
+        makeWeapon({ slot: 'off_hand', identity: 'NEW_OH', equipLoc: 'INVTYPE_HOLDABLE' }),
+      ],
+      converged,
+    );
+    expect(combos).toEqual([]);
+  });
+
+  it('generates a triple combining 2 non-weapons + a 1H MH (with paired OH)', () => {
+    const converged = {
+      main_hand: makeWeapon({ slot: 'main_hand', identity: 'EQ_MH', equipLoc: 'INVTYPE_WEAPON' }),
+      off_hand: makeWeapon({ slot: 'off_hand', identity: 'EQ_OH', equipLoc: 'INVTYPE_HOLDABLE' }),
+    };
+    const combos = generateCombos(
+      [
+        makeItem('chest', 'NEW_C'),
+        makeItem('legs', 'NEW_L'),
+        makeWeapon({ slot: 'main_hand', identity: 'NEW_MH', equipLoc: 'INVTYPE_WEAPON' }),
+      ],
+      converged,
+    );
+    // pairs: (chest, legs), (chest, mh), (legs, mh) + triple = 4 combos
+    expect(combos.filter((c) => c.id.startsWith('bp3_'))).toHaveLength(1);
+    const triple = combos.find((c) => c.id.startsWith('bp3_'))!;
+    expect(triple.swaps['chest']!.identity).toBe('NEW_C');
+    expect(triple.swaps['legs']!.identity).toBe('NEW_L');
+    expect(triple.swaps['main_hand']!.identity).toBe('NEW_MH');
+    expect(triple.swaps['off_hand']!.identity).toBe('EQ_OH'); // carried from converged
+  });
+
+  it('omits weapon combos entirely when converged is not provided (backward-compat default {})', () => {
+    // No converged → weapons can't be paired → only non-weapon-only combos remain.
+    const combos = generateCombos([
+      makeItem('chest', 'NEW_C'),
+      makeWeapon({ slot: 'main_hand', identity: 'NEW_MH', equipLoc: 'INVTYPE_WEAPON' }),
+    ]);
+    expect(combos).toEqual([]);
+  });
+});
+
 describe('applyComboToLoadout', () => {
   it('applies the combo swaps to the loadout', () => {
     const loadout: Record<string, ParsedItem> = {
@@ -157,6 +314,67 @@ describe('applyComboToLoadout', () => {
     };
     applyComboToLoadout(loadout, combo);
     expect(loadout['chest']!.identity).toBe('EQ_C');
+  });
+
+  it('deletes off_hand from the result when clearOffHand is set (2H combo)', () => {
+    const loadout: Record<string, ParsedItem> = {
+      main_hand: makeWeapon({ slot: 'main_hand', identity: 'EQ_MH', equipLoc: 'INVTYPE_WEAPON' }),
+      off_hand: makeWeapon({ slot: 'off_hand', identity: 'EQ_OH', equipLoc: 'INVTYPE_HOLDABLE' }),
+      chest: makeItem('chest', 'EQ_C'),
+    };
+    const combo = {
+      id: 'bp2_2h',
+      swaps: {
+        main_hand: makeWeapon({ slot: 'main_hand', identity: 'NEW_2H', equipLoc: 'INVTYPE_2HWEAPON' }),
+        chest: makeItem('chest', 'NEW_C'),
+      },
+      clearOffHand: true,
+    };
+    const out = applyComboToLoadout(loadout, combo);
+    expect(out['main_hand']!.identity).toBe('NEW_2H');
+    expect(out['chest']!.identity).toBe('NEW_C');
+    expect(out['off_hand']).toBeUndefined();
+  });
+});
+
+describe('buildBreakpointScript (weapon-aware)', () => {
+  it('emits an empty `off_hand=` line for clearOffHand combos (2H lockout)', () => {
+    const converged = {
+      main_hand: makeWeapon({ slot: 'main_hand', identity: 'EQ_MH', equipLoc: 'INVTYPE_WEAPON' }),
+      off_hand: makeWeapon({ slot: 'off_hand', identity: 'EQ_OH', equipLoc: 'INVTYPE_HOLDABLE' }),
+      chest: makeItem('chest', 'EQ_C'),
+    };
+    const combos: BreakpointCombo[] = [{
+      id: 'bp_2h',
+      swaps: {
+        main_hand: makeWeapon({ slot: 'main_hand', identity: 'NEW_2H', equipLoc: 'INVTYPE_2HWEAPON' }),
+      },
+      clearOffHand: true,
+    }];
+    const out = buildBreakpointScript(converged, combos);
+    expect(out.script).toContain('profileset."bp_2h"+="off_hand="');
+    // The "real" off_hand line (with EQ_OH) must NOT be emitted for this combo.
+    expect(out.script).not.toMatch(/profileset\."bp_2h"\+=".*off_hand.*EQ_OH/);
+  });
+
+  it('emits both main_hand and off_hand lines for a 1H+paired-OH combo', () => {
+    const converged = {
+      main_hand: makeWeapon({ slot: 'main_hand', identity: 'EQ_MH', equipLoc: 'INVTYPE_WEAPON' }),
+      off_hand: makeWeapon({ slot: 'off_hand', identity: 'EQ_OH', equipLoc: 'INVTYPE_HOLDABLE' }),
+      chest: makeItem('chest', 'EQ_C'),
+    };
+    const combos: BreakpointCombo[] = [{
+      id: 'bp_1h',
+      swaps: {
+        main_hand: makeWeapon({ slot: 'main_hand', identity: 'NEW_1H', equipLoc: 'INVTYPE_WEAPON' }),
+        off_hand: makeWeapon({ slot: 'off_hand', identity: 'EQ_OH', equipLoc: 'INVTYPE_HOLDABLE' }),
+      },
+    }];
+    const out = buildBreakpointScript(converged, combos);
+    expect(out.script).toMatch(/profileset\."bp_1h"\+=".*main_hand.*"/);
+    expect(out.script).toMatch(/profileset\."bp_1h"\+=".*off_hand.*"/);
+    // No bare clear line.
+    expect(out.script).not.toContain('profileset."bp_1h"+="off_hand="');
   });
 });
 
@@ -394,6 +612,37 @@ describe('predictComboScore', () => {
       combo, converged, dpsPerIlvlPct: 0.05, baseline_dps: 100_000,
     });
     expect(score).toBeCloseTo(500, 6);
+  });
+
+  it('subtracts the converged off_hand stats when clearOffHand is set (2H lockout)', () => {
+    // Going 1H+OH (100 int + 50 int = 150) → 2H (200 int) means NET stat
+    // delta of +50 int even though the 2H has more int than the 1H alone.
+    const converged = {
+      main_hand: makeWeapon({
+        slot: 'main_hand', identity: 'EQ_1H', equipLoc: 'INVTYPE_WEAPON', ilvl: 270,
+        raw_stats: rawStats({ intellect: 100 }),
+      }),
+      off_hand: makeWeapon({
+        slot: 'off_hand', identity: 'EQ_OH', equipLoc: 'INVTYPE_HOLDABLE', ilvl: 270,
+        raw_stats: rawStats({ intellect: 50 }),
+      }),
+    };
+    const combo: BreakpointCombo = {
+      id: 'bp_2h',
+      swaps: {
+        main_hand: makeWeapon({
+          slot: 'main_hand', identity: 'NEW_2H', equipLoc: 'INVTYPE_2HWEAPON', ilvl: 280,
+          raw_stats: rawStats({ intellect: 200 }),
+        }),
+      },
+      clearOffHand: true,
+    };
+    const score = predictComboScore({
+      combo, converged, weights, dpsPerIlvlPct: 0.05, baseline_dps: 100_000,
+    });
+    // Candidates: [200 int]. Incumbents: [100 int (MH), 50 int (OH)] = 150 int.
+    // Net delta = 200 - 150 = 50.
+    expect(score).toBeCloseTo(50, 6);
   });
 });
 

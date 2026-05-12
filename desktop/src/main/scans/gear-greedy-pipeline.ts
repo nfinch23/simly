@@ -27,7 +27,6 @@ import {
   type SwapTestRunner,
 } from './greedy-search';
 import { runBreakpointSearch, applyComboToLoadout } from './breakpoint-search';
-import { classifyWeapon } from './weapon-config';
 import {
   computeDpsPerIlvlPct,
 } from './gear-pruner';
@@ -221,23 +220,12 @@ export async function runGreedyGearPipeline(
   let breakpointCombos = 0;
 
   // 2. Breakpoint phase — exhaustive 2-and-3 cartesian over rejects.
-  // Filter weapon items out of the breakpoint pool: the breakpoint
-  // phase doesn't have weapon-aware profileset emission yet, so a 2H
-  // candidate combined with anything else would inflate its DPS by
-  // also counting the equipped off-hand's stats (the same bug the
-  // greedy fix closes). Greedy already made the weapon decision —
-  // breakpoint focuses on non-weapon synergies (haste-breakpoint pairs,
-  // set-bonus completers, etc.). Weapon-aware breakpoint is a follow-up.
-  const breakpointPool = greedy.rejected.filter(
-    (i) => classifyWeapon(i) === 'NON_WEAPON',
-  );
-  const weaponSkipped = greedy.rejected.length - breakpointPool.length;
-  if (weaponSkipped > 0) {
-    console.log(
-      `[gear] breakpoint phase: skipped ${weaponSkipped} weapon item(s) — ` +
-      `breakpoint not yet weapon-aware (greedy already decided weapons)`,
-    );
-  }
+  // Weapon items now flow through: generateCombos resolves their slot
+  // semantics from the converged loadout (1H pairs with converged OH,
+  // 2H sets clearOffHand). The defensive filter that previously
+  // stripped weapons was removed in the weapon-aware-breakpoint slice
+  // — see breakpoint-search.ts `buildComboFromItems` for the new logic.
+  const breakpointPool = greedy.rejected;
 
   if (breakpointPool.length >= 2) {
     console.log(
