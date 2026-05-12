@@ -128,6 +128,24 @@ export const OH_SUBSIM_TIE_PCT = 1.0;
 export const OH_SUBSIM_MAX_PARTNERS = 3;
 
 // ---------------------------------------------------------------------------
+// Breakpoint phase (scans/breakpoint-search.ts)
+// ---------------------------------------------------------------------------
+
+/**
+ * Hard cap on how many breakpoint combos the sim phase runs after
+ * stat-vector ordering. Combos beyond this are dropped (predicted
+ * weakest first) before the SimC roundtrip.
+ *
+ * Why 100: C(15, 2) + C(15, 3) ≈ 470 combos when the rejected pool is
+ * at the triple-eligibility ceiling. 100 covers the top ~21 % of those,
+ * heavily biased toward predicted upgrades. At 3000 iter per combo,
+ * 100 combos is ~5 minutes — the budget ceiling for the breakpoint
+ * phase on a typical machine. When the rejected pool is small (≤ 10
+ * items) all combos fit comfortably under 100 and the cap is a no-op.
+ */
+export const MAX_BREAKPOINT_COMBOS = 100;
+
+// ---------------------------------------------------------------------------
 // Ignore list (ignore-list.ts)
 // ---------------------------------------------------------------------------
 

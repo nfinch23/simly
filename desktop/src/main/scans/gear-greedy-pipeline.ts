@@ -253,6 +253,9 @@ export async function runGreedyGearPipeline(
       tieWindowPct,
       dpsPerIlvlPct,
       weights: opts.weights,
+      // Greedy just measured this; pass it so prioritizeCombos can
+      // convert ilvl-proxy deltas into commensurate absolute DPS.
+      estimatedBaselineDps: greedy.convergedDps,
       onProgress: opts.onProgress,
     });
     breakpointCombos = bp.combos.length;

@@ -4,6 +4,8 @@ import {
   buildBreakpointDiagnostics,
   generateCombos,
   loadoutToBestLoadoutSlots,
+  predictComboScore,
+  prioritizeCombos,
   type BreakpointCombo,
 } from './breakpoint-search';
 import type { ParsedItem, SlotName } from '../simc-export-parser';
@@ -329,5 +331,121 @@ describe('loadoutToBestLoadoutSlots', () => {
       identity: 'A',
       ilvl: 280,
     });
+  });
+});
+
+describe('predictComboScore', () => {
+  const weights: StatWeightsLike = {
+    intellect: 1,
+    haste: 1,
+    crit: 1,
+    mastery: 1,
+    versatility: 1,
+  };
+
+  it('returns stat-vector delta when every item has raw_stats and weights are given', () => {
+    const converged = {
+      chest: makeItem('chest', 'CHEST_OLD', 270, rawStats({ intellect: 100 })),
+      legs: makeItem('legs', 'LEGS_OLD', 270, rawStats({ intellect: 100 })),
+    };
+    const combo: BreakpointCombo = {
+      id: 'bp2_test',
+      swaps: {
+        chest: makeItem('chest', 'CHEST_NEW', 280, rawStats({ intellect: 150 })),
+        legs: makeItem('legs', 'LEGS_NEW', 280, rawStats({ intellect: 120 })),
+      },
+    };
+    const score = predictComboScore({
+      combo, converged, weights, dpsPerIlvlPct: 0.05, baseline_dps: 100_000,
+    });
+    // Stat-vector delta = (150 + 120) - (100 + 100) = 70 int × 1 dps_per_int.
+    expect(score).toBeCloseTo(70, 6);
+  });
+
+  it('falls back to ilvl-proxy when any item is missing raw_stats', () => {
+    const converged = {
+      chest: makeItem('chest', 'CHEST_OLD', 270, rawStats({ intellect: 100 })),
+    };
+    const combo: BreakpointCombo = {
+      id: 'bp1_test',
+      swaps: {
+        // No raw_stats on candidate → must fall back.
+        chest: makeItem('chest', 'CHEST_NEW', 280),
+      },
+    };
+    const score = predictComboScore({
+      combo, converged, weights, dpsPerIlvlPct: 0.05, baseline_dps: 100_000,
+    });
+    // Ilvl-proxy: +10 ilvl × 0.05% × 100k = 500.
+    expect(score).toBeCloseTo(500, 6);
+  });
+
+  it('falls back to ilvl-proxy when weights are not given', () => {
+    const converged = {
+      chest: makeItem('chest', 'CHEST_OLD', 270, rawStats({ intellect: 100 })),
+    };
+    const combo: BreakpointCombo = {
+      id: 'bp1_test',
+      swaps: {
+        chest: makeItem('chest', 'CHEST_NEW', 280, rawStats({ intellect: 150 })),
+      },
+    };
+    const score = predictComboScore({
+      combo, converged, dpsPerIlvlPct: 0.05, baseline_dps: 100_000,
+    });
+    expect(score).toBeCloseTo(500, 6);
+  });
+});
+
+describe('prioritizeCombos', () => {
+  const weights: StatWeightsLike = { intellect: 1 };
+
+  function ringCombo(id: string, intGainPerRing: number): BreakpointCombo {
+    return {
+      id,
+      swaps: {
+        finger1: makeItem('finger1', `${id}_r1`, 280, rawStats({ intellect: intGainPerRing })),
+        finger2: makeItem('finger2', `${id}_r2`, 280, rawStats({ intellect: intGainPerRing })),
+      },
+    };
+  }
+
+  const converged = {
+    finger1: makeItem('finger1', 'F1_OLD', 270, rawStats({ intellect: 0 })),
+    finger2: makeItem('finger2', 'F2_OLD', 270, rawStats({ intellect: 0 })),
+  };
+
+  it('sorts combos descending by predicted score', () => {
+    const out = prioritizeCombos({
+      combos: [ringCombo('weak', 5), ringCombo('strong', 100), ringCombo('mid', 50)],
+      converged, weights, dpsPerIlvlPct: 0.05, baseline_dps: 100_000,
+    });
+    expect(out.map((p) => p.combo.id)).toEqual(['strong', 'mid', 'weak']);
+  });
+
+  it('truncates to maxCombos (predicted weakest dropped first)', () => {
+    const out = prioritizeCombos({
+      combos: [ringCombo('weak', 5), ringCombo('strong', 100), ringCombo('mid', 50)],
+      converged, weights, dpsPerIlvlPct: 0.05, baseline_dps: 100_000,
+      maxCombos: 2,
+    });
+    expect(out).toHaveLength(2);
+    expect(out.map((p) => p.combo.id)).toEqual(['strong', 'mid']);
+  });
+
+  it('returns empty array when given no combos', () => {
+    const out = prioritizeCombos({
+      combos: [], converged, weights, dpsPerIlvlPct: 0.05, baseline_dps: 100_000,
+    });
+    expect(out).toEqual([]);
+  });
+
+  it('annotates each returned entry with its predicted_score', () => {
+    const out = prioritizeCombos({
+      combos: [ringCombo('a', 10)],
+      converged, weights, dpsPerIlvlPct: 0.05, baseline_dps: 100_000,
+    });
+    // Two ring slots, each gaining +10 int × 1 dps_per_int = 20 total.
+    expect(out[0]!.predicted_score).toBeCloseTo(20, 6);
   });
 });
