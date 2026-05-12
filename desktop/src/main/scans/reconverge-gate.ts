@@ -31,16 +31,31 @@
 import type { StatWeights } from '@simly/shared';
 
 /**
- * Threshold for the WEIGHTS trigger. Any secondary stat whose marginal
- * value changes by more than this fraction between v1 and v2 fires the
- * trigger.
+ * Threshold for the WEIGHTS trigger. A stat fires when its v2/v1 ratio
+ * deviates from the HERD (median secondary ratio) by more than this
+ * fraction.
  *
- * 0.25 chosen as the conservative "something material shifted" floor.
- * GCD-floor crossings typically halve or double a stat's marginal
- * value, so a 25% gate catches breakpoint transitions while ignoring
- * sim-noise jitter (typically <10% on 1000-iter scale-factor sims).
+ * Why herd-relative, not absolute: an absolute-shift threshold conflates
+ * "the actor's stat budget grew" (e.g., a new chest added 200 int → all
+ * secondary marginal values rise proportionally in the scale-factor
+ * sim) with "one stat hit a structural breakpoint" (GCD floor, stat
+ * cap). We want to detect ONLY the second case. The herd median acts
+ * as the baseline for "what stats are doing on average"; deviations
+ * from that signal asymmetric structural changes.
+ *
+ * Calibration: 0.25 (a stat must be ≥ 25% away from the herd to fire).
+ * Real GCD-floor crossings halve a stat's marginal value while the
+ * herd shifts at most ~10-20% (typical gear-upgrade pattern), giving
+ * deviations of ~50%+. Sim noise on 1000-iter scale-factor sims is
+ * ~5-10% per stat, so 25% sits cleanly between noise and real signal.
+ *
+ * The +23.7% near-miss seen on Felfriend (PR #27 live data) is the
+ * exact case herd-relative detection is designed to suppress: all four
+ * secondaries shifted upward (+3.5% / +23.7% / +11.0% / +7.7%) due to
+ * an intellect increase from the converged chest. Median ≈ +9%, so
+ * haste's deviation from herd is only ~13% — well under the threshold.
  */
-export const WEIGHT_SHIFT_THRESHOLD = 0.25;
+export const RELATIVE_DELTA_THRESHOLD = 0.25;
 
 /**
  * Tolerance for the WEIGHTS_RANK trigger. Two stats are considered
@@ -85,8 +100,23 @@ export type ReconvergeReason =
       stat: TriggeredStat;
       v1: number;
       v2: number;
-      /** v2 / v1 ratio; the trigger fires when |ratio - 1| > threshold. */
+      /** v2 / v1 ratio for this stat. */
       ratio: number;
+      /**
+       * Median v2/v1 ratio across all measurable secondaries. The
+       * "herd" the offending stat moved relative to. Logged in the
+       * diagnostic so the user can see whether the trigger fired
+       * because of a uniform shift (median far from 1.0) vs an
+       * asymmetric one.
+       */
+      herd_median: number;
+      /**
+       * stat's ratio divided by herd_median. The trigger fires when
+       * |relative_ratio - 1| > RELATIVE_DELTA_THRESHOLD. A value of
+       * 0.50 means "this stat dropped to half of what the herd did";
+       * 1.50 means "this stat rose 50% more than the herd did."
+       */
+      relative_ratio: number;
     }
   | {
       kind: 'weights_rank';
@@ -107,6 +137,93 @@ export type ReconvergeReason =
   | {
       kind: 'trinket';
     };
+
+/**
+ * Compute the median v2/v1 ratio across all secondaries that have
+ * present, non-zero values on both sides. Returns 1.0 when there are
+ * fewer than 2 measurable secondaries (no meaningful herd to derive).
+ *
+ * Median (vs mean) is the right central tendency here because the
+ * thing we want to detect — one stat moving differently from the
+ * others — would skew the mean toward itself. The median resists
+ * being pulled by the outlier we're trying to find.
+ */
+export function computeHerdMedian(
+  weights_v1: Readonly<Record<string, number | undefined>>,
+  weights_v2: Readonly<Record<string, number | undefined>>,
+): number {
+  const ratios: number[] = [];
+  for (const stat of TRIGGERED_STATS) {
+    const v1 = weights_v1[stat];
+    const v2 = weights_v2[stat];
+    if (v1 === undefined || v2 === undefined) continue;
+    if (v1 === 0) continue;
+    ratios.push(v2 / v1);
+  }
+  if (ratios.length < 2) return 1.0;
+  ratios.sort((a, b) => a - b);
+  const n = ratios.length;
+  if (n % 2 === 1) return ratios[Math.floor(n / 2)]!;
+  return (ratios[n / 2 - 1]! + ratios[n / 2]!) / 2;
+}
+
+/**
+ * Find every secondary that moved meaningfully differently from the
+ * herd. Returns one entry per outlying stat (the WEIGHTS reason payload
+ * minus the discriminant). Uses RELATIVE_DELTA_THRESHOLD as the gate.
+ *
+ * Returned in stable TRIGGERED_STATS order so diagnostic output is
+ * deterministic across runs.
+ */
+export function detectMagnitudeOutliers(
+  weights_v1: Readonly<Record<string, number | undefined>>,
+  weights_v2: Readonly<Record<string, number | undefined>>,
+  threshold: number = RELATIVE_DELTA_THRESHOLD,
+): Array<{
+  stat: TriggeredStat;
+  v1: number;
+  v2: number;
+  ratio: number;
+  herd_median: number;
+  relative_ratio: number;
+}> {
+  const herd_median = computeHerdMedian(weights_v1, weights_v2);
+  // If we couldn't derive a herd (fewer than 2 measurable secondaries),
+  // we can't meaningfully detect outliers — return empty. The gate
+  // silently skips the WEIGHTS trigger in that case.
+  if (herd_median === 1.0) {
+    // 1.0 is also the legitimate "no shift at all" case. Distinguish
+    // by recounting measurable secondaries.
+    let measurable = 0;
+    for (const stat of TRIGGERED_STATS) {
+      const v1 = weights_v1[stat];
+      const v2 = weights_v2[stat];
+      if (v1 !== undefined && v2 !== undefined && v1 !== 0) measurable++;
+    }
+    if (measurable < 2) return [];
+  }
+
+  const out: Array<{
+    stat: TriggeredStat;
+    v1: number;
+    v2: number;
+    ratio: number;
+    herd_median: number;
+    relative_ratio: number;
+  }> = [];
+  for (const stat of TRIGGERED_STATS) {
+    const v1 = weights_v1[stat];
+    const v2 = weights_v2[stat];
+    if (v1 === undefined || v2 === undefined) continue;
+    if (v1 === 0) continue;
+    const ratio = v2 / v1;
+    const relative_ratio = ratio / herd_median;
+    if (Math.abs(relative_ratio - 1) > threshold) {
+      out.push({ stat, v1, v2, ratio, herd_median, relative_ratio });
+    }
+  }
+  return out;
+}
 
 /**
  * Detect every pair of secondary stats that clearly swapped dominance
@@ -250,29 +367,28 @@ export function shouldTriggerPass2(
 ): ReconvergeGateResult {
   const reasons: ReconvergeReason[] = [];
 
-  // --- Trigger A: stat-weights magnitude shift past threshold on any
-  // secondary. Catches "hard" breakpoints — a stat's marginal value
-  // halved/doubled.
+  // --- Trigger A: stat-weights magnitude shift relative to the herd.
+  // Computes each secondary's v2/v1 ratio, then compares each ratio
+  // against the median ratio across all secondaries (the "herd"). A
+  // stat fires when it deviates from the herd by more than
+  // RELATIVE_DELTA_THRESHOLD — catches asymmetric structural shifts
+  // (one stat hitting a GCD floor while others stay flat) without
+  // false-firing on uniform stat-budget growth (all secondaries
+  // scaling up because intellect rose).
   if (input.weights_v1 && input.weights_v2) {
-    for (const stat of TRIGGERED_STATS) {
-      const v1 = input.weights_v1[stat];
-      const v2 = input.weights_v2[stat];
-      // Both values must be present AND v1 must be non-zero to compute
-      // a meaningful ratio. Skip stats the sim didn't measure or that
-      // are structurally zero for this spec.
-      if (v1 === undefined || v2 === undefined) continue;
-      if (v1 === 0) continue;
-      const ratio = v2 / v1;
-      if (Math.abs(ratio - 1) > WEIGHT_SHIFT_THRESHOLD) {
-        reasons.push({ kind: 'weights', stat, v1, v2, ratio });
-      }
+    const outliers = detectMagnitudeOutliers(
+      input.weights_v1,
+      input.weights_v2,
+    );
+    for (const o of outliers) {
+      reasons.push({ kind: 'weights', ...o });
     }
 
-    // --- Trigger A2: WEIGHTS_RANK. Even if no single stat shifted past
-    // the magnitude threshold, a "soft" breakpoint can flip the
-    // PRIORITY ORDER of secondaries (e.g., crit > haste in v1, haste >
-    // crit in v2). That's a strong signal future gear decisions will
-    // disagree with pass-1's pick, so re-search is warranted.
+    // --- Trigger A2: WEIGHTS_RANK. Even if no stat deviates from the
+    // herd past the magnitude threshold, a "soft" breakpoint can flip
+    // the PRIORITY ORDER of secondaries (e.g., crit > haste in v1,
+    // haste > crit in v2). That's a strong signal future gear decisions
+    // will disagree with pass-1's pick, so re-search is warranted.
     const flips = detectRankFlips(input.weights_v1, input.weights_v2);
     for (const flip of flips) {
       reasons.push({ kind: 'weights_rank', ...flip });
@@ -326,9 +442,17 @@ export function shouldTriggerPass2(
 export function formatReconvergeReason(reason: ReconvergeReason): string {
   switch (reason.kind) {
     case 'weights': {
-      const pct = (reason.ratio - 1) * 100;
-      const sign = pct >= 0 ? '+' : '';
-      return `weights: ${reason.stat} shifted ${sign}${pct.toFixed(1)}% (${reason.v1.toFixed(2)} → ${reason.v2.toFixed(2)})`;
+      const stat_pct = (reason.ratio - 1) * 100;
+      const stat_sign = stat_pct >= 0 ? '+' : '';
+      const herd_pct = (reason.herd_median - 1) * 100;
+      const herd_sign = herd_pct >= 0 ? '+' : '';
+      const rel_pct = (reason.relative_ratio - 1) * 100;
+      const rel_sign = rel_pct >= 0 ? '+' : '';
+      return (
+        `weights: ${reason.stat} moved ${stat_sign}${stat_pct.toFixed(1)}% ` +
+        `vs herd ${herd_sign}${herd_pct.toFixed(1)}% ` +
+        `(relative ${rel_sign}${rel_pct.toFixed(1)}%)`
+      );
     }
     case 'weights_rank':
       return (
