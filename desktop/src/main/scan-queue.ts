@@ -14,6 +14,7 @@ import {
 } from '@simly/shared';
 import { hashGearContext, replaceGearInProfile } from './profile-builder';
 import {
+  computeHerdMedian,
   computeWeightDeltas,
   formatReconvergeReason,
   shouldTriggerPass2,
@@ -1173,17 +1174,28 @@ export class ScanQueue {
           );
           gate.shouldTrigger = true;
           gate.reasons = [
-            { kind: 'weights', stat: 'haste', v1: 1, v2: 1, ratio: 1 },
+            {
+              kind: 'weights',
+              stat: 'haste',
+              v1: 1,
+              v2: 1,
+              ratio: 1,
+              herd_median: 1,
+              relative_ratio: 1,
+            },
           ];
         }
 
         // Always compute weight_deltas — surfaces what shifted even
         // when no trigger fires. Useful for tuning thresholds and for
         // the user to see "your gear didn't move haste much" at a
-        // glance.
+        // glance. Also log the herd median so the user can see the
+        // baseline the trigger compares against — uniform shifts
+        // (median far from 1.0) are the cases the herd-relative gate
+        // is designed to suppress.
         const weightDeltas =
           weightsV2 !== undefined ? computeWeightDeltas(weightsV1, weightsV2) : undefined;
-        if (weightDeltas) {
+        if (weightDeltas && weightsV2 !== undefined) {
           const deltaStr = Object.entries(weightDeltas)
             .map(([stat, ratio]) => {
               const pct = (ratio - 1) * 100;
@@ -1191,7 +1203,13 @@ export class ScanQueue {
               return `${stat}=${sign}${pct.toFixed(1)}%`;
             })
             .join(' ');
-          console.log(`[gear] weight_deltas (post-pass-1 vs baseline): ${deltaStr}`);
+          const herdMedian = computeHerdMedian(weightsV1, weightsV2);
+          const herdPct = (herdMedian - 1) * 100;
+          const herdSign = herdPct >= 0 ? '+' : '';
+          console.log(
+            `[gear] weight_deltas (post-pass-1 vs baseline): ${deltaStr} ` +
+              `(herd median ${herdSign}${herdPct.toFixed(1)}%)`,
+          );
         }
 
         let pass2RanAndWon = false;

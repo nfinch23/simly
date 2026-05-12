@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import {
+  computeHerdMedian,
   computeWeightDeltas,
+  detectMagnitudeOutliers,
   detectRankFlips,
   formatReconvergeReason,
   RANK_FLIP_TOLERANCE,
+  RELATIVE_DELTA_THRESHOLD,
   shouldTriggerPass2,
-  WEIGHT_SHIFT_THRESHOLD,
 } from './reconverge-gate';
 import type { StatWeights } from '@simly/shared';
 
@@ -34,17 +36,12 @@ describe('shouldTriggerPass2', () => {
     expect(result.reasons).toEqual([]);
   });
 
-  it('fires WEIGHTS trigger when haste shifts past 25% (GCD-floor scenario)', () => {
+  it('fires WEIGHTS trigger when haste halves vs a flat herd (GCD-floor scenario)', () => {
+    // crit/mastery/vers unchanged → herd median = 1.0
+    // haste 12 → 6 → ratio 0.5, relative_ratio 0.5 (50% below herd)
     const result = shouldTriggerPass2({
       weights_v1: baseWeights,
-      // Haste's marginal value halves — classic post-GCD-floor pattern.
-      // This also flips haste vs mastery (haste 12→6, mastery 10), so
-      // the rank-flip reason fires alongside the magnitude reason.
       weights_v2: { ...baseWeights, haste: 6 },
-      flask_v1_item_id: 100,
-      flask_v2_item_id: 100,
-      food_v1_item_id: 200,
-      food_v2_item_id: 200,
       trinket_flip_predicted: false,
     });
     expect(result.shouldTrigger).toBe(true);
@@ -53,29 +50,92 @@ describe('shouldTriggerPass2', () => {
     if (weightsReason && weightsReason.kind === 'weights') {
       expect(weightsReason.stat).toBe('haste');
       expect(weightsReason.ratio).toBeCloseTo(0.5, 2);
+      expect(weightsReason.herd_median).toBeCloseTo(1.0, 2);
+      expect(weightsReason.relative_ratio).toBeCloseTo(0.5, 2);
     }
   });
 
-  it('fires WEIGHTS trigger for upward shifts too (haste becomes more valuable)', () => {
+  it('fires WEIGHTS trigger for upward outliers too (crit shoots up while herd stays flat)', () => {
     const result = shouldTriggerPass2({
       weights_v1: baseWeights,
-      weights_v2: { ...baseWeights, crit: 22 }, // 22/15 = 1.47 ratio = +47%
+      // crit 15 → 22 (ratio 1.47); haste/mastery/vers unchanged so
+      // herd = 1.0; relative_ratio = 1.47 (47% above herd, above
+      // threshold).
+      weights_v2: { ...baseWeights, crit: 22 },
       trinket_flip_predicted: false,
     });
     expect(result.shouldTrigger).toBe(true);
-    const r = result.reasons[0]!;
-    expect(r.kind).toBe('weights');
-    if (r.kind === 'weights') expect(r.stat).toBe('crit');
+    const r = result.reasons.find((x) => x.kind === 'weights');
+    expect(r).toBeDefined();
+    if (r && r.kind === 'weights') {
+      expect(r.stat).toBe('crit');
+      expect(r.herd_median).toBeCloseTo(1.0, 2);
+    }
   });
 
-  it('does NOT fire WEIGHTS trigger when shift is below threshold', () => {
+  it('does NOT fire when one stat shifts but stays within tolerance of the herd', () => {
+    // haste 12 → 13.5 (ratio 1.125); herd = 1.0; relative = 1.125,
+    // deviation 12.5%, below 25% threshold.
     const result = shouldTriggerPass2({
-      // 12 → 13.5 is +12.5%, well below the 25% threshold.
       weights_v1: baseWeights,
       weights_v2: { ...baseWeights, haste: 13.5 },
       trinket_flip_predicted: false,
     });
     expect(result.shouldTrigger).toBe(false);
+  });
+
+  // NEW: this is the +23.7% near-miss case from PR #27's real Felfriend
+  // data. All four secondaries shifted upward (intellect growth lifted
+  // the entire stat budget), so the herd shifted too — haste's
+  // deviation from herd is only ~13%, well under the threshold. Under
+  // the old absolute-shift detection this WOULD have fired (haste +23.7%
+  // looks close to the absolute threshold); under herd-relative
+  // detection it correctly stays silent because nothing structurally
+  // changed about the actor's stat priorities.
+  it('does NOT fire when ALL secondaries shift upward together (intellect-growth artifact)', () => {
+    const result = shouldTriggerPass2({
+      weights_v1: { intellect: 30, crit: 15, haste: 12, mastery: 10, versatility: 11 },
+      weights_v2: {
+        intellect: 32, // primary growth (excluded from check anyway)
+        crit: 15 * 1.035,    // +3.5%
+        haste: 12 * 1.237,   // +23.7%
+        mastery: 10 * 1.110, // +11.0%
+        versatility: 11 * 1.077, // +7.7%
+      },
+      trinket_flip_predicted: false,
+    });
+    expect(result.shouldTrigger).toBe(false);
+    // Sanity: even the largest shift (haste +23.7%) is within tolerance
+    // because the herd also moved.
+    const median = computeHerdMedian(
+      { intellect: 30, crit: 15, haste: 12, mastery: 10, versatility: 11 },
+      {
+        intellect: 32,
+        crit: 15 * 1.035,
+        haste: 12 * 1.237,
+        mastery: 10 * 1.110,
+        versatility: 11 * 1.077,
+      },
+    );
+    expect(median).toBeGreaterThan(1.07); // herd moved ~9%
+    expect(median).toBeLessThan(1.12);
+  });
+
+  it('fires WHEN one stat moves opposite the herd (asymmetric structural change)', () => {
+    // crit, mastery, vers all up 10%. Haste DOWN 30%. Median ≈ 1.10.
+    // haste relative = 0.70/1.10 = 0.636 → 36.4% deviation, fires.
+    const result = shouldTriggerPass2({
+      weights_v1: { crit: 15, haste: 12, mastery: 10, versatility: 11 },
+      weights_v2: { crit: 15 * 1.10, haste: 12 * 0.70, mastery: 10 * 1.10, versatility: 11 * 1.10 },
+    });
+    expect(result.shouldTrigger).toBe(true);
+    const w = result.reasons.find((r) => r.kind === 'weights');
+    expect(w).toBeDefined();
+    if (w && w.kind === 'weights') {
+      expect(w.stat).toBe('haste');
+      expect(w.herd_median).toBeCloseTo(1.10, 2);
+      expect(w.relative_ratio).toBeLessThan(0.75); // clearly below herd
+    }
   });
 
   it('does NOT fire WEIGHTS trigger for primary-stat changes (intellect excluded)', () => {
@@ -199,24 +259,101 @@ describe('shouldTriggerPass2', () => {
     expect(result.shouldTrigger).toBe(false);
   });
 
-  it('threshold edges: ratio = 1.25 exactly does NOT fire (strictly greater than)', () => {
-    // 12 × 1.25 = 15.0 → |ratio - 1| = 0.25 exactly; should NOT trigger.
+  it('threshold edges: relative_ratio at 1.25 exactly does NOT fire (strictly greater than)', () => {
+    // Herd = 1.0 (other stats unchanged). haste 12 → 15 gives ratio 1.25,
+    // relative_ratio 1.25, deviation exactly 25% — boundary case, should
+    // NOT fire.
     const result = shouldTriggerPass2({
       weights_v1: baseWeights,
       weights_v2: { ...baseWeights, haste: 15.0 },
       trinket_flip_predicted: false,
     });
     expect(result.shouldTrigger).toBe(false);
-    expect(WEIGHT_SHIFT_THRESHOLD).toBe(0.25);
+    expect(RELATIVE_DELTA_THRESHOLD).toBe(0.25);
   });
 
-  it('threshold edges: ratio just past 1.25 DOES fire', () => {
+  it('threshold edges: relative_ratio just past 1.25 DOES fire', () => {
+    // haste 12 → 15.5 (ratio 1.292); herd = 1.0; relative_ratio 1.292,
+    // deviation 29.2%, above threshold.
     const result = shouldTriggerPass2({
       weights_v1: baseWeights,
-      weights_v2: { ...baseWeights, haste: 15.5 }, // ratio ≈ 1.29
+      weights_v2: { ...baseWeights, haste: 15.5 },
       trinket_flip_predicted: false,
     });
     expect(result.shouldTrigger).toBe(true);
+  });
+});
+
+describe('computeHerdMedian', () => {
+  it('returns 1.0 when fewer than 2 secondaries are measurable', () => {
+    // Only crit measurable — can't form a median.
+    expect(computeHerdMedian({ crit: 15 }, { crit: 12 })).toBe(1.0);
+  });
+
+  it('returns the middle ratio for an odd-count list', () => {
+    const median = computeHerdMedian(
+      { crit: 10, haste: 10, mastery: 10 },
+      { crit: 9, haste: 11, mastery: 13 },
+    );
+    // Sorted ratios: [0.9, 1.1, 1.3]. Median = 1.1.
+    expect(median).toBeCloseTo(1.1, 4);
+  });
+
+  it('returns the average of the two middle ratios for an even-count list', () => {
+    const median = computeHerdMedian(
+      { crit: 10, haste: 10, mastery: 10, versatility: 10 },
+      { crit: 8, haste: 10, mastery: 12, versatility: 14 },
+    );
+    // Sorted ratios: [0.8, 1.0, 1.2, 1.4]. Median = (1.0 + 1.2) / 2 = 1.1.
+    expect(median).toBeCloseTo(1.1, 4);
+  });
+
+  it('skips stats with v1 = 0 when computing median', () => {
+    // mastery v1 = 0 → excluded. Median across crit + haste only.
+    const median = computeHerdMedian(
+      { crit: 10, haste: 10, mastery: 0 },
+      { crit: 12, haste: 14, mastery: 5 },
+    );
+    expect(median).toBeCloseTo(1.3, 4); // avg of 1.2 and 1.4
+  });
+});
+
+describe('detectMagnitudeOutliers', () => {
+  it('returns empty when no stat deviates from the herd', () => {
+    // All four secondaries shift uniformly +10%.
+    const outliers = detectMagnitudeOutliers(
+      { crit: 10, haste: 10, mastery: 10, versatility: 10 },
+      { crit: 11, haste: 11, mastery: 11, versatility: 11 },
+    );
+    expect(outliers).toEqual([]);
+  });
+
+  it('returns the outlying stat with its herd_median and relative_ratio', () => {
+    const outliers = detectMagnitudeOutliers(
+      { crit: 10, haste: 10, mastery: 10, versatility: 10 },
+      { crit: 11, haste: 4, mastery: 11, versatility: 11 },
+    );
+    expect(outliers).toHaveLength(1);
+    expect(outliers[0]!.stat).toBe('haste');
+    // Herd median: sorted [0.4, 1.1, 1.1, 1.1], median = (1.1+1.1)/2 = 1.1
+    expect(outliers[0]!.herd_median).toBeCloseTo(1.1, 4);
+    // relative_ratio = 0.4 / 1.1 ≈ 0.364
+    expect(outliers[0]!.relative_ratio).toBeCloseTo(0.4 / 1.1, 3);
+  });
+
+  it('returns no outliers when fewer than 2 secondaries are measurable (no herd)', () => {
+    // Only crit present.
+    const outliers = detectMagnitudeOutliers({ crit: 10 }, { crit: 50 });
+    expect(outliers).toEqual([]);
+  });
+
+  it('respects the threshold argument', () => {
+    // With default threshold 0.25 this fires; tighten to 0.50 and it
+    // shouldn't.
+    const v1 = { crit: 10, haste: 10, mastery: 10, versatility: 10 };
+    const v2 = { crit: 11, haste: 11, mastery: 11, versatility: 7 }; // vers -30%
+    expect(detectMagnitudeOutliers(v1, v2, 0.25)).toHaveLength(1);
+    expect(detectMagnitudeOutliers(v1, v2, 0.50)).toHaveLength(0);
   });
 });
 
@@ -356,15 +493,19 @@ describe('computeWeightDeltas', () => {
 });
 
 describe('formatReconvergeReason', () => {
-  it('formats weights reason with sign and percent', () => {
+  it('formats weights reason with stat shift, herd shift, AND relative deviation', () => {
     const out = formatReconvergeReason({
       kind: 'weights',
       stat: 'haste',
       v1: 12,
       v2: 6,
       ratio: 0.5,
+      herd_median: 1.1,
+      relative_ratio: 0.5 / 1.1,
     });
-    expect(out).toBe('weights: haste shifted -50.0% (12.00 → 6.00)');
+    expect(out).toContain('haste moved -50.0%');
+    expect(out).toContain('vs herd +10.0%');
+    expect(out).toContain('relative -54.5%');
   });
 
   it('formats consumables reason with item ids', () => {
