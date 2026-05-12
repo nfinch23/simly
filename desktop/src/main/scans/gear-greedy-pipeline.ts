@@ -244,6 +244,10 @@ export async function runGreedyGearPipeline(
       // Greedy just measured this; pass it so prioritizeCombos can
       // convert ilvl-proxy deltas into commensurate absolute DPS.
       estimatedBaselineDps: greedy.convergedDps,
+      // Pass the full bag so breakpoint can sub-sim close OH partners
+      // for any 1H-weapon-inclusive combo (mirrors greedy's OH sub-sim
+      // from PR #35).
+      bagItems: bagPool,
       onProgress: opts.onProgress,
     });
     breakpointCombos = bp.combos.length;
