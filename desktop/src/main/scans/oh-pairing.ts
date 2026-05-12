@@ -22,6 +22,7 @@ import type { ParsedItem } from '../simc-export-parser';
 import type { StatWeights } from '@simly/shared';
 import { canPairAsOH, classifyWeapon } from './weapon-config';
 import { predictDpsFromAggregatedStatDelta } from './pruner-diagnostic';
+import { OH_SUBSIM_MAX_PARTNERS, OH_SUBSIM_TIE_PCT } from '../gear-config';
 
 export interface PickBestOHOptions {
   /** Main_hand candidate the OH is being chosen for. */
@@ -93,4 +94,70 @@ export function pickBestOHForMH(opts: PickBestOHOptions): PickBestOHResult {
 
   ranked.sort((a, b) => b.predicted_score - a.predicted_score);
   return { bestOH: ranked[0]!.oh, rankedScores: ranked };
+}
+
+export interface PickCloseOHsOptions extends PickBestOHOptions {
+  /**
+   * % below the top-ranked OH's predicted score that still counts as
+   * "close." OHs more than this far below the leader are dropped.
+   * Defaults to OH_SUBSIM_TIE_PCT (1.0 %). Pass a tighter value when
+   * the caller wants fewer sub-sim candidates.
+   */
+  tieWindowPct?: number;
+  /**
+   * Maximum number of OH partners to return. Defaults to
+   * OH_SUBSIM_MAX_PARTNERS (3). Caps combinatorial blowup when many
+   * OHs cluster at the top of the predicted ranking.
+   */
+  maxPartners?: number;
+}
+
+export interface PickCloseOHsResult {
+  /**
+   * Best-first list of OH partners worth sub-simming for this MH.
+   * Always at least 1 entry when an eligible OH exists; at most
+   * `maxPartners`. Empty when MH is 2H or the OH pool is empty.
+   */
+  partners: ParsedItem[];
+  /** All OH rankings returned by `pickBestOHForMH` (for diagnostics). */
+  rankedScores: OHRanking[];
+}
+
+/**
+ * Return the top-K OH partners for a given MH whose predicted scores
+ * are within a tie window of the best. When the prediction is
+ * decisive (top OH well ahead), returns a single partner — same
+ * behaviour as `pickBestOHForMH`. When several OHs cluster at the
+ * top, returns all close partners (up to `maxPartners`) so greedy can
+ * sub-sim them and let the actual DPS decide.
+ *
+ * Threshold semantics: a partner is kept when
+ * `(top_score - score) / max(|top_score|, ε) ≤ tieWindowPct / 100`.
+ * Using a percentage of the top score (not an absolute delta) keeps
+ * the gate scale-invariant — a 1 % gap between two OHs is the same
+ * "closeness" whether the dot products are 500 or 5000.
+ */
+export function pickCloseOHsForMH(opts: PickCloseOHsOptions): PickCloseOHsResult {
+  const base = pickBestOHForMH(opts);
+  if (!base.bestOH || base.rankedScores.length === 0) {
+    return { partners: [], rankedScores: base.rankedScores };
+  }
+
+  const tieWindowPct = opts.tieWindowPct ?? OH_SUBSIM_TIE_PCT;
+  const maxPartners = opts.maxPartners ?? OH_SUBSIM_MAX_PARTNERS;
+  const topScore = base.rankedScores[0]!.predicted_score;
+  const denom = Math.max(Math.abs(topScore), 1e-9);
+
+  const partners: ParsedItem[] = [];
+  for (const r of base.rankedScores) {
+    if (partners.length >= maxPartners) break;
+    const gap = (topScore - r.predicted_score) / denom;
+    if (gap * 100 <= tieWindowPct) {
+      partners.push(r.oh);
+    } else {
+      break; // ranked desc — first non-close means no further are close
+    }
+  }
+
+  return { partners, rankedScores: base.rankedScores };
 }

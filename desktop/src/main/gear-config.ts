@@ -102,6 +102,32 @@ export const TRINKET_ITERATIONS = 3000;
 export const SWAP_TEST_ITERATIONS = 2000;
 
 // ---------------------------------------------------------------------------
+// OH sub-sim (oh-pairing.ts; consumed by greedy-search.ts)
+// ---------------------------------------------------------------------------
+
+/**
+ * % below the best-predicted OH score that counts as "close." When
+ * multiple OHs are within this band, greedy emits one `(mh, oh)` swap
+ * per close partner instead of locking the single best — letting the
+ * sim resolve close calls instead of trusting the stat-vector estimate.
+ *
+ * Stat-vector predictions are an approximation: OH stat budgets are
+ * small (~5-10% of MH) and on-use / proc effects are invisible to the
+ * dot product. 1.0% is wider than the catalog tie window (0.1%) but
+ * tighter than the gear-coarse keep threshold (1%) — captures the
+ * cases where prediction noise could realistically flip the winner.
+ */
+export const OH_SUBSIM_TIE_PCT = 1.0;
+
+/**
+ * Hard cap on how many close OHs greedy will sub-sim for a single MH.
+ * Combinatorial growth: 5 MH candidates × 3 OH partners = 15 weapon
+ * profilesets per greedy iter. Three keeps the budget bounded while
+ * giving room for an MH whose top partners are genuinely close.
+ */
+export const OH_SUBSIM_MAX_PARTNERS = 3;
+
+// ---------------------------------------------------------------------------
 // Ignore list (ignore-list.ts)
 // ---------------------------------------------------------------------------
 
