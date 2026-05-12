@@ -211,8 +211,19 @@ export interface PassHistoryEntry {
   finished_at: number;
   /** Stat weights computed at end-of-pass against the pass's converged actor. */
   weights?: StatWeights;
+  /**
+   * Per-stat v2/v1 ratios (this pass's weights divided by the pass's
+   * BASELINE weights — pass-1's baseline is the initial scan; pass-2's
+   * baseline is pass-1's end-of-pass weights). Always populated when
+   * both endpoints have meaningful values, regardless of whether any
+   * trigger fired — gives the addon panel a permanent record of how
+   * much actor state shifted on each pass. Stat keys: `crit`, `haste`,
+   * `mastery`, `versatility` (primary stats excluded; their swings are
+   * dominated by ilvl scaling, not actor state).
+   */
+  weight_deltas?: Record<string, number>;
   /** Triggers that fired AT THE END of this pass (i.e. reasons the NEXT pass would run, if any). */
-  triggers?: Array<'weights' | 'consumables' | 'trinket'>;
+  triggers?: Array<'weights' | 'weights_rank' | 'consumables' | 'trinket'>;
   /**
    * Human-readable detail strings describing each trigger (mirrors
    * `formatReconvergeReason` output). Stored alongside `triggers` so the

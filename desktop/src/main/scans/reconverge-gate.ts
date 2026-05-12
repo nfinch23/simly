@@ -43,6 +43,28 @@ import type { StatWeights } from '@simly/shared';
 export const WEIGHT_SHIFT_THRESHOLD = 0.25;
 
 /**
+ * Tolerance for the WEIGHTS_RANK trigger. Two stats are considered
+ * "clearly separated" in a given pass when their ratio exceeds
+ * 1 + this value (i.e., the dominant one is at least 10% bigger).
+ *
+ * A rank FLIP is recorded when stats A and B were clearly separated
+ * in v1 with A > B, AND in v2 are clearly separated with B > A.
+ * Ties (stats within the tolerance) on either side do not count as
+ * flips — that catches sim-noise jitter without false-firing on
+ * stats that have always been roughly equivalent.
+ *
+ * 0.10 chosen because 1000-iter scale-factor sims show typical noise
+ * of ~5% per-stat; 10% is comfortably outside that envelope.
+ *
+ * Real-world signal this catches: a "soft" breakpoint. Mastery
+ * dominates pre-converge; the converged gear pushes haste over a
+ * GCD floor and haste now dominates. Individual magnitudes might
+ * not change >25% (the WEIGHTS threshold), but the *priority order*
+ * for future gear decisions clearly has.
+ */
+export const RANK_FLIP_TOLERANCE = 0.10;
+
+/**
  * Stats that count for the WEIGHTS trigger. Primary stats (intellect /
  * strength / agility) deliberately excluded — their marginal value is
  * dominated by ilvl scaling, not actor state, so a primary-stat weight
@@ -67,6 +89,16 @@ export type ReconvergeReason =
       ratio: number;
     }
   | {
+      kind: 'weights_rank';
+      /** The two stats that swapped dominance. */
+      stat_a: TriggeredStat;
+      stat_b: TriggeredStat;
+      /** Ratio stat_a / stat_b in pass v1 (always > 1 by construction). */
+      v1_ratio: number;
+      /** Ratio stat_b / stat_a in pass v2 (always > 1 by construction). */
+      v2_ratio: number;
+    }
+  | {
       kind: 'consumables';
       consumable: 'flask' | 'food';
       v1_item_id: number | undefined;
@@ -75,6 +107,108 @@ export type ReconvergeReason =
   | {
       kind: 'trinket';
     };
+
+/**
+ * Detect every pair of secondary stats that clearly swapped dominance
+ * between v1 and v2. A "clear" swap requires both versions to separate
+ * the pair by more than RANK_FLIP_TOLERANCE — pairs that were within
+ * tolerance in either version are skipped (they were already tied,
+ * not flipped).
+ *
+ * Pairs are returned in a stable order (the pair where stat_a appears
+ * earlier in TRIGGERED_STATS comes first) so the diagnostic output is
+ * deterministic across runs.
+ */
+export function detectRankFlips(
+  weights_v1: Readonly<Record<string, number | undefined>>,
+  weights_v2: Readonly<Record<string, number | undefined>>,
+  tolerance: number = RANK_FLIP_TOLERANCE,
+): Array<{
+  stat_a: TriggeredStat;
+  stat_b: TriggeredStat;
+  v1_ratio: number;
+  v2_ratio: number;
+}> {
+  const flips: Array<{
+    stat_a: TriggeredStat;
+    stat_b: TriggeredStat;
+    v1_ratio: number;
+    v2_ratio: number;
+  }> = [];
+
+  for (let i = 0; i < TRIGGERED_STATS.length; i++) {
+    for (let j = i + 1; j < TRIGGERED_STATS.length; j++) {
+      const a = TRIGGERED_STATS[i]!;
+      const b = TRIGGERED_STATS[j]!;
+      const a_v1 = weights_v1[a];
+      const b_v1 = weights_v1[b];
+      const a_v2 = weights_v2[a];
+      const b_v2 = weights_v2[b];
+      if (
+        a_v1 === undefined ||
+        b_v1 === undefined ||
+        a_v2 === undefined ||
+        b_v2 === undefined
+      ) {
+        continue;
+      }
+      if (a_v1 <= 0 || b_v1 <= 0 || a_v2 <= 0 || b_v2 <= 0) continue;
+
+      const v1_ratio_ab = a_v1 / b_v1; // > 1 ⇒ A dominates in v1
+      const v2_ratio_ab = a_v2 / b_v2; // > 1 ⇒ A still dominates in v2
+
+      // A clearly dominated B in v1 (>= 1 + tolerance), and B clearly
+      // dominates A in v2.
+      if (v1_ratio_ab > 1 + tolerance && v2_ratio_ab < 1 / (1 + tolerance)) {
+        flips.push({
+          stat_a: a,
+          stat_b: b,
+          v1_ratio: v1_ratio_ab,
+          v2_ratio: b_v2 / a_v2,
+        });
+        continue;
+      }
+      // B clearly dominated A in v1, and A clearly dominates B in v2.
+      if (v1_ratio_ab < 1 / (1 + tolerance) && v2_ratio_ab > 1 + tolerance) {
+        flips.push({
+          stat_a: b,
+          stat_b: a,
+          v1_ratio: b_v1 / a_v1,
+          v2_ratio: v2_ratio_ab,
+        });
+        continue;
+      }
+    }
+  }
+
+  return flips;
+}
+
+/**
+ * Compute per-stat v2/v1 ratios for every secondary stat present in
+ * both weight maps with non-zero v1. Used to write `weight_deltas`
+ * into pass_history regardless of whether any trigger fired —
+ * gives the addon panel + future devex tools a visible record of how
+ * much actor state shifted on each pass.
+ *
+ * Stats missing from either side or with zero v1 are omitted from
+ * the output (avoids divide-by-zero and noise from spec-irrelevant
+ * stats).
+ */
+export function computeWeightDeltas(
+  weights_v1: Readonly<Record<string, number | undefined>>,
+  weights_v2: Readonly<Record<string, number | undefined>>,
+): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const stat of TRIGGERED_STATS) {
+    const v1 = weights_v1[stat];
+    const v2 = weights_v2[stat];
+    if (v1 === undefined || v2 === undefined) continue;
+    if (v1 === 0) continue;
+    out[stat] = v2 / v1;
+  }
+  return out;
+}
 
 export interface ReconvergeGateInput {
   /** Stat weights from the initial pre-gear-search scale-factor sim. */
@@ -116,7 +250,9 @@ export function shouldTriggerPass2(
 ): ReconvergeGateResult {
   const reasons: ReconvergeReason[] = [];
 
-  // --- Trigger A: stat-weights shift past threshold on any secondary.
+  // --- Trigger A: stat-weights magnitude shift past threshold on any
+  // secondary. Catches "hard" breakpoints — a stat's marginal value
+  // halved/doubled.
   if (input.weights_v1 && input.weights_v2) {
     for (const stat of TRIGGERED_STATS) {
       const v1 = input.weights_v1[stat];
@@ -130,6 +266,16 @@ export function shouldTriggerPass2(
       if (Math.abs(ratio - 1) > WEIGHT_SHIFT_THRESHOLD) {
         reasons.push({ kind: 'weights', stat, v1, v2, ratio });
       }
+    }
+
+    // --- Trigger A2: WEIGHTS_RANK. Even if no single stat shifted past
+    // the magnitude threshold, a "soft" breakpoint can flip the
+    // PRIORITY ORDER of secondaries (e.g., crit > haste in v1, haste >
+    // crit in v2). That's a strong signal future gear decisions will
+    // disagree with pass-1's pick, so re-search is warranted.
+    const flips = detectRankFlips(input.weights_v1, input.weights_v2);
+    for (const flip of flips) {
+      reasons.push({ kind: 'weights_rank', ...flip });
     }
   }
 
@@ -184,6 +330,12 @@ export function formatReconvergeReason(reason: ReconvergeReason): string {
       const sign = pct >= 0 ? '+' : '';
       return `weights: ${reason.stat} shifted ${sign}${pct.toFixed(1)}% (${reason.v1.toFixed(2)} → ${reason.v2.toFixed(2)})`;
     }
+    case 'weights_rank':
+      return (
+        `weights_rank: ${reason.stat_a} vs ${reason.stat_b} flipped ` +
+        `(was ${reason.stat_a} ${reason.v1_ratio.toFixed(2)}× ${reason.stat_b}, ` +
+        `now ${reason.stat_b} ${reason.v2_ratio.toFixed(2)}× ${reason.stat_a})`
+      );
     case 'consumables':
       return `consumables: ${reason.consumable} winner flipped (item_id ${reason.v1_item_id} → ${reason.v2_item_id})`;
     case 'trinket':

@@ -14,6 +14,7 @@ import {
 } from '@simly/shared';
 import { hashGearContext, replaceGearInProfile } from './profile-builder';
 import {
+  computeWeightDeltas,
   formatReconvergeReason,
   shouldTriggerPass2,
 } from './scans/reconverge-gate';
@@ -1161,10 +1162,219 @@ export class ScanQueue {
           weights_v1: weightsV1,
           weights_v2: weightsV2,
         });
-        if (gate.shouldTrigger) {
+        // Debug override: `SIMLY_FORCE_PASS2=1 npm run dev` forces the
+        // dispatch path regardless of gate verdict. Useful for live-
+        // verifying the dispatch on characters whose gear converges
+        // stably (Felfriend-style) without resorting to threshold-
+        // mangling. Surfaces in the log so it's never silent.
+        if (process.env.SIMLY_FORCE_PASS2 === '1' && !gate.shouldTrigger) {
           console.log(
-            `[gear] pass-2 WOULD trigger (slice 2a diagnostic; dispatch is slice 2b): ${gate.reasons.map(formatReconvergeReason).join(' | ')}`,
+            `[gear] SIMLY_FORCE_PASS2=1 — forcing pass-2 despite stable gate verdict (debug only)`,
           );
+          gate.shouldTrigger = true;
+          gate.reasons = [
+            { kind: 'weights', stat: 'haste', v1: 1, v2: 1, ratio: 1 },
+          ];
+        }
+
+        // Always compute weight_deltas — surfaces what shifted even
+        // when no trigger fires. Useful for tuning thresholds and for
+        // the user to see "your gear didn't move haste much" at a
+        // glance.
+        const weightDeltas =
+          weightsV2 !== undefined ? computeWeightDeltas(weightsV1, weightsV2) : undefined;
+        if (weightDeltas) {
+          const deltaStr = Object.entries(weightDeltas)
+            .map(([stat, ratio]) => {
+              const pct = (ratio - 1) * 100;
+              const sign = pct >= 0 ? '+' : '';
+              return `${stat}=${sign}${pct.toFixed(1)}%`;
+            })
+            .join(' ');
+          console.log(`[gear] weight_deltas (post-pass-1 vs baseline): ${deltaStr}`);
+        }
+
+        let pass2RanAndWon = false;
+        if (gate.shouldTrigger && weightsV2 !== undefined && args.parsedExport) {
+          console.log(
+            `[gear] PASS 2 triggered: ${gate.reasons.map(formatReconvergeReason).join(' | ')}`,
+          );
+
+          // P2.1: trinket re-prescan against the converged actor.
+          // We always do a full pool sim (3000 iter) — the gear context
+          // is new, so cache wouldn't hit anyway, and the marginal cost
+          // of caching pass-2 results is small.
+          let p2TrinketLock: TrinketLock | undefined;
+          const trinkets = getTrinketPool(args.parsedExport);
+          if (trinkets.length >= 2) {
+            const tp2Started = Math.floor(Date.now() / 1000);
+            const tp2T0 = Date.now();
+            const tp2Progress = makeStageProgressLogger(
+              'trinket_pre_scan (pass 2)',
+              args.characterKey,
+            );
+            try {
+              const r = await runTrinketPreScanSim({
+                paths: runnerPaths,
+                baseProfile: convergedProfile,
+                trinkets,
+                iterations: s.trinketIterations,
+                onProgress: tp2Progress.onProgress,
+              });
+              const pairs = parseTrinketPreScanResult(r.run, r.pairsByName).pairs;
+              const data = finalizeTrinketResult(pairs);
+              const tp2Finished = Math.floor(Date.now() / 1000);
+              tp2Progress.stop();
+              const tp2dt = ((Date.now() - tp2T0) / 1000).toFixed(1);
+              const winnerStr = data.winner
+                ? `${data.winner.trinket1.name} + ${data.winner.trinket2.name} @ ${Math.round(data.winner.mean_dps)} dps`
+                : '(no winner)';
+              console.log(
+                `[sim] trinket_pre_scan (pass 2, ${tp2dt}s, ${data.pairs.length} pair(s)): ${winnerStr}`,
+              );
+              // Lock the new winning pair for the pass-2 gear ladder.
+              if (data.winner) {
+                const meta = r.pairsByName.get(data.winner.pair_id);
+                if (meta) p2TrinketLock = { trinket1: meta.t1, trinket2: meta.t2 };
+              }
+              // Cache pass-2 result keyed on gear_context_hash so future
+              // pass-1 runs that converge to the same gear can reuse.
+              if (this.trinketCache) {
+                try {
+                  this.trinketCache.put({
+                    character_key: args.characterKey,
+                    scenario: args.scenario,
+                    pool_signature: poolSignature(trinkets),
+                    gear_context_hash: gearContextHash,
+                    pairs: data.pairs,
+                    top_trinket_identities: selectTopTrinkets(
+                      data.pairs,
+                      s.topTrinketsToKeep,
+                    ),
+                    last_simmed_at: tp2Finished,
+                  });
+                } catch (err) {
+                  console.warn(
+                    '[sim] pass-2 trinket cache write failed:',
+                    (err as Error).message,
+                  );
+                }
+              }
+              // Overwrite scans.trinket_pre_scan with the pass-2 result
+              // so the addon panel reflects the latest pair decision.
+              scans.trinket_pre_scan = {
+                status: 'done',
+                started_at: tp2Started,
+                finished_at: tp2Finished,
+                data,
+              };
+            } catch (err) {
+              tp2Progress.stop();
+              console.error(
+                '[sim] pass-2 trinket pre-scan failed:',
+                (err as Error).message,
+              );
+            }
+          }
+
+          // P2.2: re-run greedy + breakpoint with new locks + weights_v2.
+          if (p2TrinketLock) {
+            const gc2Started = Math.floor(Date.now() / 1000);
+            const gc2T0 = Date.now();
+            const gc2Progress = makeStageProgressLogger(
+              'gear_search (pass 2)',
+              args.characterKey,
+            );
+            try {
+              const catalogForP2 = this.gearCatalog?.get(
+                args.characterKey,
+                args.scenario,
+              );
+              const pass1WinnerDps =
+                (scans.gear_final?.data as GearScanResult | undefined)?.winner
+                  ?.mean_dps ?? 100_000;
+              const greedyResult2 = await runGreedyGearPipeline({
+                paths: runnerPaths,
+                baseProfile: convergedProfile,
+                parsed: args.parsedExport,
+                weights: weightsV2,
+                trinketLock: p2TrinketLock,
+                catalog: catalogForP2,
+                bestLoadoutDps: pass1WinnerDps,
+                greedyIterations: s.coarseIterations,
+                breakpointIterations: s.refinedIterations,
+                tieWindowPct: TIE_WINDOW_PCT,
+                onProgress: gc2Progress.onProgress,
+              });
+              gc2Progress.stop();
+              const gc2dt = ((Date.now() - gc2T0) / 1000).toFixed(1);
+              const w2 = greedyResult2.result.winner;
+              console.log(
+                `[sim] greedy gear search (pass 2, ${gc2dt}s): ` +
+                  (w2
+                    ? `winner ${w2.combo_id} @ ${Math.round(w2.mean_dps)} dps ` +
+                      `(${greedyResult2.greedyIterations} greedy iter, ${greedyResult2.breakpointCombos} breakpoint combos)`
+                    : '(no improvement found)'),
+              );
+
+              // Compare pass-2 winner against pass-1's. Only overwrite
+              // when pass-2 actually improved DPS — sim noise can let a
+              // pass-2 run "find" a regression. Tie window: 0.05 % to
+              // avoid flipping on noise.
+              if (
+                greedyResult2.finalDps > 0 &&
+                greedyResult2.finalDps > pass1WinnerDps * 1.0005
+              ) {
+                scans.gear_final = {
+                  status: 'done',
+                  started_at: gc2Started,
+                  finished_at: Math.floor(Date.now() / 1000),
+                  data: greedyResult2.result,
+                };
+                pass2RanAndWon = true;
+                console.log(
+                  `[gear] PASS 2 winner improved DPS: ${Math.round(pass1WinnerDps)} → ${Math.round(greedyResult2.finalDps)} (+${(((greedyResult2.finalDps - pass1WinnerDps) / pass1WinnerDps) * 100).toFixed(2)}%); overwriting gear_final`,
+                );
+                // Update catalog with pass-2 winner.
+                if (this.gearCatalog) {
+                  try {
+                    const prior = this.gearCatalog.get(
+                      args.characterKey,
+                      args.scenario,
+                    );
+                    const updated = updateCatalogFromGearScan({
+                      prior,
+                      character_key: args.characterKey,
+                      scenario: args.scenario,
+                      pool_signature: fullPoolSignature(args.parsedExport),
+                      combos: greedyResult2.result.combos,
+                      parsedExport: args.parsedExport,
+                    });
+                    this.gearCatalog.put(updated);
+                  } catch (err) {
+                    console.warn(
+                      '[catalog] pass-2 update failed:',
+                      (err as Error).message,
+                    );
+                  }
+                }
+              } else {
+                console.log(
+                  `[gear] PASS 2 result did NOT improve DPS (${Math.round(greedyResult2.finalDps)} vs pass-1 ${Math.round(pass1WinnerDps)}); keeping pass-1 winner`,
+                );
+              }
+            } catch (err) {
+              gc2Progress.stop();
+              console.error(
+                '[sim] pass-2 gear pipeline failed:',
+                (err as Error).message,
+              );
+            }
+          } else {
+            console.log(
+              `[gear] PASS 2 skipped (no trinket lock after re-prescan)`,
+            );
+          }
         } else if (weightsV2 !== undefined) {
           console.log(
             `[gear] pass-2 not needed (weights stable post-pass-1; gear_context_hash=${gearContextHash})`,
@@ -1175,9 +1385,21 @@ export class ScanQueue {
           pass: 1,
           finished_at: Math.floor(Date.now() / 1000),
           weights: weightsV2 ?? weightsV1,
+          weight_deltas: weightDeltas,
           triggers: gate.reasons.map((r) => r.kind),
           trigger_details: gate.reasons.map(formatReconvergeReason),
         });
+        if (pass2RanAndWon) {
+          passHistory.push({
+            pass: 2,
+            finished_at: Math.floor(Date.now() / 1000),
+            weights: weightsV2,
+            // No pass-3 — capped here. Triggers are forensic (would
+            // they have fired again?) but we don't run another
+            // stat-weights sim to check; that'd cost another 1.7s
+            // for no behavior change at the 2-pass cap.
+          });
+        }
       }
 
       // Stage 2: consumables (flask + food) via profileset sim.
