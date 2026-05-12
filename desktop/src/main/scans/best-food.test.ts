@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { buildFoodProfilesetLines, parseBestFood, FOOD_CANDIDATES } from './best-food';
+import {
+  buildFoodProfilesetLines,
+  parseBestFood,
+  pickWinningFoodSimcKey,
+  FOOD_CANDIDATES,
+} from './best-food';
 import type { SimcRunResult } from '../simc-runner';
 
 function makeRun(profilesets: Array<{ name: string; mean: number }>): SimcRunResult {
@@ -92,5 +97,24 @@ describe('parseBestFood', () => {
     const result = parseBestFood(run);
     expect(result?.best.name).toBe('Blooming Feast');
     expect(result?.alternatives).toHaveLength(0);
+  });
+});
+
+describe('pickWinningFoodSimcKey', () => {
+  it('returns the simcFood identifier of the highest-DPS profileset', () => {
+    const run = makeRun([
+      { name: 'food_blooming_feast', mean: 700 },
+      { name: 'food_silvermoon_parade', mean: 720 },
+      { name: 'food_royal_roast', mean: 690 },
+    ]);
+    expect(pickWinningFoodSimcKey(run)).toBe('silvermoon_parade');
+  });
+
+  it('returns undefined when no food profilesets are present', () => {
+    const run = makeRun([
+      { name: 'flask_magisters', mean: 9999 },
+      { name: 'unrelated', mean: 1234 },
+    ]);
+    expect(pickWinningFoodSimcKey(run)).toBeUndefined();
   });
 });

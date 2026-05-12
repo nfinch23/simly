@@ -7,7 +7,7 @@ import {
   type Scan,
 } from './index';
 
-interface FoodCandidate {
+export interface FoodCandidate {
   key: string;
   item_id: number;
   name: string;
@@ -61,6 +61,18 @@ export function buildFoodProfilesetLines(): string {
       simcLine: `food=${c.simcFood}`,
     })),
   );
+}
+
+/**
+ * Pick the winning food's SimC key (e.g. `silvermoon_parade`) from a
+ * SimC run that included the food profilesets. See `pickWinningFlaskSimcKey`
+ * for the motivation — symmetric helper for food.
+ */
+export function pickWinningFoodSimcKey(run: SimcRunResult): string | undefined {
+  const matched = matchProfilesetsByPrefix(run, PREFIX, FOOD_CANDIDATES);
+  if (matched.length === 0) return undefined;
+  matched.sort((a, b) => b.mean - a.mean);
+  return matched[0]!.candidate.simcFood;
 }
 
 export function parseBestFood(run: SimcRunResult): BestFoodResult | undefined {

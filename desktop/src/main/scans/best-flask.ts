@@ -7,7 +7,7 @@ import {
   type Scan,
 } from './index';
 
-interface FlaskCandidate {
+export interface FlaskCandidate {
   key: string;
   item_id: number;
   name: string;
@@ -50,6 +50,25 @@ export function buildFlaskProfilesetLines(): string {
       simcLine: `flask=${c.simcFlask}`,
     })),
   );
+}
+
+/**
+ * Pick the winning flask's SimC key (e.g. `flask_of_the_blood_knights_2`)
+ * from a SimC run that included the flask profilesets. Returns undefined
+ * when no flask profileset was found in the run output — caller decides
+ * whether to skip the consumables lock or fall back.
+ *
+ * Used by the pass-1 consumables prescan to feed the winning key into
+ * `setConsumablesInProfile()` so gear search runs with the flask locked
+ * in. The parsed `best.item_id` is currently a placeholder `0` (see the
+ * FLASK_CANDIDATES comment), so we have to surface the key from the
+ * candidate definition directly.
+ */
+export function pickWinningFlaskSimcKey(run: SimcRunResult): string | undefined {
+  const matched = matchProfilesetsByPrefix(run, PREFIX, FLASK_CANDIDATES);
+  if (matched.length === 0) return undefined;
+  matched.sort((a, b) => b.mean - a.mean);
+  return matched[0]!.candidate.simcFlask;
 }
 
 export function parseBestFlask(run: SimcRunResult): BestFlaskResult | undefined {

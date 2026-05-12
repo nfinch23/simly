@@ -170,6 +170,37 @@ describe('shouldTriggerPass2', () => {
     }
   });
 
+  it('fires CONSUMABLES trigger when flask SimC key flips (string identifiers)', () => {
+    // Real-world orchestrator path: the prescan / re-eval winners are
+    // SimC key strings (e.g. flask_of_the_magisters_2), not numeric
+    // item_ids, because the best.item_id field is currently a placeholder
+    // 0 — same string flowing into setConsumablesInProfile.
+    const result = shouldTriggerPass2({
+      flask_v1_item_id: 'flask_of_the_magisters_2',
+      flask_v2_item_id: 'flask_of_the_blood_knights_2',
+      food_v1_item_id: 'silvermoon_parade',
+      food_v2_item_id: 'silvermoon_parade',
+    });
+    expect(result.shouldTrigger).toBe(true);
+    const r = result.reasons[0]!;
+    expect(r.kind).toBe('consumables');
+    if (r.kind === 'consumables') {
+      expect(r.consumable).toBe('flask');
+      expect(r.v1_item_id).toBe('flask_of_the_magisters_2');
+      expect(r.v2_item_id).toBe('flask_of_the_blood_knights_2');
+    }
+  });
+
+  it('does NOT fire CONSUMABLES trigger when flask SimC keys match', () => {
+    const result = shouldTriggerPass2({
+      flask_v1_item_id: 'flask_of_the_magisters_2',
+      flask_v2_item_id: 'flask_of_the_magisters_2',
+      food_v1_item_id: 'silvermoon_parade',
+      food_v2_item_id: 'silvermoon_parade',
+    });
+    expect(result.shouldTrigger).toBe(false);
+  });
+
   it('fires CONSUMABLES trigger when food winner flips', () => {
     const result = shouldTriggerPass2({
       flask_v1_item_id: 100,

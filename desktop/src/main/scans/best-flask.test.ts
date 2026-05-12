@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { buildFlaskProfilesetLines, parseBestFlask, FLASK_CANDIDATES } from './best-flask';
+import {
+  buildFlaskProfilesetLines,
+  parseBestFlask,
+  pickWinningFlaskSimcKey,
+  FLASK_CANDIDATES,
+} from './best-flask';
 import type { SimcRunResult } from '../simc-runner';
 
 function makeRun(profilesets: Array<{ name: string; mean: number }>): SimcRunResult {
@@ -105,5 +110,29 @@ describe('parseBestFlask', () => {
   it('rounds dps to integers (Lua doesn\'t care about float precision here)', () => {
     const run = makeRun([{ name: 'flask_blood_knights', mean: 642.7 }]);
     expect(parseBestFlask(run)?.best.dps).toBe(643);
+  });
+});
+
+describe('pickWinningFlaskSimcKey', () => {
+  it('returns the simcFlask identifier of the highest-DPS profileset', () => {
+    const run = makeRun([
+      { name: 'flask_blood_knights', mean: 640 },
+      { name: 'flask_magisters', mean: 700 },
+      { name: 'flask_shattered_sun', mean: 680 },
+    ]);
+    expect(pickWinningFlaskSimcKey(run)).toBe('flask_of_the_magisters_2');
+  });
+
+  it('returns undefined when no flask profilesets are present', () => {
+    const run = makeRun([
+      { name: 'food_silvermoon_parade', mean: 9999 },
+      { name: 'something_else', mean: 1234 },
+    ]);
+    expect(pickWinningFlaskSimcKey(run)).toBeUndefined();
+  });
+
+  it('still picks a winner when only one flask profileset matched', () => {
+    const run = makeRun([{ name: 'flask_blood_knights', mean: 640 }]);
+    expect(pickWinningFlaskSimcKey(run)).toBe('flask_of_the_blood_knights_2');
   });
 });

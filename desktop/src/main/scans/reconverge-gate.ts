@@ -131,8 +131,20 @@ export type ReconvergeReason =
   | {
       kind: 'consumables';
       consumable: 'flask' | 'food';
-      v1_item_id: number | undefined;
-      v2_item_id: number | undefined;
+      /**
+       * v1/v2 identifiers for the consumable. Accepts either the SimC
+       * key string (e.g. `flask_of_the_magisters_2`) or a numeric
+       * item_id. v1 = baseline prescan winner, v2 = post-gear re-eval
+       * winner. The trigger fires whenever v1 ≠ v2.
+       *
+       * Keep both string and number shapes: best-flask/best-food's
+       * parsed `best.item_id` is currently a placeholder `0` (item_ids
+       * not yet wired through `data/`), so the orchestrator passes the
+       * SimC key string instead. Older tests that use numeric ids
+       * continue to type-check.
+       */
+      v1_item_id: string | number | undefined;
+      v2_item_id: string | number | undefined;
     }
   | {
       kind: 'trinket';
@@ -332,12 +344,18 @@ export interface ReconvergeGateInput {
   weights_v1?: StatWeights;
   /** Stat weights re-run against the gear that pass 1 converged on. */
   weights_v2?: StatWeights;
-  /** Item id of the flask the baseline prescan locked in. Undefined if no flask scan ran. */
-  flask_v1_item_id?: number;
-  /** Item id of the flask the post-gear re-eval picked. Undefined if no flask re-eval ran. */
-  flask_v2_item_id?: number;
-  food_v1_item_id?: number;
-  food_v2_item_id?: number;
+  /**
+   * Identifier for the flask the baseline prescan locked in. Either a
+   * SimC key string (e.g. `flask_of_the_magisters_2` — what the
+   * orchestrator currently passes, since item_ids are placeholder 0)
+   * or a numeric item_id (for tests / future callers). Undefined if
+   * no flask prescan ran.
+   */
+  flask_v1_item_id?: string | number;
+  /** Same shape as flask_v1_item_id, from the post-gear re-eval. */
+  flask_v2_item_id?: string | number;
+  food_v1_item_id?: string | number;
+  food_v2_item_id?: string | number;
   /**
    * Pre-computed result of "does stat-vector × new-actor-stats predict
    * a different trinket pair than the locked pair?" The caller owns
