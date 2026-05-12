@@ -196,6 +196,31 @@ export interface ScanCollection {
   [scanId: string]: ScanRecord<unknown> | undefined;
 }
 
+/**
+ * One row in the pass-history log produced by the two-pass stat-reconverge
+ * pipeline. Optional and additive: scenarios run by older orchestrator code
+ * (or by future code that skips re-convergence) will not write this field.
+ *
+ * Pass 1 is always recorded. Pass 2 is recorded only when the reconverge
+ * gate fired. `triggers` enumerates which gate condition(s) caused the
+ * follow-up pass — diagnostic only.
+ */
+export interface PassHistoryEntry {
+  pass: 1 | 2;
+  /** Unix seconds the pass finished. */
+  finished_at: number;
+  /** Stat weights computed at end-of-pass against the pass's converged actor. */
+  weights?: StatWeights;
+  /** Triggers that fired AT THE END of this pass (i.e. reasons the NEXT pass would run, if any). */
+  triggers?: Array<'weights' | 'consumables' | 'trinket'>;
+  /**
+   * Human-readable detail strings describing each trigger (mirrors
+   * `formatReconvergeReason` output). Stored alongside `triggers` so the
+   * addon panel can render the explanation without re-deriving it.
+   */
+  trigger_details?: string[];
+}
+
 /** Per-scenario result bucket stored inside SimlyResults.scenarios. */
 export interface ScenarioResults {
   generated_at: number;
@@ -203,6 +228,13 @@ export interface ScenarioResults {
   scans: ScanCollection;
   composed?: ComposedLoadout;
   catalog_summary?: CatalogSummary;
+  /**
+   * Pass history for the two-pass stat-reconverge pipeline. Optional and
+   * additive — absent on scenarios written by single-pass orchestrators
+   * or by future orchestrators that skipped re-convergence (no triggers
+   * fired). When present, length is 1 (pass 1 only) or 2 (pass 2 ran).
+   */
+  pass_history?: PassHistoryEntry[];
 }
 
 export interface SimlyResults {
