@@ -129,6 +129,20 @@ This project uses one feature branch per slice.
 - Pick the slice name yourself (short kebab-case noun phrase reflecting the work — e.g. `calibrated-pruner`, `m-plus-status-fix`, `auto-name-slices`). Tell the user what you picked in your first response of the session — do not ask them to name it. If the user explicitly says "call this <name>", use their name instead.
 - Create the feature branch: `git checkout -b feat/<slice-name>`
 - Do not work on the default branch directly
+- **Verify (and if needed, repoint) the in-game AddOn junction.** WoW loads addon code from `C:\Program Files (x86)\World of Warcraft\_retail_\Interface\AddOns\Simly`, which is a junction that should point to *this worktree's* `addon/` directory. When a prior worktree gets deleted, the junction goes stale and WoW reports "Simly: Dependency missing" (because it can't even read the .toc) — the symptom is misleading, the cause is a dangling junction. Run the check + auto-fix below; it's idempotent and safe to run unconditionally at session start.
+
+  ```powershell
+  $expected = "$PWD\addon"
+  $junction = 'C:\Program Files (x86)\World of Warcraft\_retail_\Interface\AddOns\Simly'
+  $current = (Get-Item $junction -ErrorAction SilentlyContinue).Target
+  if ($current -ne $expected) {
+    if (Test-Path $junction) { Remove-Item $junction -Force }
+    New-Item -ItemType Junction -Path $junction -Target $expected | Out-Null
+    "[junction] repointed Simly addon → $expected"
+  } else {
+    "[junction] already pointing at this worktree"
+  }
+  ```
 
 **During the session:**
 - Commit per logical unit on the feature branch (a function + its passing test, or a small cohesive change)
