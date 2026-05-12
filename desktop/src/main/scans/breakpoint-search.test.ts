@@ -3,6 +3,7 @@ import {
   applyComboToLoadout,
   buildBreakpointDiagnostics,
   buildBreakpointScript,
+  expandWeaponCombosWithCloseOHs,
   generateCombos,
   loadoutToBestLoadoutSlots,
   predictComboScore,
@@ -696,5 +697,182 @@ describe('prioritizeCombos', () => {
     });
     // Two ring slots, each gaining +10 int × 1 dps_per_int = 20 total.
     expect(out[0]!.predicted_score).toBeCloseTo(20, 6);
+  });
+});
+
+describe('expandWeaponCombosWithCloseOHs', () => {
+  const weights: StatWeightsLike = { intellect: 1, haste: 1 };
+
+  it('passes combos through unchanged when weights are not supplied (no ranking possible)', () => {
+    const combo: BreakpointCombo = {
+      id: 'bp_x',
+      swaps: { chest: makeItem('chest', 'C', 270, rawStats({ intellect: 100 })) },
+    };
+    const out = expandWeaponCombosWithCloseOHs({
+      combos: [combo],
+      converged: {},
+      bagItems: [],
+    });
+    expect(out).toEqual([combo]);
+  });
+
+  it('passes 2H combos through unchanged (clearOffHand → no OH to pick)', () => {
+    const combo: BreakpointCombo = {
+      id: 'bp_2h',
+      swaps: {
+        chest: makeItem('chest', 'C', 270, rawStats({ intellect: 100 })),
+        main_hand: makeWeapon({
+          slot: 'main_hand', identity: '2H', equipLoc: 'INVTYPE_2HWEAPON',
+          raw_stats: rawStats({ intellect: 200 }),
+        }),
+      },
+      clearOffHand: true,
+    };
+    const out = expandWeaponCombosWithCloseOHs({
+      combos: [combo],
+      converged: { off_hand: makeWeapon({ slot: 'off_hand', identity: 'EQ_OH', equipLoc: 'INVTYPE_HOLDABLE' }) },
+      bagItems: [makeWeapon({ slot: 'off_hand', identity: 'BAG_OH', equipLoc: 'INVTYPE_HOLDABLE' })],
+      weights,
+    });
+    expect(out).toEqual([combo]);
+  });
+
+  it('passes non-weapon combos through unchanged', () => {
+    const combo: BreakpointCombo = {
+      id: 'bp_nw',
+      swaps: {
+        chest: makeItem('chest', 'C', 270, rawStats({ intellect: 100 })),
+        legs: makeItem('legs', 'L', 270, rawStats({ intellect: 100 })),
+      },
+    };
+    const out = expandWeaponCombosWithCloseOHs({
+      combos: [combo],
+      converged: { off_hand: makeWeapon({ slot: 'off_hand', identity: 'EQ_OH', equipLoc: 'INVTYPE_HOLDABLE' }) },
+      bagItems: [],
+      weights,
+    });
+    expect(out).toEqual([combo]);
+  });
+
+  it('keeps a 1H combo as-is when the OH pool contains only one eligible item (decisive)', () => {
+    const mh = makeWeapon({
+      slot: 'main_hand', identity: '1H', equipLoc: 'INVTYPE_WEAPON',
+      raw_stats: rawStats({ intellect: 200 }),
+    });
+    const convOH = makeWeapon({
+      slot: 'off_hand', identity: 'EQ_OH', equipLoc: 'INVTYPE_HOLDABLE',
+      raw_stats: rawStats({ intellect: 100 }),
+    });
+    const combo: BreakpointCombo = {
+      id: 'bp_1h',
+      swaps: {
+        chest: makeItem('chest', 'C', 270, rawStats({ intellect: 50 })),
+        main_hand: mh,
+        off_hand: convOH,
+      },
+    };
+    const out = expandWeaponCombosWithCloseOHs({
+      combos: [combo],
+      converged: { off_hand: convOH },
+      bagItems: [],
+      weights,
+    });
+    expect(out).toHaveLength(1);
+    expect(out[0]!.id).toBe('bp_1h');
+  });
+
+  it('expands a 1H combo into one variant per close OH partner (sub-sim)', () => {
+    const mh = makeWeapon({
+      slot: 'main_hand', identity: '1H', equipLoc: 'INVTYPE_WEAPON',
+      raw_stats: rawStats({ intellect: 200 }),
+    });
+    // Two OHs with nearly-identical stat-vector scores → both within
+    // the 1% tie window.
+    const ohA = makeWeapon({
+      slot: 'off_hand', identity: 'OH_A', equipLoc: 'INVTYPE_HOLDABLE',
+      raw_stats: rawStats({ intellect: 100, haste_rating: 100 }),
+    });
+    const ohB = makeWeapon({
+      slot: 'off_hand', identity: 'OH_B', equipLoc: 'INVTYPE_HOLDABLE',
+      raw_stats: rawStats({ intellect: 99, haste_rating: 102 }),
+    });
+    const combo: BreakpointCombo = {
+      id: 'bp_1h',
+      swaps: {
+        chest: makeItem('chest', 'C', 270, rawStats({ intellect: 50 })),
+        main_hand: mh,
+        off_hand: ohA,
+      },
+    };
+    const out = expandWeaponCombosWithCloseOHs({
+      combos: [combo],
+      converged: { off_hand: ohA },
+      bagItems: [ohB],
+      weights,
+    });
+    // Two variants, one per partner. IDs share the base + an OH suffix.
+    expect(out).toHaveLength(2);
+    expect(out.every((c) => c.id.startsWith('bp_1h_oh'))).toBe(true);
+    const ohIdentities = out.map((c) => c.swaps['off_hand']!.identity).sort();
+    expect(ohIdentities).toEqual(['OH_A', 'OH_B']);
+  });
+
+  it('respects OH_SUBSIM_MAX_PARTNERS — caps expansion at 3 even when many are close', () => {
+    const mh = makeWeapon({
+      slot: 'main_hand', identity: '1H', equipLoc: 'INVTYPE_WEAPON',
+      raw_stats: rawStats({ intellect: 200 }),
+    });
+    // 4 nearly-identical OHs. With default maxPartners=3, only 3 emit.
+    const ohs = [1, 2, 3, 4].map((i) =>
+      makeWeapon({
+        slot: 'off_hand', identity: `OH${i}`, equipLoc: 'INVTYPE_HOLDABLE',
+        raw_stats: rawStats({ intellect: 100, haste_rating: 100 - i * 0.1 }),
+      }),
+    );
+    const combo: BreakpointCombo = {
+      id: 'bp_1h',
+      swaps: {
+        chest: makeItem('chest', 'C', 270, rawStats({ intellect: 50 })),
+        main_hand: mh,
+        off_hand: ohs[0]!,
+      },
+    };
+    const out = expandWeaponCombosWithCloseOHs({
+      combos: [combo],
+      converged: { off_hand: ohs[0]! },
+      bagItems: ohs.slice(1),
+      weights,
+    });
+    expect(out).toHaveLength(3);
+  });
+
+  it('deduplicates OH partners that appear in BOTH converged and bagItems', () => {
+    // The converged off_hand is also in bagItems (someone leveled an
+    // alt with the same OH); expandWeaponCombosWithCloseOHs's identity
+    // de-dupe should keep it as one.
+    const mh = makeWeapon({
+      slot: 'main_hand', identity: '1H', equipLoc: 'INVTYPE_WEAPON',
+      raw_stats: rawStats({ intellect: 200 }),
+    });
+    const oh = makeWeapon({
+      slot: 'off_hand', identity: 'OH', equipLoc: 'INVTYPE_HOLDABLE',
+      raw_stats: rawStats({ intellect: 100 }),
+    });
+    const combo: BreakpointCombo = {
+      id: 'bp_1h',
+      swaps: {
+        chest: makeItem('chest', 'C', 270, rawStats({ intellect: 50 })),
+        main_hand: mh,
+        off_hand: oh,
+      },
+    };
+    const out = expandWeaponCombosWithCloseOHs({
+      combos: [combo],
+      converged: { off_hand: oh },
+      bagItems: [oh],
+      weights,
+    });
+    // Only one OH in pool → single combo passes through unchanged.
+    expect(out).toHaveLength(1);
   });
 });

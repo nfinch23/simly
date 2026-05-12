@@ -30,6 +30,7 @@ import {
   type StatWeightsLike,
 } from './pruner-diagnostic';
 import { canPairAsOH, classifyWeapon, locksOffHand } from './weapon-config';
+import { pickCloseOHsForMH } from './oh-pairing';
 
 const BASELINE_NAME = 'bp_baseline';
 const MAX_REJECTED_FOR_TRIPLES = 15;
@@ -114,6 +115,15 @@ export interface RunBreakpointSearchOptions {
    * 2) to force the cap to bite without generating hundreds of items.
    */
   maxCombos?: number;
+  /**
+   * Bag pool used for OH sub-sim of 1H weapon combos. When supplied
+   * AND `weights` are present, each 1H-weapon-inclusive combo is
+   * expanded into one variant per close OH partner from this pool +
+   * the converged off_hand. Mirrors greedy's OH sub-sim behaviour
+   * from PR #35. Empty/undefined disables expansion (single combo
+   * with the converged OH, same as PR #38's behaviour).
+   */
+  bagItems?: readonly ParsedItem[];
   onProgress?: Parameters<typeof runSimc>[0]['onProgress'];
 }
 
@@ -259,6 +269,86 @@ export function predictComboScore(args: {
     weights: args.weights,
   });
   return predicted_delta_dps;
+}
+
+/**
+ * Expand each 1H-weapon-inclusive combo into one variant per close OH
+ * partner. Mirrors greedy's OH sub-sim ([PR #35]) — when the
+ * stat-vector predicts multiple OHs are within `OH_SUBSIM_TIE_PCT` of
+ * the best, emit all of them so the sim resolves the close call.
+ *
+ * Combos without a main_hand swap, or whose main_hand is 2H
+ * (`clearOffHand`), or that come with `weights === undefined` /
+ * empty `bagItems`, pass through unchanged. The expanded variants
+ * share the same core combo id but get a `_oh<hash>` suffix so they're
+ * distinct profileset names; the original combo (with the converged
+ * off_hand) is kept as one of the variants when the converged OH is
+ * among the close partners.
+ *
+ * Pure helper — no I/O.
+ */
+export function expandWeaponCombosWithCloseOHs(args: {
+  combos: readonly BreakpointCombo[];
+  converged: Record<string, ParsedItem>;
+  bagItems?: readonly ParsedItem[];
+  weights?: StatWeightsLike;
+}): BreakpointCombo[] {
+  // Without weights we can't rank OH partners — return combos as-is.
+  if (!args.weights) return [...args.combos];
+
+  // OH partner pool = OH-eligible bag items + the converged off_hand.
+  const ohPoolSet = new Map<string, ParsedItem>();
+  for (const item of args.bagItems ?? []) {
+    if (canPairAsOH(item)) ohPoolSet.set(item.identity, item);
+  }
+  const convOH = args.converged['off_hand'];
+  if (convOH && canPairAsOH(convOH)) ohPoolSet.set(convOH.identity, convOH);
+  const ohPool = [...ohPoolSet.values()];
+
+  if (ohPool.length === 0) return [...args.combos];
+
+  const out: BreakpointCombo[] = [];
+  for (const combo of args.combos) {
+    const mh = combo.swaps['main_hand'];
+    if (!mh || combo.clearOffHand || locksOffHand(mh) || classifyWeapon(mh) === 'NON_WEAPON') {
+      out.push(combo);
+      continue;
+    }
+    const pick = pickCloseOHsForMH({
+      mh,
+      ohCandidates: ohPool,
+      // StatWeightsLike and the shared StatWeights are structurally
+      // identical (catch-all index sig). Cast is to satisfy the strict
+      // shared-package import that pickCloseOHsForMH uses.
+      weights: args.weights as Parameters<typeof pickCloseOHsForMH>[0]['weights'],
+    });
+    if (pick.partners.length <= 1) {
+      // Single partner (or none) → no sub-sim. Keep the original combo
+      // even if pick.partners[0] differs from combo.swaps.off_hand —
+      // generateCombos already chose converged.off_hand and we trust
+      // that choice when the prediction is decisive.
+      out.push(combo);
+      continue;
+    }
+    for (const oh of pick.partners) {
+      // Replace the off_hand in swaps with this partner. Append an
+      // OH-discriminating suffix to the id so the profileset names
+      // stay unique.
+      const newSwaps: Record<string, ParsedItem> = { ...combo.swaps, off_hand: oh };
+      const newId = `${combo.id}_oh${shortIdHash(oh.identity)}`;
+      out.push({ id: newId, swaps: newSwaps });
+    }
+  }
+  return out;
+}
+
+function shortIdHash(s: string): string {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return (h >>> 0).toString(36);
 }
 
 /**
@@ -499,7 +589,18 @@ export async function runBreakpointSearch(
   const tieWindowPct = opts.tieWindowPct ?? 0.1;
   // Pass converged so generateCombos can resolve weapon slot semantics
   // (1H + OH pairing, 2H clearOffHand, pure-OH MH pairing).
-  const allCombos = generateCombos(opts.rejected, opts.converged);
+  const rawCombos = generateCombos(opts.rejected, opts.converged);
+
+  // Expand 1H-weapon combos into one variant per close OH partner from
+  // the bag pool. Mirrors greedy's OH sub-sim — lets the breakpoint sim
+  // resolve close (mh, oh) calls instead of trusting the dot-product
+  // winner. No-op when `bagItems` or `weights` are missing.
+  const allCombos = expandWeaponCombosWithCloseOHs({
+    combos: rawCombos,
+    converged: opts.converged,
+    bagItems: opts.bagItems,
+    weights: opts.weights,
+  });
 
   // Empty case — nothing to test.
   if (allCombos.length === 0) {
