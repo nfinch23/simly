@@ -1606,6 +1606,80 @@ export class ScanQueue {
             }
           }
 
+          // P2.1b: ring re-prescan against the converged actor. Mirror
+          // of the trinket block above — same rationale: gear context is
+          // new, so we always do a full pool sim. Failures are non-fatal
+          // (we keep the pass-1 ring result on the scans record). No
+          // lock is wired into the gear ladder because rings live
+          // outside GEAR_LADDER_SLOTS, same as in pass 1.
+          const rings = getRingPool(args.parsedExport);
+          if (rings.length >= 2) {
+            const rp2Started = Math.floor(Date.now() / 1000);
+            const rp2T0 = Date.now();
+            const rp2Progress = makeStageProgressLogger(
+              'ring_pre_scan (pass 2)',
+              args.characterKey,
+            );
+            try {
+              const r = await runRingPreScanSim({
+                paths: runnerPaths,
+                baseProfile: pass2ConvergedProfile,
+                rings,
+                iterations: s.ringIterations,
+                onProgress: rp2Progress.onProgress,
+              });
+              const pairs = parseRingPreScanResult(r.run, r.pairsByName).pairs;
+              const data = finalizeRingResult(pairs);
+              const rp2Finished = Math.floor(Date.now() / 1000);
+              rp2Progress.stop();
+              const rp2dt = ((Date.now() - rp2T0) / 1000).toFixed(1);
+              const winnerStr = data.winner
+                ? `${data.winner.finger1.name} + ${data.winner.finger2.name} @ ${Math.round(data.winner.mean_dps)} dps`
+                : '(no winner)';
+              console.log(
+                `[sim] ring_pre_scan (pass 2, ${rp2dt}s, ${data.pairs.length} pair(s)): ${winnerStr}`,
+              );
+              // Cache pass-2 result keyed on gear_context_hash so future
+              // pass-1 runs that converge to the same gear can reuse.
+              if (this.ringCache) {
+                try {
+                  this.ringCache.put({
+                    character_key: args.characterKey,
+                    scenario: args.scenario,
+                    pool_signature: ringPoolSignature(rings),
+                    gear_context_hash: gearContextHash,
+                    pairs: data.pairs,
+                    top_ring_identities: selectTopRings(
+                      data.pairs,
+                      s.topRingsToKeep,
+                    ),
+                    last_simmed_at: rp2Finished,
+                  });
+                } catch (err) {
+                  console.warn(
+                    '[sim] pass-2 ring cache write failed:',
+                    (err as Error).message,
+                  );
+                }
+              }
+              // Overwrite scans.ring_pre_scan with the pass-2 result so
+              // the composer's downstream merge into composed.gear picks
+              // up the latest winner.
+              scans.ring_pre_scan = {
+                status: 'done',
+                started_at: rp2Started,
+                finished_at: rp2Finished,
+                data,
+              };
+            } catch (err) {
+              rp2Progress.stop();
+              console.error(
+                '[sim] pass-2 ring pre-scan failed:',
+                (err as Error).message,
+              );
+            }
+          }
+
           // P2.2: re-run greedy + breakpoint with new locks + weights_v2.
           if (p2TrinketLock) {
             const gc2Started = Math.floor(Date.now() / 1000);
