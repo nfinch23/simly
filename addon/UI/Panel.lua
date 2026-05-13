@@ -49,6 +49,139 @@ local SLOT_DISPLAY_ORDER = {
 	{ id = "off_hand",  label = "Off hand",  inv = INVSLOT_OFFHAND },
 }
 
+-- Paper-doll geometry. Top 12 slots live in two side columns of 6
+-- (left = head→wrist, right = hands→finger2). Bottom row holds the
+-- 4 horizontal slots (trinkets + weapons), 4-wide and centered. All
+-- positions are pixel offsets from the doll content frame's TOPLEFT
+-- (content frame is anchored just below the title bar).
+local SLOT_SIZE       = 37
+local SLOT_GAP        = 6
+local DOLL_PAD        = 8
+local DOLL_TITLE_H    = 24
+local DOLL_ROWS       = 6
+-- Bottom row is 4 buttons wide; that's the constraint on doll width.
+local DOLL_BOTTOM_W   = 4 * SLOT_SIZE + 3 * SLOT_GAP        -- 166
+local DOLL_WIDTH      = DOLL_BOTTOM_W + 2 * DOLL_PAD        -- 182
+local DOLL_LEFT_X     = DOLL_PAD                            -- 8
+local DOLL_RIGHT_X    = DOLL_WIDTH - DOLL_PAD - SLOT_SIZE   -- 137
+local DOLL_ROWS_H     = DOLL_ROWS * SLOT_SIZE + (DOLL_ROWS - 1) * SLOT_GAP -- 252
+local DOLL_BOTTOM_Y   = DOLL_ROWS_H + SLOT_GAP * 2          -- 264 (extra gap before bottom row)
+local DOLL_HEIGHT     = DOLL_TITLE_H + DOLL_BOTTOM_Y + SLOT_SIZE + DOLL_PAD -- 24 + 264 + 37 + 8 = 333
+
+-- Pixel position of each slot's TOPLEFT, in the doll content frame's
+-- coordinate system. y is positive-down here; the builder negates it
+-- for SetPoint's TOP-anchored offset.
+local PAPER_DOLL_POS = {
+	head      = { x = DOLL_LEFT_X,  y = 0 * (SLOT_SIZE + SLOT_GAP) },
+	neck      = { x = DOLL_LEFT_X,  y = 1 * (SLOT_SIZE + SLOT_GAP) },
+	shoulder  = { x = DOLL_LEFT_X,  y = 2 * (SLOT_SIZE + SLOT_GAP) },
+	back      = { x = DOLL_LEFT_X,  y = 3 * (SLOT_SIZE + SLOT_GAP) },
+	chest     = { x = DOLL_LEFT_X,  y = 4 * (SLOT_SIZE + SLOT_GAP) },
+	wrist     = { x = DOLL_LEFT_X,  y = 5 * (SLOT_SIZE + SLOT_GAP) },
+	hands     = { x = DOLL_RIGHT_X, y = 0 * (SLOT_SIZE + SLOT_GAP) },
+	waist     = { x = DOLL_RIGHT_X, y = 1 * (SLOT_SIZE + SLOT_GAP) },
+	legs      = { x = DOLL_RIGHT_X, y = 2 * (SLOT_SIZE + SLOT_GAP) },
+	feet      = { x = DOLL_RIGHT_X, y = 3 * (SLOT_SIZE + SLOT_GAP) },
+	finger1   = { x = DOLL_RIGHT_X, y = 4 * (SLOT_SIZE + SLOT_GAP) },
+	finger2   = { x = DOLL_RIGHT_X, y = 5 * (SLOT_SIZE + SLOT_GAP) },
+	trinket1  = { x = DOLL_PAD + 0 * (SLOT_SIZE + SLOT_GAP), y = DOLL_BOTTOM_Y },
+	trinket2  = { x = DOLL_PAD + 1 * (SLOT_SIZE + SLOT_GAP), y = DOLL_BOTTOM_Y },
+	main_hand = { x = DOLL_PAD + 2 * (SLOT_SIZE + SLOT_GAP), y = DOLL_BOTTOM_Y },
+	off_hand  = { x = DOLL_PAD + 3 * (SLOT_SIZE + SLOT_GAP), y = DOLL_BOTTOM_Y },
+}
+
+-- Human-readable labels for the scenario key. Defined twice in this
+-- file historically; this copy is used by the paper-doll tooltip and
+-- the one below by the text body. Keep them in sync.
+local SCENARIO_LABELS_FOR_DOLL = {
+	single_target_patchwerk = "Single-target",
+	m_plus                  = "Mythic+",
+	aoe_cleave              = "AoE Cleave",
+	aoe_funnel              = "AoE Funnel",
+}
+
+local function setSlotBorderColor(btn, r, g, b)
+	local nt = btn:GetNormalTexture()
+	if nt then nt:SetVertexColor(r, g, b) end
+end
+
+local function showPaperDollTooltip(btn)
+	local rec = btn.currentRec
+	local equippedId = btn.currentEquippedId
+	local lockedOH = btn.isLocked2H
+	if not rec and not equippedId and not lockedOH then return end
+
+	GameTooltip:SetOwner(btn, "ANCHOR_RIGHT")
+	if rec then
+		GameTooltip:SetItemByID(rec.item_id)
+		GameTooltip:AddLine(" ")
+		local key = ns.SavedVars and ns.SavedVars.GetScenario and ns.SavedVars.GetScenario() or "single_target_patchwerk"
+		local label = SCENARIO_LABELS_FOR_DOLL[key] or key
+		GameTooltip:AddLine("|cffffd700Simly:|r |cffaaaaaaRecommended for " .. label .. "|r")
+		if equippedId == rec.item_id then
+			GameTooltip:AddLine("|cff00ff00Currently equipped|r")
+		elseif equippedId == nil then
+			GameTooltip:AddLine("|cffffff00You don't have this equipped — empty slot!|r")
+		else
+			GameTooltip:AddLine("|cffffff00Swap in from bag/bank|r")
+		end
+	elseif lockedOH then
+		GameTooltip:AddLine("|cff" .. "aaaaaa" .. btn.slotLabel .. "|r")
+		GameTooltip:AddLine("|cffff8888Locked — 2H weapon equipped|r")
+	elseif equippedId then
+		GameTooltip:SetInventoryItem("player", btn.slotInv)
+		GameTooltip:AddLine(" ")
+		GameTooltip:AddLine("|cffaaaaaa(No Simly recommendation for this slot yet)|r")
+	end
+	GameTooltip:Show()
+end
+
+local function createPaperDoll(parentFrame)
+	local doll = CreateFrame("Frame", "SimlyPaperDollFrame", parentFrame, "BackdropTemplate")
+	doll:SetSize(DOLL_WIDTH, DOLL_HEIGHT)
+	-- Dock to the LEFT of the main panel. -2 nudge keeps the right
+	-- edge flush against the main frame's left border without overlap.
+	doll:SetPoint("TOPRIGHT", parentFrame, "TOPLEFT", -2, 0)
+	doll:SetFrameStrata("DIALOG")
+	doll:SetBackdrop({
+		bgFile   = "Interface\\DialogFrame\\UI-DialogBox-Background",
+		edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
+		edgeSize = 16,
+		insets   = { left = 4, right = 4, top = 4, bottom = 4 },
+	})
+
+	local title = doll:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+	title:SetPoint("TOP", 0, -10)
+	title:SetText("Recommended gear")
+
+	-- Content lives below the title bar. Slot positions are computed
+	-- relative to this frame's TOPLEFT.
+	local content = CreateFrame("Frame", nil, doll)
+	content:SetPoint("TOPLEFT", 4, -DOLL_TITLE_H)
+	content:SetPoint("BOTTOMRIGHT", -4, 4)
+
+	local buttons = {}
+	for _, slot in ipairs(SLOT_DISPLAY_ORDER) do
+		local pos = PAPER_DOLL_POS[slot.id]
+		local btn = CreateFrame("Button", "SimlyPaperDoll_" .. slot.id, content, "ItemButtonTemplate")
+		btn:SetSize(SLOT_SIZE, SLOT_SIZE)
+		btn:SetPoint("TOPLEFT", pos.x, -pos.y)
+		btn.slotId    = slot.id
+		btn.slotInv   = slot.inv
+		btn.slotLabel = slot.label
+		btn:SetScript("OnEnter", showPaperDollTooltip)
+		btn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+		buttons[slot.id] = btn
+	end
+
+	doll.buttons = buttons
+	-- Parenting alone propagates show/hide, but hook explicitly so the
+	-- behavior is easy to find when someone reads this file later.
+	parentFrame:HookScript("OnShow", function() doll:Show() end)
+	parentFrame:HookScript("OnHide", function() doll:Hide() end)
+	return doll
+end
+
 local function createFrame()
 	local f = CreateFrame("Frame", "SimlyPanelFrame", UIParent, "BackdropTemplate")
 	f:SetSize(440, 560)
@@ -189,6 +322,12 @@ local function createFrame()
 		if self:IsShown() then Panel.Refresh() end
 	end)
 
+	-- Paper-doll side panel: docks to the left of the main frame and
+	-- shows the per-slot recommended gear as character-pane-style icon
+	-- buttons. Shares show/hide with the parent via HookScript inside
+	-- createPaperDoll.
+	f.paperDoll = createPaperDoll(f)
+
 	-- WoW frames are shown by default at creation; hide so the very
 	-- first /simly call doesn't toggle a just-created visible frame off.
 	f:Hide()
@@ -259,6 +398,73 @@ local SCENARIO_LABELS = {
 	aoe_funnel              = "AoE Funnel (5-target)",
 }
 
+-- Paint the paper-doll side panel from the active scenario's
+-- composed.gear. Border tint by status: green=equipped what's
+-- recommended, yellow=swap-in/empty-with-rec, gray=no rec but
+-- something equipped, dim-gray=empty + no rec / 2H-locked off-hand.
+-- Stores rec + equippedId + lock state on each button so OnEnter
+-- can build a context-aware tooltip without re-reading state.
+function Panel.RefreshPaperDoll()
+	if not frame or not frame.paperDoll then return end
+	local doll = frame.paperDoll
+
+	local activeScenario = ns.SavedVars.GetScenario()
+	local scenarioData = (SimlyResults and SimlyResults.scenarios and SimlyResults.scenarios[activeScenario]) or nil
+	if not scenarioData and SimlyResults and SimlyResults.scans then
+		scenarioData = SimlyResults
+	end
+	local gear = (scenarioData and scenarioData.composed and scenarioData.composed.gear) or {}
+
+	-- 2H main-hand locks the off-hand slot. Same heuristic as the
+	-- text renderer used to use.
+	local mhIs2H = false
+	local mhRec = gear.main_hand
+	if mhRec and GetItemInfo then
+		local _, _, _, _, _, _, _, _, equipLoc = GetItemInfo(mhRec.item_id)
+		mhIs2H = (equipLoc == "INVTYPE_2HWEAPON")
+	end
+
+	for _, slot in ipairs(SLOT_DISPLAY_ORDER) do
+		local btn = doll.buttons[slot.id]
+		if btn then
+			local rec = gear[slot.id]
+			local lockedOH = (slot.id == "off_hand" and mhIs2H)
+			if lockedOH then rec = nil end
+			local equippedId = GetInventoryItemID and GetInventoryItemID("player", slot.inv) or nil
+
+			btn.currentRec        = rec
+			btn.currentEquippedId = equippedId
+			btn.isLocked2H        = lockedOH
+
+			-- Icon: prefer the recommended item; fall back to whatever
+			-- the player is wearing (so an unsimmed slot still feels
+			-- like a real character pane). nil clears the icon.
+			local icon = nil
+			if rec then
+				icon = GetItemIcon and GetItemIcon(rec.item_id) or nil
+			elseif equippedId then
+				icon = GetItemIcon and GetItemIcon(equippedId) or nil
+			end
+			SetItemButtonTexture(btn, icon)
+
+			-- Border color encodes status.
+			local r, g, b = 0.35, 0.35, 0.35
+			if lockedOH then
+				r, g, b = 0.25, 0.25, 0.25
+			elseif rec then
+				if equippedId == rec.item_id then
+					r, g, b = 0, 1, 0
+				else
+					r, g, b = 1, 0.85, 0
+				end
+			elseif equippedId then
+				r, g, b = 0.65, 0.65, 0.65
+			end
+			setSlotBorderColor(btn, r, g, b)
+		end
+	end
+end
+
 function Panel.Refresh()
 	if not frame then return end
 
@@ -299,60 +505,27 @@ function Panel.Refresh()
 			(c.label and (" |cffaaaaaa(" .. c.label .. ")|r") or "") ..
 			(c.expected_dps and (" |cff00ff00" .. math.floor(c.expected_dps) .. " dps|r") or ""))
 
-		-- Gear block: per-slot recommended item, in WoW character-
-		-- screen order. Lines colored:
-		--   green  = the recommended item is currently equipped
-		--   yellow = recommendation differs from what's equipped (the
-		--            user has the item somewhere — bag or bank — and
-		--            should swap to it)
-		--   gray   = no live equip data (e.g., GetInventoryItemID
-		--            returned nil — slot empty or transient)
+		-- Gear visualization now lives in the paper-doll side panel
+		-- (see createPaperDoll / Panel.RefreshPaperDoll). All we keep
+		-- in the text body is the one-line "Wearing X/Y" summary so the
+		-- user has a glanceable progress number without hovering 16 slots.
 		if c.gear then
-			-- Detect a 2H recommended main hand. WoW locks out the
-			-- off-hand slot when a 2H weapon is equipped, so showing
-			-- an off-hand recommendation would be misleading — the
-			-- player can't act on it. GetItemInfo's itemEquipLoc
-			-- returns "INVTYPE_2HWEAPON" for staves / 2H swords / etc.
-			-- If GetItemInfo returns nil (item not cached yet), fall
-			-- through to default render — better to show a stale row
-			-- than to silently hide a legitimate off-hand suggestion.
 			local mhIs2H = false
 			local mhRec = c.gear.main_hand
 			if mhRec and GetItemInfo then
 				local _, _, _, _, _, _, _, _, equipLoc = GetItemInfo(mhRec.item_id)
 				mhIs2H = (equipLoc == "INVTYPE_2HWEAPON")
 			end
-
 			local equippedCount, totalCount = 0, 0
 			for _, slot in ipairs(SLOT_DISPLAY_ORDER) do
 				local rec = c.gear[slot.id]
-				-- Skip off_hand entirely when main_hand is 2H — the
-				-- slot is locked, so any recommendation is noise.
-				if slot.id == "off_hand" and mhIs2H then
-					rec = nil
-				end
+				if slot.id == "off_hand" and mhIs2H then rec = nil end
 				if rec then
 					totalCount = totalCount + 1
 					local equippedId = GetInventoryItemID and GetInventoryItemID("player", slot.inv) or nil
-					local color, suffix
 					if equippedId == rec.item_id then
-						color = "|cff00ff00"
-						suffix = " |cffaaaaaa[equipped]|r"
 						equippedCount = equippedCount + 1
-					elseif equippedId == nil then
-						-- Slot is empty but we have a recommendation —
-						-- treat as a swap-in (the user is missing a DPS-
-						-- relevant item, not "no data to display").
-						color = "|cffffff00"
-						suffix = " |cffaaaaaa[empty — equip!]|r"
-					else
-						color = "|cffffff00"
-						suffix = " |cffaaaaaa[swap in]|r"
 					end
-					table.insert(lines, string.format(
-						"  %s%s|r: %s%s|r |cffaaaaaa(%d)|r%s",
-						color, slot.label, color, rec.name, rec.ilvl or 0, suffix
-					))
 				end
 			end
 			if totalCount > 0 then
@@ -520,6 +693,10 @@ function Panel.Refresh()
 	end
 
 	frame.body:SetText(table.concat(lines, "\n"))
+	-- Refresh the paper-doll side panel from the same scenario data.
+	-- Sits at the end of Refresh so any layout work (Show/Hide) above
+	-- this point has settled before we touch icon/border state.
+	Panel.RefreshPaperDoll()
 	-- Resize the scroll content to fit the rendered text so the
 	-- scrollbar's range matches what's actually drawn. GetStringHeight
 	-- returns the wrapped text's pixel height; the +12 padding gives
