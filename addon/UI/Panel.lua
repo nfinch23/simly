@@ -254,6 +254,13 @@ local function createPaperDoll(parentFrame)
 				return
 			end
 			DEFAULT_CHAT_FRAME:AddMessage("|cff00ffffSimly:|r equipping " .. rec.name .. " to " .. self.slotLabel .. "...")
+			-- Play the same item-pickup sound WoW fires when an item
+			-- leaves the bag on a right-click equip. WoW will then
+			-- play the kit-specific armor put-down sound automatically
+			-- when the equip event resolves, matching the normal flow.
+			if PlaySound and SOUNDKIT and SOUNDKIT.PUT_DOWN_SMALL_CHAIN then
+				PlaySound(SOUNDKIT.PUT_DOWN_SMALL_CHAIN)
+			end
 			EquipItemByName(rec.name, self.slotInv)
 		end)
 		btn:SetScript("OnEnter", showPaperDollTooltip)
