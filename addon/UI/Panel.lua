@@ -103,12 +103,16 @@ local PAPER_DOLL_POS = {
 	off_hand  = { x = DOLL_WEAPONS_X0 + SLOT_SIZE + SLOT_GAP, y = DOLL_BOTTOM_Y },
 }
 
--- Decorative slots: cosmetic-only in WoW so Simly never recommends
--- them. We still draw them (dimmed, no tooltip) to match the WoW
--- character pane's row alignment. Both live in the left column.
-local PAPER_DOLL_DECOR = {
-	{ id = "shirt",  x = DOLL_LEFT_X, y = rowY(5), icon = "Interface\\PaperDollInfoFrame\\UI-PaperDoll-Slot-Shirt"  },
-	{ id = "tabard", x = DOLL_LEFT_X, y = rowY(6), icon = "Interface\\PaperDollInfoFrame\\UI-PaperDoll-Slot-Tabard" },
+-- Consumable buttons: rows 5 and 6 of the left column. Shirt and
+-- tabard would live here on a real character pane; Simly fills them
+-- with the recommended flask and food instead since those slots have
+-- meaningful data and the cosmetic slots don't.
+-- `field` is the composed.* key to read at refresh time; `fallback`
+-- is a generic Blizzard icon used when GetItemInfoInstant(name) can't
+-- resolve a real icon (the consumables scans currently store item_id=0).
+local PAPER_DOLL_CONSUMABLES = {
+	{ id = "flask", field = "flask", label = "Best flask", x = DOLL_LEFT_X, y = rowY(5), fallback = "Interface\\Icons\\inv_alchemy_70_flask01" },
+	{ id = "food",  field = "food",  label = "Best food",  x = DOLL_LEFT_X, y = rowY(6), fallback = "Interface\\Icons\\inv_misc_food_15" },
 }
 
 -- Human-readable labels for the scenario key. Defined twice in this
@@ -126,33 +130,6 @@ local function setSlotBorderColor(btn, r, g, b)
 	if nt then nt:SetVertexColor(r, g, b) end
 end
 
--- Build a WoW item string from a composed-gear record. The composer
--- stores identity as "itemId:bonus1/bonus2/...:crafted1/crafted2".
--- Tooltip APIs need a full item string with bonus IDs so the rendered
--- ilvl reflects the *actual* drop level (e.g. 272) instead of the raw
--- base item level (often 15-50 for high-end gear before bonuses).
--- Format: item:itemID:enchant:gem1:gem2:gem3:gem4:suffix:unique:level
---         :specID:modMask:numBonus:bonus1:bonus2:...
--- Missing fields are empty colons; numBonus is the count.
-local function buildItemString(rec)
-	if not rec or not rec.item_id then return nil end
-	local bonuses = {}
-	if rec.identity then
-		-- identity = "ITEMID:b1/b2/b3:cs1/cs2"
-		local _, _, bonusStr = string.find(rec.identity, "^[^:]*:([^:]*)")
-		if bonusStr and bonusStr ~= "" then
-			for b in string.gmatch(bonusStr, "[^/]+") do
-				table.insert(bonuses, b)
-			end
-		end
-	end
-	-- 11 empty fields between itemID and numBonusIDs:
-	-- enchant, gem1..gem4, suffix, unique, linkLevel, specID, upgradeID, instanceDifficultyID.
-	local s = "item:" .. rec.item_id .. ":::::::::::" .. #bonuses
-	for _, b in ipairs(bonuses) do s = s .. ":" .. b end
-	return s
-end
-
 local function showPaperDollTooltip(btn)
 	local rec = btn.currentRec
 	local equippedId = btn.currentEquippedId
@@ -161,14 +138,14 @@ local function showPaperDollTooltip(btn)
 
 	GameTooltip:SetOwner(btn, "ANCHOR_RIGHT")
 	if rec then
-		-- SetHyperlink with a bonus-ID-bearing item string renders
-		-- at the right ilvl. SetItemByID alone shows the base item
-		-- (often dramatically lower ilvl) which misled the user.
-		local itemStr = buildItemString(rec)
-		if itemStr then
-			GameTooltip:SetHyperlink(itemStr)
-		else
-			GameTooltip:SetItemByID(rec.item_id)
+		-- SetItemByID renders the item at its base/template ilvl
+		-- (often 15-50 for high-end gear pre-bonuses). Hand-built
+		-- hyperlinks with bonus IDs were fragile across retail
+		-- builds. Trade-off: stable render + a manual ilvl line that
+		-- shows the actual simmed value from rec.ilvl.
+		GameTooltip:SetItemByID(rec.item_id)
+		if rec.ilvl and rec.ilvl > 0 then
+			GameTooltip:AddDoubleLine("Item Level", tostring(rec.ilvl), 0.66, 0.66, 0.66, 1, 0.82, 0)
 		end
 		GameTooltip:AddLine(" ")
 		local key = ns.SavedVars and ns.SavedVars.GetScenario and ns.SavedVars.GetScenario() or "single_target_patchwerk"
@@ -219,11 +196,12 @@ local function createPaperDoll(parentFrame)
 	local buttons = {}
 	for _, slot in ipairs(SLOT_DISPLAY_ORDER) do
 		local pos = PAPER_DOLL_POS[slot.id]
-		-- Use the dedicated ItemButton object type. Retail's modern
-		-- ItemButtonTemplate is bound to this type; passing "Button" as
-		-- the frame type silently leaves the icon/border children
-		-- missing on some retail builds and the whole panel falls over.
-		local btn = CreateFrame("ItemButton", "SimlyPaperDoll_" .. slot.id, content)
+		-- Use the dedicated ItemButton object type *with* the template.
+		-- Without the template the icon/border child textures don't get
+		-- created — SetItemButtonTexture then errors silently (caught
+		-- by the pcall in Panel.Refresh) and currentRec never gets
+		-- assigned, which is why tooltips returned blank.
+		local btn = CreateFrame("ItemButton", "SimlyPaperDoll_" .. slot.id, content, "ItemButtonTemplate")
 		btn:SetSize(SLOT_SIZE, SLOT_SIZE)
 		btn:SetPoint("TOPLEFT", pos.x, -pos.y)
 		btn.slotId    = slot.id
@@ -234,23 +212,41 @@ local function createPaperDoll(parentFrame)
 		buttons[slot.id] = btn
 	end
 
-	-- Decorative shirt/tabard buttons — fixed silhouette icon, dim
-	-- border, no tooltip, no refresh hook. They exist purely so the
-	-- grid matches WoW's character pane row alignment.
-	for _, decor in ipairs(PAPER_DOLL_DECOR) do
-		local btn = CreateFrame("ItemButton", "SimlyPaperDoll_" .. decor.id, content)
+	-- Consumable buttons (flask + food) fill the cosmetic shirt/tabard
+	-- rows. Refresh logic in Panel.RefreshPaperDoll reads composed.*
+	-- and paints icon/tooltip; here we just construct the buttons.
+	local consumables = {}
+	for _, c in ipairs(PAPER_DOLL_CONSUMABLES) do
+		local btn = CreateFrame("ItemButton", "SimlyPaperDoll_" .. c.id, content, "ItemButtonTemplate")
 		btn:SetSize(SLOT_SIZE, SLOT_SIZE)
-		btn:SetPoint("TOPLEFT", decor.x, -decor.y)
-		btn:EnableMouse(false)
-		SetItemButtonTexture(btn, decor.icon)
-		-- Faint icon + dim border so the slot reads as "not in use".
-		local iconTex = _G[btn:GetName() .. "IconTexture"]
-		if iconTex then iconTex:SetVertexColor(0.45, 0.45, 0.45) end
-		local nt = btn:GetNormalTexture()
-		if nt then nt:SetVertexColor(0.3, 0.3, 0.3) end
+		btn:SetPoint("TOPLEFT", c.x, -c.y)
+		btn.consumableField = c.field
+		btn.consumableLabel = c.label
+		btn.consumableFallback = c.fallback
+		btn:SetScript("OnEnter", function(self)
+			local rec = self.currentRec
+			if not rec then return end
+			GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+			-- item_id is 0 from the consumables scans (they sim by
+			-- name, not item id). When/if a real id ever appears,
+			-- prefer the WoW tooltip path so stats + icons show.
+			if rec.item_id and rec.item_id > 0 then
+				GameTooltip:SetItemByID(rec.item_id)
+			else
+				GameTooltip:AddLine(rec.name, 1, 1, 1)
+			end
+			GameTooltip:AddLine(" ")
+			local key = ns.SavedVars and ns.SavedVars.GetScenario and ns.SavedVars.GetScenario() or "single_target_patchwerk"
+			local label = SCENARIO_LABELS_FOR_DOLL[key] or key
+			GameTooltip:AddLine("|cffffd700Simly:|r |cffaaaaaa" .. self.consumableLabel .. " for " .. label .. "|r")
+			GameTooltip:Show()
+		end)
+		btn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+		consumables[c.id] = btn
 	end
 
 	doll.buttons = buttons
+	doll.consumables = consumables
 	-- Parenting alone propagates show/hide, but hook explicitly so the
 	-- behavior is easy to find when someone reads this file later.
 	parentFrame:HookScript("OnShow", function() doll:Show() end)
@@ -545,6 +541,46 @@ function Panel.RefreshPaperDoll()
 				r, g, b = 0.65, 0.65, 0.65
 			end
 			setSlotBorderColor(btn, r, g, b)
+		end
+	end
+
+	-- Consumable buttons (flask, food). Same composed.* source as the
+	-- text body would have read; we just present it as icons in the
+	-- shirt/tabard rows of the doll grid.
+	local composed = scenarioData and scenarioData.composed or nil
+	if doll.consumables then
+		for _, c in ipairs(PAPER_DOLL_CONSUMABLES) do
+			local btn = doll.consumables[c.id]
+			if btn then
+				local rec = composed and composed[c.field] or nil
+				btn.currentRec = rec
+				if rec then
+					-- Try to upgrade from a real item icon if WoW's
+					-- client has it cached; else use the generic fallback.
+					local icon
+					if rec.item_id and rec.item_id > 0 then
+						icon = GetItemIcon and GetItemIcon(rec.item_id) or nil
+					end
+					if not icon and rec.name and GetItemInfoInstant then
+						local _, _, _, _, foundIcon = GetItemInfoInstant(rec.name)
+						icon = foundIcon
+					end
+					SetItemButtonTexture(btn, icon or c.fallback)
+					setSlotBorderColor(btn, 0.65, 0.65, 0.85)
+					btn:Show()
+				else
+					-- No scan data yet: dim placeholder, no tooltip.
+					SetItemButtonTexture(btn, c.fallback)
+					setSlotBorderColor(btn, 0.3, 0.3, 0.3)
+					local iconTex = _G[btn:GetName() .. "IconTexture"]
+					if iconTex then iconTex:SetVertexColor(0.45, 0.45, 0.45) end
+				end
+				if rec then
+					-- Restore full brightness when we have data.
+					local iconTex = _G[btn:GetName() .. "IconTexture"]
+					if iconTex then iconTex:SetVertexColor(1, 1, 1) end
+				end
+			end
 		end
 	end
 end
