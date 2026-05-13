@@ -30,6 +30,7 @@ import {
   type ScanCollection,
   type Scenario,
   type SimlyResults,
+  type TrinketPreScanResult,
 } from '@simly/shared';
 import { buildCatalogSummary, type GearCatalogEntry } from './gear-catalog';
 
@@ -162,6 +163,32 @@ export function composeFromScans(
         name: slotInfo.name,
         ilvl: slotInfo.ilvl,
         identity: slotInfo.identity,
+      };
+    }
+  }
+
+  // Merge the trinket pre-scan winner into composed.gear. Trinkets
+  // aren't enumerated by the gear ladder (they're effect/proc-based —
+  // can't stat-score them, must pair-sim), so they need their own
+  // path into the addon's per-slot view. Only fill slots the gear
+  // scan didn't already populate, so a future gear pipeline that
+  // owns trinkets (unlikely) wouldn't be silently overridden.
+  const trinketScan = scans.trinket_pre_scan?.data as TrinketPreScanResult | undefined;
+  if (trinketScan?.winner) {
+    if (!gear.trinket1) {
+      gear.trinket1 = {
+        item_id: trinketScan.winner.trinket1.item_id,
+        name: trinketScan.winner.trinket1.name,
+        ilvl: trinketScan.winner.trinket1.ilvl,
+        identity: trinketScan.winner.trinket1.identity,
+      };
+    }
+    if (!gear.trinket2) {
+      gear.trinket2 = {
+        item_id: trinketScan.winner.trinket2.item_id,
+        name: trinketScan.winner.trinket2.name,
+        ilvl: trinketScan.winner.trinket2.ilvl,
+        identity: trinketScan.winner.trinket2.identity,
       };
     }
   }
