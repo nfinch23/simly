@@ -162,6 +162,32 @@ local function setSlotBorderColor(btn, r, g, b)
 	if btn.SetBorderColor then btn:SetBorderColor(r, g, b, 1) end
 end
 
+-- Construct a full WoW item hyperlink from a composed-gear record.
+-- Composer stores identity as "itemId:bonus1/bonus2/...:crafted/...";
+-- the full link format includes a wrapper |H...|h[name]|h|r which is
+-- what GameTooltip:SetHyperlink robustly accepts across retail builds.
+-- Layout: |cffffffff|Hitem:ID:enchant:gem1:gem2:gem3:gem4:suffix:unique:
+-- linkLevel:specID:upgradeID:instanceDifficulty:numBonus:b1:b2:...|h[Name]|h|r
+-- Returns nil if rec is missing fields needed to build the link;
+-- callers should fall back to SetItemByID in that case.
+local function buildItemHyperlink(rec)
+	if not rec or not rec.item_id or not rec.name then return nil end
+	local bonuses = {}
+	if rec.identity then
+		local _, _, bonusStr = string.find(rec.identity, "^[^:]*:([^:]*)")
+		if bonusStr and bonusStr ~= "" then
+			for b in string.gmatch(bonusStr, "[^/]+") do
+				table.insert(bonuses, b)
+			end
+		end
+	end
+	-- 11 empty fields between itemID and numBonusIDs.
+	local s = "|cffffffff|Hitem:" .. rec.item_id .. ":::::::::::" .. #bonuses
+	for _, b in ipairs(bonuses) do s = s .. ":" .. b end
+	s = s .. "|h[" .. rec.name .. "]|h|r"
+	return s
+end
+
 local function showPaperDollTooltip(btn)
 	local rec = btn.currentRec
 	local equippedId = btn.currentEquippedId
@@ -170,14 +196,16 @@ local function showPaperDollTooltip(btn)
 
 	GameTooltip:SetOwner(btn, "ANCHOR_RIGHT")
 	if rec then
-		-- SetItemByID renders the item at its base/template ilvl
-		-- (often 15-50 for high-end gear pre-bonuses). Hand-built
-		-- hyperlinks with bonus IDs were fragile across retail
-		-- builds. Trade-off: stable render + a manual ilvl line that
-		-- shows the actual simmed value from rec.ilvl.
-		GameTooltip:SetItemByID(rec.item_id)
-		if rec.ilvl and rec.ilvl > 0 then
-			GameTooltip:AddDoubleLine("Item Level", tostring(rec.ilvl), 0.66, 0.66, 0.66, 1, 0.82, 0)
+		-- Prefer a full hyperlink with bonus IDs — WoW renders the
+		-- correct ilvl (e.g. 272) from the bonus chain. Fall back to
+		-- SetItemByID only when the rec has no identity (no bonuses
+		-- to apply), which shows the base ilvl but is at least
+		-- consistent with what SetHyperlink would have rendered.
+		local link = buildItemHyperlink(rec)
+		if link then
+			GameTooltip:SetHyperlink(link)
+		else
+			GameTooltip:SetItemByID(rec.item_id)
 		end
 		GameTooltip:AddLine(" ")
 		local key = ns.SavedVars and ns.SavedVars.GetScenario and ns.SavedVars.GetScenario() or "single_target_patchwerk"

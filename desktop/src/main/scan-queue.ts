@@ -507,19 +507,28 @@ export class ScanQueue {
 
     const priorScenarioBucket = existingScenarios[args.scenario];
     if (priorScenarioBucket) {
-      // Backfill composed.gear from catalog if missing
-      const composed: ComposedLoadout | undefined = priorScenarioBucket.composed
-        ? {
-            ...priorScenarioBucket.composed,
-            gear: priorScenarioBucket.composed.gear ?? deriveGearFromCatalog(catalog),
-          }
-        : catalog
-        ? {
-            label: 'Cached best loadout',
-            expected_dps: catalog.best_loadout_dps,
-            gear: deriveGearFromCatalog(catalog),
-          }
-        : undefined;
+      // Re-run composeFromScans so any composer logic that integrates
+      // multiple scan results (e.g. merging the trinket pre-scan winner
+      // into composed.gear) fires on refresh too — not just on a full
+      // re-sim. Before this fix, the quick-sim path just preserved the
+      // prior composed verbatim, silently skipping any new composer
+      // behavior introduced after the original full sim.
+      // Falls back to the prior composed (with catalog backfill) when
+      // composeFromScans returns undefined — i.e. no scans recorded.
+      const recomposed = composeFromScans(priorScenarioBucket.scans, catalog);
+      const composed: ComposedLoadout | undefined = recomposed
+        ?? (priorScenarioBucket.composed
+          ? {
+              ...priorScenarioBucket.composed,
+              gear: priorScenarioBucket.composed.gear ?? deriveGearFromCatalog(catalog),
+            }
+          : catalog
+          ? {
+              label: 'Cached best loadout',
+              expected_dps: catalog.best_loadout_dps,
+              gear: deriveGearFromCatalog(catalog),
+            }
+          : undefined);
       scenarioResult = {
         ...priorScenarioBucket,
         generated_at: args.finishedAt,
