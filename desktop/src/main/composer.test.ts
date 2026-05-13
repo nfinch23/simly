@@ -11,6 +11,7 @@ import type {
   BestFoodResult,
   GearScanResult,
   ScanCollection,
+  TrinketPreScanResult,
 } from '@simly/shared';
 import type { GearCatalogEntry } from './gear-catalog';
 
@@ -59,6 +60,21 @@ function fakeGearScan(opts: {
       delta_pct: 0,
     },
   };
+}
+
+function fakeTrinketPreScan(opts: {
+  t1: { item_id: number; name: string; ilvl: number };
+  t2: { item_id: number; name: string; ilvl: number };
+  winner_dps?: number;
+}): TrinketPreScanResult {
+  const winner = {
+    pair_id: 'p1',
+    trinket1: { ...opts.t1, identity: `${opts.t1.item_id}::` },
+    trinket2: { ...opts.t2, identity: `${opts.t2.item_id}::` },
+    mean_dps: opts.winner_dps ?? 70_000,
+    delta_pct: 0,
+  };
+  return { label: 'Best trinket pair', pairs: [winner], winner };
 }
 
 function fakeCatalog(opts?: { dps?: number; slots?: Record<string, { item_id: number; name: string; ilvl: number }> }): GearCatalogEntry {
@@ -304,6 +320,74 @@ describe('composeFromScans', () => {
     expect(c?.flask?.name).toBe('Foo Flask');
     expect(c?.food?.name).toBe('Bar Food');
     expect(c?.gear?.head?.name).toBe('H');
+  });
+
+  it('merges trinket_pre_scan winner into composed.gear.trinket1/trinket2', () => {
+    // Trinkets are sim'd separately (effect/proc-based, not stat-scored).
+    // The gear ladder's winner therefore has 12 slots; the composer must
+    // pull trinket1/trinket2 from the trinket pre-scan winner so the
+    // addon's paper-doll renders them instead of leaving the slot empty.
+    const scans: ScanCollection = {
+      gear_final: {
+        status: 'done',
+        data: fakeGearScan({
+          winner_dps: 70_000,
+          items: [{ slot: 'head', item_id: 1, name: 'H', ilvl: 272 }],
+        }),
+      },
+      trinket_pre_scan: {
+        status: 'done',
+        data: fakeTrinketPreScan({
+          t1: { item_id: 100, name: 'Drum', ilvl: 259 },
+          t2: { item_id: 200, name: 'Bell', ilvl: 263 },
+        }),
+      },
+    };
+    const c = composeFromScans(scans, undefined);
+    expect(c?.gear?.trinket1).toEqual({ item_id: 100, name: 'Drum', ilvl: 259, identity: '100::' });
+    expect(c?.gear?.trinket2).toEqual({ item_id: 200, name: 'Bell', ilvl: 263, identity: '200::' });
+    expect(c?.gear?.head?.name).toBe('H'); // gear scan slots still present
+  });
+
+  it('does not overwrite trinket slots the gear scan already populated', () => {
+    // Defensive: a future gear pipeline that owns trinkets shouldn't be
+    // silently overridden by the trinket pre-scan. Gear scan wins.
+    const scans: ScanCollection = {
+      gear_final: {
+        status: 'done',
+        data: fakeGearScan({
+          winner_dps: 70_000,
+          items: [
+            { slot: 'trinket1', item_id: 999, name: 'Gear-picked T1', ilvl: 280 },
+          ],
+        }),
+      },
+      trinket_pre_scan: {
+        status: 'done',
+        data: fakeTrinketPreScan({
+          t1: { item_id: 100, name: 'Pre-scan T1', ilvl: 259 },
+          t2: { item_id: 200, name: 'Pre-scan T2', ilvl: 263 },
+        }),
+      },
+    };
+    const c = composeFromScans(scans, undefined);
+    expect(c?.gear?.trinket1?.name).toBe('Gear-picked T1');
+    expect(c?.gear?.trinket2?.name).toBe('Pre-scan T2'); // gap still filled
+  });
+
+  it('still merges trinkets when no gear ladder ran at all', () => {
+    const scans: ScanCollection = {
+      trinket_pre_scan: {
+        status: 'done',
+        data: fakeTrinketPreScan({
+          t1: { item_id: 100, name: 'Drum', ilvl: 259 },
+          t2: { item_id: 200, name: 'Bell', ilvl: 263 },
+        }),
+      },
+    };
+    const c = composeFromScans(scans, undefined);
+    expect(c?.gear?.trinket1?.name).toBe('Drum');
+    expect(c?.gear?.trinket2?.name).toBe('Bell');
   });
 
   it('skips a stage whose data is undefined (defensive — done w/ no data)', () => {
