@@ -49,45 +49,63 @@ local SLOT_DISPLAY_ORDER = {
 	{ id = "off_hand",  label = "Off hand",  inv = INVSLOT_OFFHAND },
 }
 
--- Paper-doll geometry. Top 12 slots live in two side columns of 6
--- (left = head→wrist, right = hands→finger2). Bottom row holds the
--- 4 horizontal slots (trinkets + weapons), 4-wide and centered. All
--- positions are pixel offsets from the doll content frame's TOPLEFT
--- (content frame is anchored just below the title bar).
-local SLOT_SIZE       = 37
-local SLOT_GAP        = 6
-local DOLL_PAD        = 8
-local DOLL_TITLE_H    = 24
-local DOLL_ROWS       = 6
--- Bottom row is 4 buttons wide; that's the constraint on doll width.
-local DOLL_BOTTOM_W   = 4 * SLOT_SIZE + 3 * SLOT_GAP        -- 166
-local DOLL_WIDTH      = DOLL_BOTTOM_W + 2 * DOLL_PAD        -- 182
-local DOLL_LEFT_X     = DOLL_PAD                            -- 8
-local DOLL_RIGHT_X    = DOLL_WIDTH - DOLL_PAD - SLOT_SIZE   -- 137
-local DOLL_ROWS_H     = DOLL_ROWS * SLOT_SIZE + (DOLL_ROWS - 1) * SLOT_GAP -- 252
-local DOLL_BOTTOM_Y   = DOLL_ROWS_H + SLOT_GAP * 2          -- 264 (extra gap before bottom row)
-local DOLL_HEIGHT     = DOLL_TITLE_H + DOLL_BOTTOM_Y + SLOT_SIZE + DOLL_PAD -- 24 + 264 + 37 + 8 = 333
+-- Paper-doll geometry. Layout mirrors WoW's character pane exactly:
+--   Left column  (8 rows): head, neck, shoulder, [shirt], chest,
+--                          waist, legs, feet
+--   Right column (8 rows): wrist, hands, back, [tabard], finger1,
+--                          finger2, trinket1, trinket2
+--   Bottom row, centered with extra vertical gap: main_hand, off_hand
+-- Shirt + tabard are placeholder slots (no Simly recommendation ever
+-- — they're cosmetic in WoW) drawn dimmed and inert so the layout
+-- reads as a real character screen.
+local SLOT_SIZE         = 37
+local SLOT_GAP          = 6
+local DOLL_PAD          = 8
+local DOLL_TITLE_H      = 24
+local DOLL_ROWS         = 8
+local DOLL_COL_GAP      = 30                                    -- space between the two columns (visual "character" area)
+local DOLL_WEAPON_GAP   = 16                                    -- extra space above the weapons row
+local DOLL_WIDTH        = DOLL_PAD * 2 + SLOT_SIZE * 2 + DOLL_COL_GAP    -- 8 + 37 + 30 + 37 + 8 = 120
+local DOLL_LEFT_X       = DOLL_PAD                              -- 8
+local DOLL_RIGHT_X      = DOLL_WIDTH - DOLL_PAD - SLOT_SIZE     -- 75
+local DOLL_ROWS_H       = DOLL_ROWS * SLOT_SIZE + (DOLL_ROWS - 1) * SLOT_GAP -- 338
+local DOLL_BOTTOM_Y     = DOLL_ROWS_H + DOLL_WEAPON_GAP         -- 354
+-- Weapons row is 2 buttons + 1 gap = 80 px wide, centered in the frame.
+local DOLL_WEAPONS_X0   = math.floor((DOLL_WIDTH - (2 * SLOT_SIZE + SLOT_GAP)) / 2) -- (120-80)/2 = 20
+local DOLL_HEIGHT       = DOLL_TITLE_H + DOLL_BOTTOM_Y + SLOT_SIZE + DOLL_PAD -- 24 + 354 + 37 + 8 = 423
 
--- Pixel position of each slot's TOPLEFT, in the doll content frame's
--- coordinate system. y is positive-down here; the builder negates it
--- for SetPoint's TOP-anchored offset.
+local function rowY(row) return row * (SLOT_SIZE + SLOT_GAP) end
+
+-- Real recommended-gear slots and their grid positions. The 2 weapon
+-- slots live in the bottom row, separated from the column slots by
+-- DOLL_WEAPON_GAP so they visually break apart.
 local PAPER_DOLL_POS = {
-	head      = { x = DOLL_LEFT_X,  y = 0 * (SLOT_SIZE + SLOT_GAP) },
-	neck      = { x = DOLL_LEFT_X,  y = 1 * (SLOT_SIZE + SLOT_GAP) },
-	shoulder  = { x = DOLL_LEFT_X,  y = 2 * (SLOT_SIZE + SLOT_GAP) },
-	back      = { x = DOLL_LEFT_X,  y = 3 * (SLOT_SIZE + SLOT_GAP) },
-	chest     = { x = DOLL_LEFT_X,  y = 4 * (SLOT_SIZE + SLOT_GAP) },
-	wrist     = { x = DOLL_LEFT_X,  y = 5 * (SLOT_SIZE + SLOT_GAP) },
-	hands     = { x = DOLL_RIGHT_X, y = 0 * (SLOT_SIZE + SLOT_GAP) },
-	waist     = { x = DOLL_RIGHT_X, y = 1 * (SLOT_SIZE + SLOT_GAP) },
-	legs      = { x = DOLL_RIGHT_X, y = 2 * (SLOT_SIZE + SLOT_GAP) },
-	feet      = { x = DOLL_RIGHT_X, y = 3 * (SLOT_SIZE + SLOT_GAP) },
-	finger1   = { x = DOLL_RIGHT_X, y = 4 * (SLOT_SIZE + SLOT_GAP) },
-	finger2   = { x = DOLL_RIGHT_X, y = 5 * (SLOT_SIZE + SLOT_GAP) },
-	trinket1  = { x = DOLL_PAD + 0 * (SLOT_SIZE + SLOT_GAP), y = DOLL_BOTTOM_Y },
-	trinket2  = { x = DOLL_PAD + 1 * (SLOT_SIZE + SLOT_GAP), y = DOLL_BOTTOM_Y },
-	main_hand = { x = DOLL_PAD + 2 * (SLOT_SIZE + SLOT_GAP), y = DOLL_BOTTOM_Y },
-	off_hand  = { x = DOLL_PAD + 3 * (SLOT_SIZE + SLOT_GAP), y = DOLL_BOTTOM_Y },
+	head      = { x = DOLL_LEFT_X,  y = rowY(0) },
+	neck      = { x = DOLL_LEFT_X,  y = rowY(1) },
+	shoulder  = { x = DOLL_LEFT_X,  y = rowY(2) },
+	-- row 3 left:  shirt (decorative; see PAPER_DOLL_DECOR below)
+	chest     = { x = DOLL_LEFT_X,  y = rowY(4) },
+	waist     = { x = DOLL_LEFT_X,  y = rowY(5) },
+	legs      = { x = DOLL_LEFT_X,  y = rowY(6) },
+	feet      = { x = DOLL_LEFT_X,  y = rowY(7) },
+	wrist     = { x = DOLL_RIGHT_X, y = rowY(0) },
+	hands     = { x = DOLL_RIGHT_X, y = rowY(1) },
+	back      = { x = DOLL_RIGHT_X, y = rowY(2) },
+	-- row 3 right: tabard (decorative; see PAPER_DOLL_DECOR below)
+	finger1   = { x = DOLL_RIGHT_X, y = rowY(4) },
+	finger2   = { x = DOLL_RIGHT_X, y = rowY(5) },
+	trinket1  = { x = DOLL_RIGHT_X, y = rowY(6) },
+	trinket2  = { x = DOLL_RIGHT_X, y = rowY(7) },
+	main_hand = { x = DOLL_WEAPONS_X0,                       y = DOLL_BOTTOM_Y },
+	off_hand  = { x = DOLL_WEAPONS_X0 + SLOT_SIZE + SLOT_GAP, y = DOLL_BOTTOM_Y },
+}
+
+-- Decorative slots: cosmetic-only in WoW so Simly never recommends
+-- them. We still draw them (dimmed, no tooltip) to match the WoW
+-- character pane's row alignment.
+local PAPER_DOLL_DECOR = {
+	{ id = "shirt",  x = DOLL_LEFT_X,  y = rowY(3), icon = "Interface\\PaperDollInfoFrame\\UI-PaperDoll-Slot-Shirt"  },
+	{ id = "tabard", x = DOLL_RIGHT_X, y = rowY(3), icon = "Interface\\PaperDollInfoFrame\\UI-PaperDoll-Slot-Tabard" },
 }
 
 -- Human-readable labels for the scenario key. Defined twice in this
@@ -105,6 +123,33 @@ local function setSlotBorderColor(btn, r, g, b)
 	if nt then nt:SetVertexColor(r, g, b) end
 end
 
+-- Build a WoW item string from a composed-gear record. The composer
+-- stores identity as "itemId:bonus1/bonus2/...:crafted1/crafted2".
+-- Tooltip APIs need a full item string with bonus IDs so the rendered
+-- ilvl reflects the *actual* drop level (e.g. 272) instead of the raw
+-- base item level (often 15-50 for high-end gear before bonuses).
+-- Format: item:itemID:enchant:gem1:gem2:gem3:gem4:suffix:unique:level
+--         :specID:modMask:numBonus:bonus1:bonus2:...
+-- Missing fields are empty colons; numBonus is the count.
+local function buildItemString(rec)
+	if not rec or not rec.item_id then return nil end
+	local bonuses = {}
+	if rec.identity then
+		-- identity = "ITEMID:b1/b2/b3:cs1/cs2"
+		local _, _, bonusStr = string.find(rec.identity, "^[^:]*:([^:]*)")
+		if bonusStr and bonusStr ~= "" then
+			for b in string.gmatch(bonusStr, "[^/]+") do
+				table.insert(bonuses, b)
+			end
+		end
+	end
+	-- 11 empty fields between itemID and numBonusIDs:
+	-- enchant, gem1..gem4, suffix, unique, linkLevel, specID, upgradeID, instanceDifficultyID.
+	local s = "item:" .. rec.item_id .. ":::::::::::" .. #bonuses
+	for _, b in ipairs(bonuses) do s = s .. ":" .. b end
+	return s
+end
+
 local function showPaperDollTooltip(btn)
 	local rec = btn.currentRec
 	local equippedId = btn.currentEquippedId
@@ -113,7 +158,15 @@ local function showPaperDollTooltip(btn)
 
 	GameTooltip:SetOwner(btn, "ANCHOR_RIGHT")
 	if rec then
-		GameTooltip:SetItemByID(rec.item_id)
+		-- SetHyperlink with a bonus-ID-bearing item string renders
+		-- at the right ilvl. SetItemByID alone shows the base item
+		-- (often dramatically lower ilvl) which misled the user.
+		local itemStr = buildItemString(rec)
+		if itemStr then
+			GameTooltip:SetHyperlink(itemStr)
+		else
+			GameTooltip:SetItemByID(rec.item_id)
+		end
 		GameTooltip:AddLine(" ")
 		local key = ns.SavedVars and ns.SavedVars.GetScenario and ns.SavedVars.GetScenario() or "single_target_patchwerk"
 		local label = SCENARIO_LABELS_FOR_DOLL[key] or key
@@ -163,7 +216,11 @@ local function createPaperDoll(parentFrame)
 	local buttons = {}
 	for _, slot in ipairs(SLOT_DISPLAY_ORDER) do
 		local pos = PAPER_DOLL_POS[slot.id]
-		local btn = CreateFrame("Button", "SimlyPaperDoll_" .. slot.id, content, "ItemButtonTemplate")
+		-- Use the dedicated ItemButton object type. Retail's modern
+		-- ItemButtonTemplate is bound to this type; passing "Button" as
+		-- the frame type silently leaves the icon/border children
+		-- missing on some retail builds and the whole panel falls over.
+		local btn = CreateFrame("ItemButton", "SimlyPaperDoll_" .. slot.id, content)
 		btn:SetSize(SLOT_SIZE, SLOT_SIZE)
 		btn:SetPoint("TOPLEFT", pos.x, -pos.y)
 		btn.slotId    = slot.id
@@ -172,6 +229,22 @@ local function createPaperDoll(parentFrame)
 		btn:SetScript("OnEnter", showPaperDollTooltip)
 		btn:SetScript("OnLeave", function() GameTooltip:Hide() end)
 		buttons[slot.id] = btn
+	end
+
+	-- Decorative shirt/tabard buttons — fixed silhouette icon, dim
+	-- border, no tooltip, no refresh hook. They exist purely so the
+	-- grid matches WoW's character pane row alignment.
+	for _, decor in ipairs(PAPER_DOLL_DECOR) do
+		local btn = CreateFrame("ItemButton", "SimlyPaperDoll_" .. decor.id, content)
+		btn:SetSize(SLOT_SIZE, SLOT_SIZE)
+		btn:SetPoint("TOPLEFT", decor.x, -decor.y)
+		btn:EnableMouse(false)
+		SetItemButtonTexture(btn, decor.icon)
+		-- Faint icon + dim border so the slot reads as "not in use".
+		local iconTex = _G[btn:GetName() .. "IconTexture"]
+		if iconTex then iconTex:SetVertexColor(0.45, 0.45, 0.45) end
+		local nt = btn:GetNormalTexture()
+		if nt then nt:SetVertexColor(0.3, 0.3, 0.3) end
 	end
 
 	doll.buttons = buttons
@@ -325,8 +398,16 @@ local function createFrame()
 	-- Paper-doll side panel: docks to the left of the main frame and
 	-- shows the per-slot recommended gear as character-pane-style icon
 	-- buttons. Shares show/hide with the parent via HookScript inside
-	-- createPaperDoll.
-	f.paperDoll = createPaperDoll(f)
+	-- createPaperDoll. pcall'd so an unexpected retail UI quirk in the
+	-- doll never blanks the main panel — the text body keeps rendering.
+	local ok, dollOrErr = pcall(createPaperDoll, f)
+	if ok then
+		f.paperDoll = dollOrErr
+	else
+		DEFAULT_CHAT_FRAME:AddMessage(
+			"|cffff5555Simly:|r paper-doll init failed: " .. tostring(dollOrErr)
+		)
+	end
 
 	-- WoW frames are shown by default at creation; hide so the very
 	-- first /simly call doesn't toggle a just-created visible frame off.
@@ -694,9 +775,15 @@ function Panel.Refresh()
 
 	frame.body:SetText(table.concat(lines, "\n"))
 	-- Refresh the paper-doll side panel from the same scenario data.
-	-- Sits at the end of Refresh so any layout work (Show/Hide) above
-	-- this point has settled before we touch icon/border state.
-	Panel.RefreshPaperDoll()
+	-- Sits at the end of Refresh so any layout work above this point
+	-- has settled. pcall'd: a transient WoW API hiccup in the doll
+	-- (e.g. an item not yet cached) shouldn't blank the text body.
+	local dollOk, dollErr = pcall(Panel.RefreshPaperDoll)
+	if not dollOk then
+		DEFAULT_CHAT_FRAME:AddMessage(
+			"|cffff5555Simly:|r paper-doll refresh failed: " .. tostring(dollErr)
+		)
+	end
 	-- Resize the scroll content to fit the rendered text so the
 	-- scrollbar's range matches what's actually drawn. GetStringHeight
 	-- returns the wrapped text's pixel height; the +12 padding gives
