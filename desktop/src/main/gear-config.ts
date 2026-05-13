@@ -91,6 +91,20 @@ export const TOP_TRINKETS_TO_KEEP = 4;
 export const TRINKET_ITERATIONS = 3000;
 
 // ---------------------------------------------------------------------------
+// Ring cache (ring-cache.ts)
+// ---------------------------------------------------------------------------
+
+/**
+ * Number of "leader" rings carried forward from one full sim to the
+ * next. Mirrors the trinket pattern — new rings sim against these
+ * rather than the historical pool.
+ */
+export const TOP_RINGS_TO_KEEP = 4;
+
+/** Iterations per profileset for the ring pre-scan stage. */
+export const RING_ITERATIONS = 3000;
+
+// ---------------------------------------------------------------------------
 // Quick-sim swap test (swap-test.ts)
 // ---------------------------------------------------------------------------
 

@@ -451,6 +451,25 @@ export function getTrinketPool(parsed: ParsedExport): ParsedItem[] {
 }
 
 /**
+ * Pull the unique ring pool from a parsed export. Both finger1 and
+ * finger2 lists are merged and deduped by identity — same ring may
+ * appear in both lists since the addon emits whatever slot it found
+ * the item in. Different ilvl variants of the same ring are kept
+ * separate (different bonus_ids = different identity).
+ */
+export function getRingPool(parsed: ParsedExport): ParsedItem[] {
+  const all = [
+    ...(parsed.poolBySlot.finger1 ?? []),
+    ...(parsed.poolBySlot.finger2 ?? []),
+  ];
+  const byIdentity = new Map<string, ParsedItem>();
+  for (const r of all) {
+    if (!byIdentity.has(r.identity)) byIdentity.set(r.identity, r);
+  }
+  return Array.from(byIdentity.values());
+}
+
+/**
  * Generate all unordered pairs of items from `arr` (n choose 2). Used
  * by the trinket and ring pre-scans. Yields tuples in stable order:
  * (arr[i], arr[j]) where i < j.

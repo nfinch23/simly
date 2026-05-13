@@ -11,6 +11,7 @@ import {
   type SimlyResults,
   type StatWeights,
   type TrinketPreScanResult,
+  type RingPreScanResult,
 } from '@simly/shared';
 import { hashGearContext, replaceGearInProfile, setConsumablesInProfile } from './profile-builder';
 import { pickWinningFlaskSimcKey } from './scans/best-flask';
@@ -37,6 +38,13 @@ import {
   runTrinketPairsSim,
   runTrinketPreScanSim,
 } from './scans/trinket-pre-scan';
+import {
+  finalizeRingResult,
+  parseRingPreScanResult,
+  profilesetsToPairResults as profilesetsToRingPairResults,
+  runRingPairsSim,
+  runRingPreScanSim,
+} from './scans/ring-pre-scan';
 import { runGreedyGearPipeline } from './scans/gear-greedy-pipeline';
 import {
   type TrinketLock,
@@ -51,6 +59,13 @@ import {
   TrinketCacheStore,
 } from './trinket-cache';
 import {
+  mergePairResults as mergeRingPairResults,
+  planRingScan,
+  poolSignature as ringPoolSignature,
+  selectTopRings,
+  RingCacheStore,
+} from './ring-cache';
+import {
   buildCatalogSummary,
   fullPoolSignature,
   GearCatalogStore,
@@ -62,6 +77,7 @@ import {
 import { planQuickSim, type QuickSimDecision } from './quick-sim';
 import { runSwapTest, type SwapTestResult } from './swap-test';
 import {
+  getRingPool,
   getTrinketPool,
   parseSimcExport,
   type ParsedExport,
@@ -88,6 +104,7 @@ import {
 import {
   tryCreateGearCatalog,
   tryCreateIgnoreList,
+  tryCreateRingCache,
   tryCreateTrinketCache,
 } from './store-factories';
 
@@ -149,6 +166,8 @@ export interface ScanQueueOptions {
   ignoreList?: IgnoreListStore;
   /** Optional trinket cache store. Same pattern as ignoreList. */
   trinketCache?: TrinketCacheStore;
+  /** Optional ring cache store. Same pattern. */
+  ringCache?: RingCacheStore;
   /** Optional gear catalog store. Same pattern. */
   gearCatalog?: GearCatalogStore;
   /**
@@ -191,6 +210,7 @@ export class ScanQueue {
   private inFlight = false;
   private readonly ignoreList: IgnoreListStore | undefined;
   private readonly trinketCache: TrinketCacheStore | undefined;
+  private readonly ringCache: RingCacheStore | undefined;
   private readonly gearCatalog: GearCatalogStore | undefined;
   /** Latest SimlyResults written to disk; exposed via IPC. */
   latestResults: SimlyResults | null = null;
@@ -212,6 +232,7 @@ export class ScanQueue {
     // gear-coarse still runs without ignore-list persistence.
     this.ignoreList = opts.ignoreList ?? tryCreateIgnoreList();
     this.trinketCache = opts.trinketCache ?? tryCreateTrinketCache();
+    this.ringCache = opts.ringCache ?? tryCreateRingCache();
     this.gearCatalog = opts.gearCatalog ?? tryCreateGearCatalog();
   }
 
@@ -273,6 +294,10 @@ export class ScanQueue {
     if (this.trinketCache) {
       try { this.trinketCache.clear(); trinketCleared = true; }
       catch (err) { console.warn('[clear-cache] trinketCache.clear threw:', (err as Error).message); }
+    }
+    if (this.ringCache) {
+      try { this.ringCache.clear(); }
+      catch (err) { console.warn('[clear-cache] ringCache.clear threw:', (err as Error).message); }
     }
     if (this.ignoreList) {
       try { this.ignoreList.clear(); ignoreCleared = true; }
@@ -731,6 +756,19 @@ export class ScanQueue {
         );
       }
     }
+    // Same rationale for the ring cache — cached ring pairs were sim'd
+    // against the old gear context and their rankings may have shifted.
+    if (this.ringCache) {
+      try {
+        this.ringCache.invalidate(args.characterKey, args.scenario);
+        console.log(`[sim] ring cache invalidated (gear context changed)`);
+      } catch (err) {
+        console.warn(
+          '[sim] ring cache invalidate failed:',
+          (err as Error).message,
+        );
+      }
+    }
 
     console.log(
       `[sim] swap test found ${result.results.filter((r) => r.is_upgrade).length} upgrade(s); ` +
@@ -1050,6 +1088,126 @@ export class ScanQueue {
         } else {
           console.log(
             `[sim] trinket_pre_scan: only ${trinkets.length} trinket(s) in pool; skipping`,
+          );
+        }
+      }
+
+      // Stage 1.6: ring pre-scan. Mirrors the trinket stage above —
+      // rings live outside GEAR_LADDER_SLOTS (the greedy pipeline doesn't
+      // enumerate them) so the addon paper-doll's finger1/finger2 are
+      // empty unless we sim them here. Same cache-aware planner: pool
+      // unchanged ⇒ reuse; new ring(s) ⇒ incremental; otherwise full.
+      // Slice B scope: result is merged into composed.gear by the
+      // composer; the gear ladder is not constrained by a ringLock yet
+      // (rings aren't in GEAR_LADDER_SLOTS, so no constraint needed).
+      if (args.useRealExport && args.parsedExport) {
+        const rings = getRingPool(args.parsedExport);
+        if (rings.length >= 2) {
+          const rStarted = Math.floor(Date.now() / 1000);
+          const r0 = Date.now();
+          const plan = this.ringCache
+            ? planRingScan({
+                rings,
+                cache: this.ringCache,
+                character_key: args.characterKey,
+                scenario: args.scenario,
+              })
+            : { kind: 'full' as const, rings, reason: 'no cache available' };
+
+          if (plan.kind === 'reuse') {
+            console.log(
+              `[sim] ring_pre_scan: cache hit (pool unchanged) — reusing ${plan.result.pairs.length} cached pairs`,
+            );
+            const rFinished = Math.floor(Date.now() / 1000);
+            scans.ring_pre_scan = {
+              status: 'done',
+              started_at: rStarted,
+              finished_at: rFinished,
+              data: plan.result,
+            };
+          } else {
+            const rPairs =
+              plan.kind === 'incremental'
+                ? plan.pairsToSim.length
+                : (plan.rings.length * (plan.rings.length - 1)) / 2;
+            const planLabel =
+              plan.kind === 'incremental'
+                ? `incremental: ${plan.newRings.length} new ring(s) vs ${plan.cachedTop.length} cached top`
+                : `full: ${plan.reason}`;
+            console.log(
+              `[sim] ring_pre_scan: ${planLabel} — ${rPairs} pair(s), ${s.ringIterations} iter each`,
+            );
+            const rProgress = makeStageProgressLogger(
+              `ring_pre_scan (${rPairs} pairs)`,
+              args.characterKey,
+            );
+            try {
+              let pairs;
+              if (plan.kind === 'incremental') {
+                const r = await runRingPairsSim({
+                  paths: runnerPaths,
+                  baseProfile: lockedBaseProfile,
+                  pairs: plan.pairsToSim,
+                  iterations: s.ringIterations,
+                  onProgress: rProgress.onProgress,
+                });
+                const fresh = profilesetsToRingPairResults(r.run, r.pairsByName);
+                const currentIdentities = new Set(rings.map((rg) => rg.identity));
+                pairs = mergeRingPairResults(plan.cached.pairs, fresh, currentIdentities);
+              } else {
+                const r = await runRingPreScanSim({
+                  paths: runnerPaths,
+                  baseProfile: lockedBaseProfile,
+                  rings: plan.rings,
+                  iterations: s.ringIterations,
+                  onProgress: rProgress.onProgress,
+                });
+                pairs = parseRingPreScanResult(r.run, r.pairsByName).pairs;
+              }
+              const data = finalizeRingResult(pairs);
+              const rFinished = Math.floor(Date.now() / 1000);
+              scans.ring_pre_scan = {
+                status: 'done',
+                started_at: rStarted,
+                finished_at: rFinished,
+                data,
+              };
+              if (this.ringCache) {
+                try {
+                  this.ringCache.put({
+                    character_key: args.characterKey,
+                    scenario: args.scenario,
+                    pool_signature: ringPoolSignature(rings),
+                    pairs: data.pairs,
+                    top_ring_identities: selectTopRings(data.pairs, s.topRingsToKeep),
+                    last_simmed_at: rFinished,
+                  });
+                } catch (err) {
+                  console.warn('[sim] ring cache write failed:', (err as Error).message);
+                }
+              }
+              const dt = ((Date.now() - r0) / 1000).toFixed(1);
+              const winnerStr = data.winner
+                ? `${data.winner.finger1.name} + ${data.winner.finger2.name} @ ${Math.round(data.winner.mean_dps)} dps`
+                : '(no winner)';
+              console.log(
+                `[sim] ring_pre_scan (${dt}s, ${data.pairs.length} pair(s) total): ${winnerStr}`,
+              );
+              rProgress.stop();
+            } catch (err) {
+              rProgress.stop();
+              console.error('[sim] ring_pre_scan failed:', (err as Error).message);
+              scans.ring_pre_scan = {
+                status: 'failed',
+                started_at: rStarted,
+                finished_at: Math.floor(Date.now() / 1000),
+                error: (err as Error).message,
+              };
+            }
+          }
+        } else {
+          console.log(
+            `[sim] ring_pre_scan: only ${rings.length} ring(s) in pool; skipping`,
           );
         }
       }

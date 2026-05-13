@@ -31,6 +31,8 @@ import {
   FINAL_ITERATIONS,
   TRINKET_ITERATIONS,
   TOP_TRINKETS_TO_KEEP,
+  RING_ITERATIONS,
+  TOP_RINGS_TO_KEEP,
   SWAP_TEST_ITERATIONS,
 } from './gear-config';
 
@@ -59,6 +61,10 @@ export interface SimlySettings {
   trinketIterations: number;
   /** Number of "top" trinkets carried forward to the gear ladder from the pre-scan. */
   topTrinketsToKeep: number;
+  /** SimC iterations per profileset for the ring pre-scan. */
+  ringIterations: number;
+  /** Number of "top" rings carried forward from the pre-scan cache. */
+  topRingsToKeep: number;
   /** SimC iterations per profileset for the swap-test quick-sim stage. */
   swapTestIterations: number;
   /** Override for the WoW retail root path. Undefined = auto-detect. */
@@ -78,6 +84,8 @@ export const SETTINGS_DEFAULTS: Readonly<Required<Omit<SimlySettings, 'wowRetail
   finalIterations: FINAL_ITERATIONS,
   trinketIterations: TRINKET_ITERATIONS,
   topTrinketsToKeep: TOP_TRINKETS_TO_KEEP,
+  ringIterations: RING_ITERATIONS,
+  topRingsToKeep: TOP_RINGS_TO_KEEP,
   swapTestIterations: SWAP_TEST_ITERATIONS,
 };
 

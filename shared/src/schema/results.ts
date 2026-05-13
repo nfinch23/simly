@@ -72,6 +72,25 @@ export interface TrinketPreScanResult {
   winner?: TrinketPairResult;
 }
 
+/** One ring pair tested in the ring pre-scan. */
+export interface RingPairResult {
+  pair_id: string;
+  finger1: ScannedItemRef;
+  finger2: ScannedItemRef;
+  mean_dps: number;
+  /** Delta vs the winning pair, in percent. The winner has 0. */
+  delta_pct: number;
+}
+
+/** Output of the ring pre-scan. */
+export interface RingPreScanResult {
+  label: string;
+  /** Sorted descending by mean_dps. */
+  pairs: RingPairResult[];
+  /** Same as pairs[0] when populated. */
+  winner?: RingPairResult;
+}
+
 /** SimC stat-weight output (per-stat normalized to intellect or strength). */
 export interface StatWeights {
   intellect?: number;
@@ -181,6 +200,7 @@ export interface CatalogSummary {
 export interface ScanCollection {
   stat_weights?: ScanRecord<StatWeights>;
   trinket_pre_scan?: ScanRecord<TrinketPreScanResult>;
+  ring_pre_scan?: ScanRecord<RingPreScanResult>;
   gear_coarse?: ScanRecord<GearScanResult>;
   gear_refined?: ScanRecord<GearScanResult>;
   gear_final?: ScanRecord<GearScanResult>;
