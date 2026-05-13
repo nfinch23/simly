@@ -72,7 +72,8 @@ local DOLL_ROWS_H       = DOLL_ROWS * SLOT_SIZE + (DOLL_ROWS - 1) * SLOT_GAP -- 
 local DOLL_BOTTOM_Y     = DOLL_ROWS_H + DOLL_WEAPON_GAP         -- 354
 -- Weapons row is 2 buttons + 1 gap = 80 px wide, centered in the frame.
 local DOLL_WEAPONS_X0   = math.floor((DOLL_WIDTH - (2 * SLOT_SIZE + SLOT_GAP)) / 2) -- (120-80)/2 = 20
-local DOLL_HEIGHT       = DOLL_TITLE_H + DOLL_BOTTOM_Y + SLOT_SIZE + DOLL_PAD -- 24 + 354 + 37 + 8 = 423
+local DOLL_EQUIP_BTN_H  = 22
+local DOLL_HEIGHT       = DOLL_TITLE_H + DOLL_BOTTOM_Y + SLOT_SIZE + DOLL_PAD + DOLL_EQUIP_BTN_H + DOLL_PAD -- 24 + 354 + 37 + 8 + 22 + 8 = 453
 
 local function rowY(row) return row * (SLOT_SIZE + SLOT_GAP) end
 
@@ -299,6 +300,48 @@ local function createPaperDoll(parentFrame)
 		btn:SetScript("OnLeave", function() GameTooltip:Hide() end)
 		consumables[c.id] = btn
 	end
+
+	-- "Equip all" button at the bottom of the doll: walks every gear
+	-- slot and equips each recommendation that isn't already equipped.
+	-- WoW handles rapid sequential EquipItemByName calls fine — they
+	-- get queued. Items not present in the player's bags (e.g. in the
+	-- bank) are silently skipped by WoW; we surface a hint about that
+	-- in the chat message.
+	local equipAllBtn = CreateFrame("Button", "SimlyPaperDollEquipAll", doll, "UIPanelButtonTemplate")
+	equipAllBtn:SetSize(DOLL_WIDTH - DOLL_PAD * 2, DOLL_EQUIP_BTN_H)
+	equipAllBtn:SetPoint("BOTTOM", 0, DOLL_PAD)
+	equipAllBtn:SetText("Equip all")
+	equipAllBtn:SetScript("OnClick", function()
+		if InCombatLockdown and InCombatLockdown() then
+			DEFAULT_CHAT_FRAME:AddMessage("|cffff5555Simly:|r can't equip in combat — try again when out of combat.")
+			return
+		end
+		if not doll.buttons then return end
+		local toEquip, alreadyOn = 0, 0
+		for _, slot in ipairs(SLOT_DISPLAY_ORDER) do
+			local btn = doll.buttons[slot.id]
+			if btn and btn.currentRec and btn.currentRec.name and not btn.isLocked2H then
+				if btn.currentEquippedId == btn.currentRec.item_id then
+					alreadyOn = alreadyOn + 1
+				else
+					EquipItemByName(btn.currentRec.name, slot.inv)
+					toEquip = toEquip + 1
+				end
+			end
+		end
+		if PlaySound and SOUNDKIT and SOUNDKIT.PUT_DOWN_SMALL_CHAIN then
+			PlaySound(SOUNDKIT.PUT_DOWN_SMALL_CHAIN)
+		end
+		if toEquip == 0 then
+			DEFAULT_CHAT_FRAME:AddMessage("|cff00ffffSimly:|r already wearing every recommended item.")
+		else
+			DEFAULT_CHAT_FRAME:AddMessage(string.format(
+				"|cff00ffffSimly:|r equipping %d item%s (%d already on). Items in the bank or missing from bags will be skipped.",
+				toEquip, toEquip == 1 and "" or "s", alreadyOn
+			))
+		end
+	end)
+	doll.equipAllBtn = equipAllBtn
 
 	doll.buttons = buttons
 	doll.consumables = consumables
