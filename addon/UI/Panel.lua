@@ -186,8 +186,10 @@ local function showPaperDollTooltip(btn)
 			GameTooltip:AddLine("|cff00ff00Currently equipped|r")
 		elseif equippedId == nil then
 			GameTooltip:AddLine("|cffffff00You don't have this equipped — empty slot!|r")
+			GameTooltip:AddLine("|cffffd700Click to equip from bags|r")
 		else
 			GameTooltip:AddLine("|cffffff00Swap in from bag/bank|r")
+			GameTooltip:AddLine("|cffffd700Click to equip|r")
 		end
 	elseif lockedOH then
 		GameTooltip:AddLine("|cff" .. "aaaaaa" .. btn.slotLabel .. "|r")
@@ -232,6 +234,27 @@ local function createPaperDoll(parentFrame)
 		btn.slotId    = slot.id
 		btn.slotInv   = slot.inv
 		btn.slotLabel = slot.label
+		-- Left-click to equip the recommendation. EquipItemByName works
+		-- from non-secure Lua out of combat; the second arg picks the
+		-- specific inventory slot so finger1/finger2 and trinket1/
+		-- trinket2 don't get swapped by the auto-finder. Blocked in
+		-- combat by WoW (we surface a friendly message instead of
+		-- letting it silently fail).
+		btn:RegisterForClicks("LeftButtonUp")
+		btn:SetScript("OnClick", function(self)
+			local rec = self.currentRec
+			if not rec or not rec.name then return end
+			if self.currentEquippedId == rec.item_id then
+				DEFAULT_CHAT_FRAME:AddMessage("|cff00ffffSimly:|r " .. rec.name .. " is already equipped.")
+				return
+			end
+			if InCombatLockdown and InCombatLockdown() then
+				DEFAULT_CHAT_FRAME:AddMessage("|cffff5555Simly:|r can't equip in combat — try again when out of combat.")
+				return
+			end
+			DEFAULT_CHAT_FRAME:AddMessage("|cff00ffffSimly:|r equipping " .. rec.name .. " to " .. self.slotLabel .. "...")
+			EquipItemByName(rec.name, self.slotInv)
+		end)
 		btn:SetScript("OnEnter", showPaperDollTooltip)
 		btn:SetScript("OnLeave", function() GameTooltip:Hide() end)
 		buttons[slot.id] = btn
