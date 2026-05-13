@@ -9,6 +9,7 @@
 
 import { GearCatalogStore } from './gear-catalog';
 import { IgnoreListStore } from './ignore-list';
+import { RingCacheStore } from './ring-cache';
 import { TrinketCacheStore } from './trinket-cache';
 
 export function tryCreateIgnoreList(): IgnoreListStore | undefined {
@@ -25,6 +26,15 @@ export function tryCreateTrinketCache(): TrinketCacheStore | undefined {
     return new TrinketCacheStore();
   } catch (err) {
     console.warn('[trinket-cache] could not initialize store:', (err as Error).message);
+    return undefined;
+  }
+}
+
+export function tryCreateRingCache(): RingCacheStore | undefined {
+  try {
+    return new RingCacheStore();
+  } catch (err) {
+    console.warn('[ring-cache] could not initialize store:', (err as Error).message);
     return undefined;
   }
 }

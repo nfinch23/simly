@@ -10,6 +10,7 @@ import type {
   BestFlaskResult,
   BestFoodResult,
   GearScanResult,
+  RingPreScanResult,
   ScanCollection,
   TrinketPreScanResult,
 } from '@simly/shared';
@@ -75,6 +76,21 @@ function fakeTrinketPreScan(opts: {
     delta_pct: 0,
   };
   return { label: 'Best trinket pair', pairs: [winner], winner };
+}
+
+function fakeRingPreScan(opts: {
+  r1: { item_id: number; name: string; ilvl: number };
+  r2: { item_id: number; name: string; ilvl: number };
+  winner_dps?: number;
+}): RingPreScanResult {
+  const winner = {
+    pair_id: 'rp1',
+    finger1: { ...opts.r1, identity: `${opts.r1.item_id}::` },
+    finger2: { ...opts.r2, identity: `${opts.r2.item_id}::` },
+    mean_dps: opts.winner_dps ?? 70_000,
+    delta_pct: 0,
+  };
+  return { label: 'Best ring pair', pairs: [winner], winner };
 }
 
 function fakeCatalog(opts?: { dps?: number; slots?: Record<string, { item_id: number; name: string; ilvl: number }> }): GearCatalogEntry {
@@ -388,6 +404,74 @@ describe('composeFromScans', () => {
     const c = composeFromScans(scans, undefined);
     expect(c?.gear?.trinket1?.name).toBe('Drum');
     expect(c?.gear?.trinket2?.name).toBe('Bell');
+  });
+
+  it('merges ring_pre_scan winner into composed.gear.finger1/finger2', () => {
+    // Rings are sim'd separately (paper-doll finger slots aren't in
+    // GEAR_LADDER_SLOTS). The composer must pull finger1/finger2 from
+    // the ring pre-scan winner so the addon's paper-doll renders them
+    // instead of leaving the slot empty/gray.
+    const scans: ScanCollection = {
+      gear_final: {
+        status: 'done',
+        data: fakeGearScan({
+          winner_dps: 70_000,
+          items: [{ slot: 'head', item_id: 1, name: 'H', ilvl: 272 }],
+        }),
+      },
+      ring_pre_scan: {
+        status: 'done',
+        data: fakeRingPreScan({
+          r1: { item_id: 300, name: 'Band', ilvl: 259 },
+          r2: { item_id: 400, name: 'Loop', ilvl: 263 },
+        }),
+      },
+    };
+    const c = composeFromScans(scans, undefined);
+    expect(c?.gear?.finger1).toEqual({ item_id: 300, name: 'Band', ilvl: 259, identity: '300::' });
+    expect(c?.gear?.finger2).toEqual({ item_id: 400, name: 'Loop', ilvl: 263, identity: '400::' });
+    expect(c?.gear?.head?.name).toBe('H'); // gear scan slots still present
+  });
+
+  it('does not overwrite ring slots the gear scan already populated', () => {
+    // Defensive: a future gear pipeline that owns rings shouldn't be
+    // silently overridden by the ring pre-scan. Gear scan wins.
+    const scans: ScanCollection = {
+      gear_final: {
+        status: 'done',
+        data: fakeGearScan({
+          winner_dps: 70_000,
+          items: [
+            { slot: 'finger1', item_id: 999, name: 'Gear-picked R1', ilvl: 280 },
+          ],
+        }),
+      },
+      ring_pre_scan: {
+        status: 'done',
+        data: fakeRingPreScan({
+          r1: { item_id: 300, name: 'Pre-scan R1', ilvl: 259 },
+          r2: { item_id: 400, name: 'Pre-scan R2', ilvl: 263 },
+        }),
+      },
+    };
+    const c = composeFromScans(scans, undefined);
+    expect(c?.gear?.finger1?.name).toBe('Gear-picked R1');
+    expect(c?.gear?.finger2?.name).toBe('Pre-scan R2'); // gap still filled
+  });
+
+  it('still merges rings when no gear ladder ran at all', () => {
+    const scans: ScanCollection = {
+      ring_pre_scan: {
+        status: 'done',
+        data: fakeRingPreScan({
+          r1: { item_id: 300, name: 'Band', ilvl: 259 },
+          r2: { item_id: 400, name: 'Loop', ilvl: 263 },
+        }),
+      },
+    };
+    const c = composeFromScans(scans, undefined);
+    expect(c?.gear?.finger1?.name).toBe('Band');
+    expect(c?.gear?.finger2?.name).toBe('Loop');
   });
 
   it('skips a stage whose data is undefined (defensive — done w/ no data)', () => {

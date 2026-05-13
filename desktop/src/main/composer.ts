@@ -27,6 +27,7 @@ import {
   type BestFoodResult,
   type ComposedGearItem,
   type ComposedLoadout,
+  type RingPreScanResult,
   type ScanCollection,
   type Scenario,
   type SimlyResults,
@@ -189,6 +190,31 @@ export function composeFromScans(
         name: trinketScan.winner.trinket2.name,
         ilvl: trinketScan.winner.trinket2.ilvl,
         identity: trinketScan.winner.trinket2.identity,
+      };
+    }
+  }
+
+  // Merge the ring pre-scan winner into composed.gear. Same rationale
+  // as the trinket merge above — rings aren't enumerated by the gear
+  // ladder (their effects/sockets can dominate over raw stat budgets),
+  // so they get their own pair-sim + composer merge. Defensive ordering:
+  // only fill slots the gear scan didn't already populate.
+  const ringScan = scans.ring_pre_scan?.data as RingPreScanResult | undefined;
+  if (ringScan?.winner) {
+    if (!gear.finger1) {
+      gear.finger1 = {
+        item_id: ringScan.winner.finger1.item_id,
+        name: ringScan.winner.finger1.name,
+        ilvl: ringScan.winner.finger1.ilvl,
+        identity: ringScan.winner.finger1.identity,
+      };
+    }
+    if (!gear.finger2) {
+      gear.finger2 = {
+        item_id: ringScan.winner.finger2.item_id,
+        name: ringScan.winner.finger2.name,
+        ilvl: ringScan.winner.finger2.ilvl,
+        identity: ringScan.winner.finger2.identity,
       };
     }
   }
