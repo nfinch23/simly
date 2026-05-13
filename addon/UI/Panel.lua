@@ -125,9 +125,40 @@ local SCENARIO_LABELS_FOR_DOLL = {
 	aoe_funnel              = "AoE Funnel",
 }
 
+-- Build a slot button from primitives — a Button with a backdrop'd
+-- border + an icon Texture child. Avoids the ItemButton/Template
+-- pairing entirely, which produced empty frames in current retail
+-- (Midnight 12.0): the children that ItemButtonTemplate creates didn't
+-- render in this build, so the buttons appeared invisible.
+-- The returned button exposes:
+--   btn.icon  — the icon Texture
+--   btn.SetBorderColor(r,g,b) — tints the backdrop border
+local function createSlotButton(name, parent, w, h)
+	local btn = CreateFrame("Button", name, parent, "BackdropTemplate")
+	btn:SetSize(w, h)
+	btn:SetBackdrop({
+		bgFile   = "Interface\\Buttons\\WHITE8x8",
+		edgeFile = "Interface\\Buttons\\WHITE8x8",
+		edgeSize = 1,
+		insets   = { left = 1, right = 1, top = 1, bottom = 1 },
+	})
+	btn:SetBackdropColor(0, 0, 0, 0.6)
+	btn:SetBackdropBorderColor(0.5, 0.5, 0.5, 1)
+	local icon = btn:CreateTexture(nil, "ARTWORK")
+	icon:SetPoint("TOPLEFT", 1, -1)
+	icon:SetPoint("BOTTOMRIGHT", -1, 1)
+	-- Standard WoW item-icon crop trims the gradient border baked into
+	-- icon textures so they fit flush inside our frame.
+	icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+	btn.icon = icon
+	btn.SetBorderColor = function(self, r, g, b, a)
+		self:SetBackdropBorderColor(r, g, b, a or 1)
+	end
+	return btn
+end
+
 local function setSlotBorderColor(btn, r, g, b)
-	local nt = btn:GetNormalTexture()
-	if nt then nt:SetVertexColor(r, g, b) end
+	if btn.SetBorderColor then btn:SetBorderColor(r, g, b, 1) end
 end
 
 local function showPaperDollTooltip(btn)
@@ -196,13 +227,7 @@ local function createPaperDoll(parentFrame)
 	local buttons = {}
 	for _, slot in ipairs(SLOT_DISPLAY_ORDER) do
 		local pos = PAPER_DOLL_POS[slot.id]
-		-- Use the dedicated ItemButton object type *with* the template.
-		-- Without the template the icon/border child textures don't get
-		-- created — SetItemButtonTexture then errors silently (caught
-		-- by the pcall in Panel.Refresh) and currentRec never gets
-		-- assigned, which is why tooltips returned blank.
-		local btn = CreateFrame("ItemButton", "SimlyPaperDoll_" .. slot.id, content, "ItemButtonTemplate")
-		btn:SetSize(SLOT_SIZE, SLOT_SIZE)
+		local btn = createSlotButton("SimlyPaperDoll_" .. slot.id, content, SLOT_SIZE, SLOT_SIZE)
 		btn:SetPoint("TOPLEFT", pos.x, -pos.y)
 		btn.slotId    = slot.id
 		btn.slotInv   = slot.inv
@@ -217,8 +242,7 @@ local function createPaperDoll(parentFrame)
 	-- and paints icon/tooltip; here we just construct the buttons.
 	local consumables = {}
 	for _, c in ipairs(PAPER_DOLL_CONSUMABLES) do
-		local btn = CreateFrame("ItemButton", "SimlyPaperDoll_" .. c.id, content, "ItemButtonTemplate")
-		btn:SetSize(SLOT_SIZE, SLOT_SIZE)
+		local btn = createSlotButton("SimlyPaperDoll_" .. c.id, content, SLOT_SIZE, SLOT_SIZE)
 		btn:SetPoint("TOPLEFT", c.x, -c.y)
 		btn.consumableField = c.field
 		btn.consumableLabel = c.label
@@ -525,7 +549,8 @@ function Panel.RefreshPaperDoll()
 			elseif equippedId then
 				icon = GetItemIcon and GetItemIcon(equippedId) or nil
 			end
-			SetItemButtonTexture(btn, icon)
+			btn.icon:SetTexture(icon)
+			btn.icon:SetVertexColor(1, 1, 1)
 
 			-- Border color encodes status.
 			local r, g, b = 0.35, 0.35, 0.35
@@ -565,20 +590,15 @@ function Panel.RefreshPaperDoll()
 						local _, _, _, _, foundIcon = GetItemInfoInstant(rec.name)
 						icon = foundIcon
 					end
-					SetItemButtonTexture(btn, icon or c.fallback)
+					btn.icon:SetTexture(icon or c.fallback)
+					btn.icon:SetVertexColor(1, 1, 1)
 					setSlotBorderColor(btn, 0.65, 0.65, 0.85)
 					btn:Show()
 				else
 					-- No scan data yet: dim placeholder, no tooltip.
-					SetItemButtonTexture(btn, c.fallback)
+					btn.icon:SetTexture(c.fallback)
+					btn.icon:SetVertexColor(0.45, 0.45, 0.45)
 					setSlotBorderColor(btn, 0.3, 0.3, 0.3)
-					local iconTex = _G[btn:GetName() .. "IconTexture"]
-					if iconTex then iconTex:SetVertexColor(0.45, 0.45, 0.45) end
-				end
-				if rec then
-					-- Restore full brightness when we have data.
-					local iconTex = _G[btn:GetName() .. "IconTexture"]
-					if iconTex then iconTex:SetVertexColor(1, 1, 1) end
 				end
 			end
 		end
