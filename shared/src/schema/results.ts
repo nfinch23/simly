@@ -205,6 +205,12 @@ export interface ScanCollection {
   gear_refined?: ScanRecord<GearScanResult>;
   gear_final?: ScanRecord<GearScanResult>;
   /**
+   * Output of the dev-only full-sim cartesian (no stat-weight pruning,
+   * all non-trash bag items). Reference-only — composed.gear still
+   * uses gear_final. Used for accuracy comparison vs the quick pipeline.
+   */
+  gear_final_full?: ScanRecord<GearScanResult>;
+  /**
    * v1-shim scans carried forward from Phase 2 — the consumables suite
    * lives behind `best_flask` / `best_food` for now and will fold into
    * `consumables_gems_enchants` when Phase 4 lands.
@@ -271,6 +277,13 @@ export interface ScenarioResults {
 export interface SimlyResults {
   schema_version: number;
   character_key: string;
+  /**
+   * True when the desktop is running under electron-vite dev
+   * (process.env.ELECTRON_RENDERER_URL is set). Addon uses this to
+   * gate dev-only UI like the "Run Full Sim (dev)" button. Absent or
+   * false in packaged builds — production users never see dev UI.
+   */
+  dev_mode?: boolean;
   /** Currently viewed/last-simmed scenario. */
   active_scenario: Scenario;
   /** Hash of equipped+bag items at sim time; addon uses to flag "stale". */

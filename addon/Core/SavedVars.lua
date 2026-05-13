@@ -50,6 +50,7 @@ function SavedVars.WriteSnapshot()
 	local prevScenario = (SimlyDB and SimlyDB.active_scenario) or DEFAULT_SCENARIO
 	local prevLastSeen = (SimlyDB and SimlyDB.last_seen_generated_at) or 0
 	local prevUpdateAllAt = (SimlyDB and SimlyDB.update_all_requested_at) or 0
+	local prevUpdateFullSimAt = (SimlyDB and SimlyDB.update_full_sim_requested_at) or 0
 
 	SimlyDB = {
 		schema_version = SCHEMA_VERSION,
@@ -67,6 +68,7 @@ function SavedVars.WriteSnapshot()
 		active_scenario = prevScenario,
 		last_seen_generated_at = prevLastSeen,
 		update_all_requested_at = prevUpdateAllAt,
+		update_full_sim_requested_at = prevUpdateFullSimAt,
 	}
 end
 
@@ -116,6 +118,16 @@ function SavedVars.RequestUpdateAll()
 	SavedVars.WriteSnapshot()
 	SimlyDB.update_requested_at = time()
 	SimlyDB.update_all_requested_at = time()
+end
+
+-- Called by the dev-only "Run Full Sim" button. Triggers the normal
+-- quick pipeline followed by a Raidbots-Top-Gear-style full cartesian
+-- sim against the same actor — used for accuracy comparison against
+-- the greedy heuristic. Re-snapshots so the export reflects current
+-- bag state (same rationale as RequestUpdate).
+function SavedVars.RequestFullSim()
+	SavedVars.WriteSnapshot()
+	SimlyDB.update_full_sim_requested_at = time()
 end
 
 -- Back-compat alias. Removed in a later phase.

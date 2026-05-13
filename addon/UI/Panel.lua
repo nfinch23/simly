@@ -490,6 +490,28 @@ local function createFrame()
 	reloadBtn:SetAttribute("type1", "macro")
 	reloadBtn:SetAttribute("macrotext1", "/reload")
 
+	-- Dev-only "Run Full Sim (dev)" button. Triggers the normal quick
+	-- pipeline followed by a Raidbots-Top-Gear-style full cartesian sim
+	-- so we can measure how much DPS the greedy heuristic leaves on the
+	-- table vs an exhaustive search. Hidden by default — Panel.Refresh
+	-- toggles visibility based on SimlyResults.dev_mode, which the
+	-- desktop sets only when running under electron-vite dev.
+	local fullSimBtn = CreateFrame("Button", nil, f, "SecureActionButtonTemplate,UIPanelButtonTemplate")
+	fullSimBtn:SetSize(180, 22)
+	fullSimBtn:SetPoint("BOTTOMLEFT", 18, 74)
+	fullSimBtn:SetText("Run Full Sim (dev)")
+	fullSimBtn:RegisterForClicks("AnyUp", "AnyDown")
+	fullSimBtn:SetAttribute("type1", "macro")
+	fullSimBtn:SetAttribute("macrotext1", "/reload")
+	fullSimBtn:SetScript("PreClick", function()
+		ns.SavedVars.RequestFullSim()
+		DEFAULT_CHAT_FRAME:AddMessage(
+			"|cffff6600Simly:|r reloading to start FULL SIM (dev). This will take ~10-30 min. Quick pipeline runs first, then the cartesian sim."
+		)
+	end)
+	fullSimBtn:Hide()
+	f.fullSimBtn = fullSimBtn
+
 	-- Scenario toggle row: four equal-width buttons at the very bottom.
 	-- Clicking one calls SavedVars.SetScenario() and refreshes the panel
 	-- to update the active highlight. The change persists to disk only on
@@ -721,6 +743,22 @@ end
 
 function Panel.Refresh()
 	if not frame then return end
+
+	-- Dev-only Full Sim button: show + reflow scroll only when the
+	-- desktop has stamped SimlyResults.dev_mode = true. Reflow is
+	-- needed because the dev button lives at y=74 (above the regular
+	-- update buttons at y=44); without resizing the scroll, the button
+	-- overlays the scroll content's bottom edge.
+	if frame.fullSimBtn and frame.scroll then
+		local devMode = SimlyResults and SimlyResults.dev_mode
+		if devMode then
+			frame.fullSimBtn:Show()
+			frame.scroll:SetPoint("BOTTOMRIGHT", -32, 110)
+		else
+			frame.fullSimBtn:Hide()
+			frame.scroll:SetPoint("BOTTOMRIGHT", -32, 80)
+		end
+	end
 
 	-- Re-apply scenario button highlight: disable the active one so it
 	-- looks "pressed"; enable all others so they're clickable.

@@ -55,4 +55,12 @@ export interface SimlyDB {
   last_seen_generated_at?: number;
   /** When set and newer than lastCompletedAllAt, desktop runs all 4 scenarios. */
   update_all_requested_at?: number;
+  /**
+   * When set and newer than lastCompletedFullSimAt, desktop runs the
+   * normal quick pipeline followed by a Raidbots-Top-Gear-style full
+   * sim (cartesian over all non-trash bag items, no stat-weight pruning).
+   * Dev-only — addon hides the trigger button unless SimlyResults.dev_mode
+   * is true.
+   */
+  update_full_sim_requested_at?: number;
 }

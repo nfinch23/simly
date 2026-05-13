@@ -13,6 +13,12 @@ import {
   type TrinketPreScanResult,
   type RingPreScanResult,
 } from '@simly/shared';
+import {
+  runGearFullSimScan,
+  MAX_FULL_SIM_COMBOS,
+  FULL_SIM_ITERATIONS,
+} from './scans/gear-full-sim';
+import { appendFullSimHistory, type FullSimHistoryEntry } from './full-sim-history';
 import { hashGearContext, replaceGearInProfile, setConsumablesInProfile } from './profile-builder';
 import { pickWinningFlaskSimcKey } from './scans/best-flask';
 import { pickWinningFoodSimcKey } from './scans/best-food';
@@ -207,6 +213,18 @@ export class ScanQueue {
    * Same defense as lastCompletedAt — both are gated on a fresh boot.
    */
   private lastCompletedAllAt: number;
+  /**
+   * Stale-trigger defense for the dev-only "Run Full Sim" button.
+   * Initialized to now so an old update_full_sim_requested_at in
+   * SavedVariables from a prior session doesn't re-fire on boot.
+   */
+  private lastCompletedFullSimAt: number;
+  /**
+   * Set true by maybeRunForSavedVars when the user clicked "Run Full
+   * Sim (dev)". Read at the end of runScan to dispatch the full
+   * cartesian after the quick pipeline finishes. Cleared in finally.
+   */
+  private fullSimRequested = false;
   private inFlight = false;
   private readonly ignoreList: IgnoreListStore | undefined;
   private readonly trinketCache: TrinketCacheStore | undefined;
@@ -225,6 +243,7 @@ export class ScanQueue {
     // stale update_all_requested_at in SavedVariables from a previous
     // session re-firing all 4 scenarios on every desktop start.
     this.lastCompletedAllAt = Math.floor(Date.now() / 1000);
+    this.lastCompletedFullSimAt = Math.floor(Date.now() / 1000);
     // electron-store needs an electron app context to default its cwd.
     // Constructing it here lazily — if Electron isn't available (rare;
     // really only happens when an environment misconfigures), we log
@@ -332,6 +351,23 @@ export class ScanQueue {
   maybeRunForSavedVars(db: SimlyDB): void {
     if (this.inFlight) {
       console.log('[queue] sim in flight; ignoring SavedVars update');
+      return;
+    }
+
+    // Dev-only "Run Full Sim" — runs the normal quick pipeline first,
+    // then a Raidbots-Top-Gear-style cartesian for comparison. Highest
+    // priority gate (above "update all") because a dev clicking Full
+    // Sim explicitly wants this branch even if other flags are stale.
+    if (
+      db.update_full_sim_requested_at &&
+      db.update_full_sim_requested_at > this.lastCompletedFullSimAt
+    ) {
+      console.log(
+        `[queue] full-sim request from addon (update_full_sim_requested_at=${db.update_full_sim_requested_at}); ` +
+          `running quick pipeline + full cartesian for ${db.character.name}`,
+      );
+      this.fullSimRequested = true;
+      void this.runForSavedVars(db);
       return;
     }
 
@@ -1902,6 +1938,10 @@ export class ScanQueue {
       const mergedResults: SimlyResults = {
         schema_version: RESULTS_SCHEMA_VERSION,
         character_key: args.characterKey,
+        // dev_mode is the canonical "running under electron-vite dev"
+        // signal — addon checks this to render the dev-only Full Sim
+        // button. Packaged builds never set ELECTRON_RENDERER_URL.
+        dev_mode: !!process.env['ELECTRON_RENDERER_URL'],
         active_scenario: args.scenario,
         scenarios: {
           ...existingScenarios,
@@ -1924,11 +1964,188 @@ export class ScanQueue {
 
       this.lastCompletedAt = finishedAt;
       scanOutcome = 'ok';
+
+      // Dev-only Full Sim extension. Runs the Raidbots-Top-Gear-style
+      // cartesian against the same actor that just finished, compares
+      // its winner to the quick pipeline's gear_final, logs + appends
+      // a history record, and re-writes SimlyResults.lua with the
+      // gear_final_full scan added. Skipped silently when the flag
+      // isn't set or when prerequisites are missing (no parsed export,
+      // no trinket lock, etc.).
+      if (
+        this.fullSimRequested &&
+        args.useRealExport &&
+        args.parsedExport &&
+        trinketLock
+      ) {
+        await this.runFullSimExtension({
+          characterKey: args.characterKey,
+          scenario: args.scenario,
+          parsedExport: args.parsedExport,
+          baseProfile: lockedBaseProfile,
+          trinketLock,
+          quickScans: scans,
+          mergedResults,
+          scenarioResult,
+          existingScenarios,
+          runnerPaths,
+        });
+        this.lastCompletedFullSimAt = Math.floor(Date.now() / 1000);
+      } else if (this.fullSimRequested) {
+        console.warn(
+          '[full-sim] skipped: prerequisites missing ' +
+            `(useRealExport=${args.useRealExport}, parsedExport=${!!args.parsedExport}, trinketLock=${!!trinketLock})`,
+        );
+        this.lastCompletedFullSimAt = Math.floor(Date.now() / 1000);
+      }
     } finally {
       setWindowTitle(terminalTitle(scanOutcome, args.characterKey));
       this.inFlight = false;
       this.runStartedAt = null;
+      this.fullSimRequested = false;
       this.emitState();
+    }
+  }
+
+  /**
+   * Dev-only Raidbots-Top-Gear-style full sim. Runs after the quick
+   * pipeline has already written SimlyResults.lua; appends a
+   * gear_final_full scan record + a comparison JSONL entry. Failures
+   * are non-fatal — the quick result already shipped, this is bonus
+   * dev-feedback data.
+   */
+  private async runFullSimExtension(args: {
+    characterKey: string;
+    scenario: Scenario;
+    parsedExport: ParsedExport;
+    baseProfile: string;
+    trinketLock: TrinketLock;
+    quickScans: ScanCollection;
+    mergedResults: SimlyResults;
+    scenarioResult: ScenarioResults;
+    existingScenarios: Partial<Record<Scenario, ScenarioResults>>;
+    runnerPaths: { binPath: string; scratchDir: string };
+  }): Promise<void> {
+    const fsStarted = Math.floor(Date.now() / 1000);
+    const fsT0 = Date.now();
+    const fsProgress = makeStageProgressLogger(
+      'gear_final_full (dev)',
+      args.characterKey,
+    );
+
+    // Union the catalog's 'trash' set with any items the gear ladder
+    // already learned to ignore — full sim still respects the empirical
+    // "this item never wins" signal.
+    const catalog = this.gearCatalog?.get(args.characterKey, args.scenario);
+    const trashIds = ignoredIdentities(catalog);
+
+    let fullResult: ScanRecord<GearScanResult>;
+    try {
+      const { result } = await runGearFullSimScan({
+        paths: args.runnerPaths,
+        baseProfile: args.baseProfile,
+        parsed: args.parsedExport,
+        trinketLock: args.trinketLock,
+        ignoreSet: trashIds,
+        iterations: FULL_SIM_ITERATIONS,
+        maxCombos: MAX_FULL_SIM_COMBOS,
+        onProgress: fsProgress.onProgress,
+        onPlanReady: (plan) => {
+          const estMin = Math.round((plan.comboCount * FULL_SIM_ITERATIONS) / 60_000);
+          console.log(
+            `[full-sim] cartesian: ${plan.comboCount} combos at ${FULL_SIM_ITERATIONS} iter ` +
+              `(${plan.ringPairs} ring pairs, est ~${estMin} min); trash filtered ${trashIds.size}`,
+          );
+        },
+      });
+      fsProgress.stop();
+      const fsFinished = Math.floor(Date.now() / 1000);
+      const fsDuration = (fsFinished - fsStarted);
+      fullResult = {
+        status: 'done',
+        started_at: fsStarted,
+        finished_at: fsFinished,
+        data: result,
+      };
+
+      // Comparison logging + JSONL persistence.
+      const quickFinal = args.quickScans.gear_final?.data as GearScanResult | undefined;
+      const quickDps = quickFinal?.winner?.mean_dps ?? 0;
+      const fullDps = result.winner?.mean_dps ?? 0;
+      const deltaPct = quickDps > 0 ? ((fullDps - quickDps) / quickDps) * 100 : 0;
+      const quickSlots = new Map(
+        (quickFinal?.winner?.items ?? []).map((i) => [i.slot, i.item.name]),
+      );
+      const fullSlots = new Map(
+        (result.winner?.items ?? []).map((i) => [i.slot, i.item.name]),
+      );
+      const slotsChanged: Array<{ slot: string; quick: string; full: string }> = [];
+      for (const [slot, fullName] of fullSlots) {
+        const quickName = quickSlots.get(slot);
+        if (quickName !== fullName) {
+          slotsChanged.push({ slot, quick: quickName ?? '(empty)', full: fullName });
+        }
+      }
+      const slotsSummary = slotsChanged.length === 0
+        ? '0 (identical loadout)'
+        : `${slotsChanged.length} (${slotsChanged.map((s) => `${s.slot}: ${s.quick}→${s.full}`).join(', ')})`;
+      console.log(
+        `[full-sim-compare] quick=${Math.round(quickDps)} dps | full=${Math.round(fullDps)} dps | ` +
+          `delta=${deltaPct >= 0 ? '+' : ''}${deltaPct.toFixed(3)}% | slots_changed=${slotsSummary} | ` +
+          `combos=${result.total_combos} | duration=${fsDuration}s`,
+      );
+
+      const entry: FullSimHistoryEntry = {
+        ts: new Date().toISOString(),
+        character_key: args.characterKey,
+        scenario: args.scenario,
+        quick_winner_dps: quickDps,
+        full_winner_dps: fullDps,
+        delta_pct: Number(deltaPct.toFixed(3)),
+        slots_changed: slotsChanged,
+        full_combos: result.total_combos,
+        full_duration_s: fsDuration,
+      };
+      await appendFullSimHistory(entry);
+    } catch (err) {
+      fsProgress.stop();
+      console.error('[full-sim] failed:', (err as Error).message);
+      fullResult = {
+        status: 'failed',
+        started_at: fsStarted,
+        finished_at: Math.floor(Date.now() / 1000),
+        error: (err as Error).message,
+      };
+    }
+
+    // Update SimlyResults.lua with the new gear_final_full record so
+    // the addon sees it on /reload. Mutate the in-memory mergedResults
+    // and re-write atomically.
+    const updatedScans: ScanCollection = {
+      ...args.quickScans,
+      gear_final_full: fullResult,
+    };
+    const updatedScenarioResult: ScenarioResults = {
+      ...args.scenarioResult,
+      scans: updatedScans,
+    };
+    const updatedResults: SimlyResults = {
+      ...args.mergedResults,
+      scenarios: {
+        ...args.existingScenarios,
+        [args.scenario]: updatedScenarioResult,
+      },
+    };
+    try {
+      await writeLuaFile(
+        this.opts.paths.resultsLuaPath,
+        'SimlyResults',
+        updatedResults as unknown as Parameters<typeof writeLuaFile>[2],
+      );
+      this.latestResults = updatedResults;
+      console.log('[full-sim] wrote SimlyResults.lua with gear_final_full');
+    } catch (err) {
+      console.error('[full-sim] failed to re-write SimlyResults.lua:', err);
     }
   }
 }
