@@ -186,10 +186,10 @@ local function showPaperDollTooltip(btn)
 			GameTooltip:AddLine("|cff00ff00Currently equipped|r")
 		elseif equippedId == nil then
 			GameTooltip:AddLine("|cffffff00You don't have this equipped — empty slot!|r")
-			GameTooltip:AddLine("|cffffd700Click to equip from bags|r")
+			GameTooltip:AddLine("|cffffd700Right-click to equip from bags|r")
 		else
 			GameTooltip:AddLine("|cffffff00Swap in from bag/bank|r")
-			GameTooltip:AddLine("|cffffd700Click to equip|r")
+			GameTooltip:AddLine("|cffffd700Right-click to equip|r")
 		end
 	elseif lockedOH then
 		GameTooltip:AddLine("|cff" .. "aaaaaa" .. btn.slotLabel .. "|r")
@@ -234,14 +234,15 @@ local function createPaperDoll(parentFrame)
 		btn.slotId    = slot.id
 		btn.slotInv   = slot.inv
 		btn.slotLabel = slot.label
-		-- Left-click to equip the recommendation. EquipItemByName works
-		-- from non-secure Lua out of combat; the second arg picks the
-		-- specific inventory slot so finger1/finger2 and trinket1/
-		-- trinket2 don't get swapped by the auto-finder. Blocked in
-		-- combat by WoW (we surface a friendly message instead of
-		-- letting it silently fail).
-		btn:RegisterForClicks("LeftButtonUp")
-		btn:SetScript("OnClick", function(self)
+		-- Right-click to equip the recommendation. Mirrors WoW's
+		-- natural convention of right-clicking an item in your bags
+		-- to equip it. EquipItemByName works from non-secure Lua out
+		-- of combat; the second arg picks the specific inventory slot
+		-- so finger1/finger2 and trinket1/trinket2 don't get swapped
+		-- by the auto-finder.
+		btn:RegisterForClicks("RightButtonUp")
+		btn:SetScript("OnClick", function(self, button)
+			if button ~= "RightButton" then return end
 			local rec = self.currentRec
 			if not rec or not rec.name then return end
 			if self.currentEquippedId == rec.item_id then
