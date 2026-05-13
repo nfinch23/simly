@@ -181,8 +181,11 @@ local function buildItemHyperlink(rec)
 			end
 		end
 	end
-	-- 11 empty fields between itemID and numBonusIDs.
-	local s = "|cffffffff|Hitem:" .. rec.item_id .. ":::::::::::" .. #bonuses
+	-- WoW item link field positions:
+	--   1=itemID, 2=enchant, 3..6=gem1..gem4, 7=suffix, 8=unique,
+	--   9=linkLevel, 10=specID, 11=upgrade, 12=instanceDifficulty, 13=numBonus
+	-- That's 12 separators between itemID and numBonus.
+	local s = "|cffffffff|Hitem:" .. rec.item_id .. "::::::::::::" .. #bonuses
 	for _, b in ipairs(bonuses) do s = s .. ":" .. b end
 	s = s .. "|h[" .. rec.name .. "]|h|r"
 	return s
@@ -197,15 +200,24 @@ local function showPaperDollTooltip(btn)
 	GameTooltip:SetOwner(btn, "ANCHOR_RIGHT")
 	if rec then
 		-- Prefer a full hyperlink with bonus IDs — WoW renders the
-		-- correct ilvl (e.g. 272) from the bonus chain. Fall back to
-		-- SetItemByID only when the rec has no identity (no bonuses
-		-- to apply), which shows the base ilvl but is at least
-		-- consistent with what SetHyperlink would have rendered.
+		-- correct ilvl (e.g. 272) from the bonus chain. SetHyperlink
+		-- fails silently if the link format is malformed (no error,
+		-- empty tooltip). Use NumLines after the call to detect that
+		-- and fall back to SetItemByID so the player always sees
+		-- *something* on hover, even if it's the base ilvl.
 		local link = buildItemHyperlink(rec)
+		local rendered = false
 		if link then
 			GameTooltip:SetHyperlink(link)
-		else
+			rendered = (GameTooltip:NumLines() or 0) > 0
+		end
+		if not rendered then
 			GameTooltip:SetItemByID(rec.item_id)
+			-- Surface the simmed ilvl explicitly since SetItemByID
+			-- renders the base/template ilvl, often dramatically lower.
+			if rec.ilvl and rec.ilvl > 0 then
+				GameTooltip:AddDoubleLine("|cffffd700Simly Item Level|r", tostring(rec.ilvl), 1, 0.82, 0, 1, 1, 1)
+			end
 		end
 		GameTooltip:AddLine(" ")
 		local key = ns.SavedVars and ns.SavedVars.GetScenario and ns.SavedVars.GetScenario() or "single_target_patchwerk"
