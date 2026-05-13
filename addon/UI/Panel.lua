@@ -50,9 +50,9 @@ local SLOT_DISPLAY_ORDER = {
 }
 
 -- Paper-doll geometry. Layout mirrors WoW's character pane exactly:
---   Left column  (8 rows): head, neck, shoulder, [shirt], chest,
---                          waist, legs, feet
---   Right column (8 rows): wrist, hands, back, [tabard], finger1,
+--   Left column  (8 rows): head, neck, shoulder, back, chest,
+--                          [shirt], [tabard], wrist
+--   Right column (8 rows): hands, waist, legs, feet, finger1,
 --                          finger2, trinket1, trinket2
 --   Bottom row, centered with extra vertical gap: main_hand, off_hand
 -- Shirt + tabard are placeholder slots (no Simly recommendation ever
@@ -80,32 +80,35 @@ local function rowY(row) return row * (SLOT_SIZE + SLOT_GAP) end
 -- slots live in the bottom row, separated from the column slots by
 -- DOLL_WEAPON_GAP so they visually break apart.
 local PAPER_DOLL_POS = {
+	-- Left column, top to bottom (matches the in-game character pane):
 	head      = { x = DOLL_LEFT_X,  y = rowY(0) },
 	neck      = { x = DOLL_LEFT_X,  y = rowY(1) },
 	shoulder  = { x = DOLL_LEFT_X,  y = rowY(2) },
-	-- row 3 left:  shirt (decorative; see PAPER_DOLL_DECOR below)
+	back      = { x = DOLL_LEFT_X,  y = rowY(3) },
 	chest     = { x = DOLL_LEFT_X,  y = rowY(4) },
-	waist     = { x = DOLL_LEFT_X,  y = rowY(5) },
-	legs      = { x = DOLL_LEFT_X,  y = rowY(6) },
-	feet      = { x = DOLL_LEFT_X,  y = rowY(7) },
-	wrist     = { x = DOLL_RIGHT_X, y = rowY(0) },
-	hands     = { x = DOLL_RIGHT_X, y = rowY(1) },
-	back      = { x = DOLL_RIGHT_X, y = rowY(2) },
-	-- row 3 right: tabard (decorative; see PAPER_DOLL_DECOR below)
+	-- row 5 left: shirt  (decorative; see PAPER_DOLL_DECOR below)
+	-- row 6 left: tabard (decorative; see PAPER_DOLL_DECOR below)
+	wrist     = { x = DOLL_LEFT_X,  y = rowY(7) },
+	-- Right column, top to bottom:
+	hands     = { x = DOLL_RIGHT_X, y = rowY(0) },
+	waist     = { x = DOLL_RIGHT_X, y = rowY(1) },
+	legs      = { x = DOLL_RIGHT_X, y = rowY(2) },
+	feet      = { x = DOLL_RIGHT_X, y = rowY(3) },
 	finger1   = { x = DOLL_RIGHT_X, y = rowY(4) },
 	finger2   = { x = DOLL_RIGHT_X, y = rowY(5) },
 	trinket1  = { x = DOLL_RIGHT_X, y = rowY(6) },
 	trinket2  = { x = DOLL_RIGHT_X, y = rowY(7) },
+	-- Weapons row, centered below the gear grid:
 	main_hand = { x = DOLL_WEAPONS_X0,                       y = DOLL_BOTTOM_Y },
 	off_hand  = { x = DOLL_WEAPONS_X0 + SLOT_SIZE + SLOT_GAP, y = DOLL_BOTTOM_Y },
 }
 
 -- Decorative slots: cosmetic-only in WoW so Simly never recommends
 -- them. We still draw them (dimmed, no tooltip) to match the WoW
--- character pane's row alignment.
+-- character pane's row alignment. Both live in the left column.
 local PAPER_DOLL_DECOR = {
-	{ id = "shirt",  x = DOLL_LEFT_X,  y = rowY(3), icon = "Interface\\PaperDollInfoFrame\\UI-PaperDoll-Slot-Shirt"  },
-	{ id = "tabard", x = DOLL_RIGHT_X, y = rowY(3), icon = "Interface\\PaperDollInfoFrame\\UI-PaperDoll-Slot-Tabard" },
+	{ id = "shirt",  x = DOLL_LEFT_X, y = rowY(5), icon = "Interface\\PaperDollInfoFrame\\UI-PaperDoll-Slot-Shirt"  },
+	{ id = "tabard", x = DOLL_LEFT_X, y = rowY(6), icon = "Interface\\PaperDollInfoFrame\\UI-PaperDoll-Slot-Tabard" },
 }
 
 -- Human-readable labels for the scenario key. Defined twice in this
