@@ -24,12 +24,16 @@ import { formatItemLine } from '../simc-export-parser';
 import type { UpgradeOpportunity, UpgradePriorityResult } from '@simly/shared';
 import { runSimc, type RunnerPaths, type SimcRunResult } from '../simc-runner';
 import { buildProfilesetLines, matchProfilesetsByPrefix, roundTo } from './index';
+import { rewriteToNextRank } from '../upgrade-track-lookup';
 
 /**
- * Assumed per-tier ilvl bump. Midnight track gaps are +13 between adjacent
- * tracks (Adventurer 237 → Veteran 250 → Champion 263 → Hero 276 → Myth 289)
- * and the dominant step within a track is also +13. Inner-track variants
- * exist but +13 keeps rank-correctness for the headline question.
+ * Fallback per-rank ilvl bump used only when we can't detect the item's
+ * upgrade track from its bonus_ids (crafted items, world-quest rewards,
+ * etc.). The PRIMARY path uses real track data from upgrade-tracks.json
+ * via `rewriteToNextRank` — within a track, real ranks step by +3 or +4
+ * ilvl, not +13. The +13 here is intentionally conservative on the high
+ * side so untrackable items still surface as candidates rather than
+ * being silently dropped.
  */
 export const ILVL_PER_TIER = 13;
 
@@ -72,6 +76,14 @@ interface SlotCandidate {
   slot: string;
   item: ParsedItem;
   next_ilvl: number;
+  /**
+   * When non-null, the item's track was identified and we'll model the
+   * upgrade by swapping the rank's bonus_id (the most accurate path).
+   * When null, we fall back to an `ilevel=<N>` override on the item line.
+   */
+  rewritten_bonus_ids: number[] | null;
+  /** Which track this item sits in, for diagnostics. Null when no track detected. */
+  track_label: string | null;
 }
 
 /**
@@ -86,11 +98,37 @@ export function buildUpgradePriorityProfilesets(
   for (const [slot, item] of Object.entries(composedGear)) {
     if (!item || item.ilvl <= 0) continue;
     if (item.ilvl >= MYTH_CEILING) continue;
+
+    // Primary path: detect upgrade track from bonus_ids, model the +1
+    // rank as a bonus_id swap. SimC reads the real rank's bonus_id and
+    // applies the authoritative ilvl + stat scaling. Returns null when
+    // the item is at the track ceiling (rank 6/6) or has no detectable
+    // track — those cases fall through to the +13 approximation, with
+    // the ceiling case being filtered by the rewrite returning null.
+    const rewrite = rewriteToNextRank(item.bonus_ids);
+
+    if (rewrite) {
+      candidates.push({
+        key: slot,
+        slot,
+        item,
+        next_ilvl: rewrite.next.ilvl,
+        rewritten_bonus_ids: rewrite.bonus_ids,
+        track_label: `${rewrite.position.track} ${rewrite.position.rank + 1}/${rewrite.position.all_ranks.length}`,
+      });
+      continue;
+    }
+
+    // Fallback for untrackable items (crafted, world-quest, etc.).
+    // ilvl override is approximate but at least surfaces the slot as a
+    // candidate so the user knows it might be worth checking.
     candidates.push({
       key: slot,
       slot,
       item,
       next_ilvl: item.ilvl + ILVL_PER_TIER,
+      rewritten_bonus_ids: null,
+      track_label: null,
     });
   }
 
@@ -112,7 +150,7 @@ export function buildUpgradePriorityProfilesets(
     { key: BASELINE_KEY, simcLine: baselineLine },
     ...candidates.map((c) => ({
       key: c.key,
-      simcLine: `${formatItemLine(c.item, c.slot as Parameters<typeof formatItemLine>[1])},ilevel=${c.next_ilvl}`,
+      simcLine: formatVariantLine(c),
     })),
   ].filter((c) => c.simcLine.length > 0);
 
@@ -120,6 +158,24 @@ export function buildUpgradePriorityProfilesets(
     lines: buildProfilesetLines(PROFILESET_PREFIX, psCandidates),
     candidates,
   };
+}
+
+/**
+ * Emit the SimC profileset body for one upgrade variant. Uses the
+ * bonus_id rewrite when available (authoritative path) and falls back
+ * to an `ilevel=<N>` override when the item has no track marker.
+ */
+function formatVariantLine(c: SlotCandidate): string {
+  const slot = c.slot as Parameters<typeof formatItemLine>[1];
+  if (c.rewritten_bonus_ids) {
+    // Replace the item's bonus_ids with the next-rank set. The base
+    // formatItemLine path emits the current bonus_ids, so we substitute
+    // them via a shallow clone before formatting.
+    const rewritten: ParsedItem = { ...c.item, bonus_ids: c.rewritten_bonus_ids };
+    return formatItemLine(rewritten, slot);
+  }
+  // Fallback path: ilevel override (the original approximation).
+  return `${formatItemLine(c.item, slot)},ilevel=${c.next_ilvl}`;
 }
 
 export function parseUpgradePriorityResult(
