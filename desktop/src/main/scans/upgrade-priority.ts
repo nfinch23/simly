@@ -18,7 +18,8 @@
  * construction time. Instead it's invoked directly from `scan-queue.ts`
  * after the gear ladder converges, in the same style as `gear-full-sim`.
  */
-import type { ParsedItem } from '../simc-export-parser';
+import type { ComposedLoadout } from '@simly/shared';
+import type { ParsedExport, ParsedItem, SlotName } from '../simc-export-parser';
 import { formatItemLine } from '../simc-export-parser';
 import type { UpgradeOpportunity, UpgradePriorityResult } from '@simly/shared';
 import { runSimc, type RunnerPaths, type SimcRunResult } from '../simc-runner';
@@ -164,6 +165,40 @@ export function parseUpgradePriorityResult(
     ilvl_per_tier: ILVL_PER_TIER,
     opportunities,
   };
+}
+
+/**
+ * Back-resolve the composer's serializable gear refs to the runtime
+ * `ParsedItem` objects. We need the bonus_id list + raw stats to emit
+ * a faithful SimC item line — `ComposedGearItem` only carries item_id +
+ * name. Match strategy: look in `parsedExport.poolBySlot[slot]` first,
+ * fall back to `equipped` (handles cases where the pool was deduped to
+ * a different identity but the equipped copy is still around).
+ *
+ * Silently drops any slot that can't be resolved (defensive — partial
+ * results are better than aborting the scan entirely).
+ */
+export function resolveComposedToParsedItems(
+  composedGear: NonNullable<ComposedLoadout['gear']>,
+  parsedExport: ParsedExport,
+): Record<string, ParsedItem> {
+  const out: Record<string, ParsedItem> = {};
+  for (const [slot, ref] of Object.entries(composedGear)) {
+    if (!ref) continue;
+    const pool = parsedExport.poolBySlot[slot as SlotName] ?? [];
+    const fromPool = pool.find((it) => it.item_id === ref.item_id);
+    if (fromPool) {
+      out[slot] = fromPool;
+      continue;
+    }
+    const fromEquipped = parsedExport.equipped.find(
+      (it) => it.item_id === ref.item_id && it.slot === slot,
+    );
+    if (fromEquipped) {
+      out[slot] = fromEquipped;
+    }
+  }
+  return out;
 }
 
 export async function runUpgradePriorityScan(
