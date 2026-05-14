@@ -56,6 +56,7 @@ import {
   resolveComposedToParsedItems,
   runUpgradePriorityScan,
 } from './scans/upgrade-priority';
+import { runBestContentScan } from './scans/best-content';
 import {
   type TrinketLock,
 } from './scans/gear-pruner';
@@ -1954,6 +1955,74 @@ export class ScanQueue {
         } catch (err) {
           console.warn(
             '[upgrade_priority] could not resolve composed gear:',
+            (err as Error).message,
+          );
+        }
+      }
+
+      // ─── Phase 7 — best_content scan ─────────────────────────────────
+      // For each item the player could acquire from enabled content
+      // (M+ at picked max level + enabled raid difficulties), sim it as
+      // a slot swap at its max-upgrade ilvl and rank by DPS gain. Same
+      // defensive try/catch shape as upgrade_priority above.
+      if (args.useRealExport && args.parsedExport && composed?.gear) {
+        try {
+          const composedItems = resolveComposedToParsedItems(
+            composed.gear,
+            args.parsedExport,
+          );
+          if (Object.keys(composedItems).length > 0) {
+            const bcStarted = Math.floor(Date.now() / 1000);
+            scans.best_content = { status: 'running', started_at: bcStarted };
+            const bcProgress = makeStageProgressLogger(
+              'best_content',
+              args.characterKey,
+            );
+            const settings = getSettings();
+            try {
+              const bcResult = await runBestContentScan({
+                paths: runnerPaths,
+                baseProfile: lockedBaseProfile,
+                className: args.parsedExport.character.class,
+                specKey: args.parsedExport.character.spec ?? '',
+                prefs: settings.contentPrefs,
+                composedGear: composedItems,
+                onProgress: bcProgress.onProgress,
+              });
+              bcProgress.stop();
+              scans.best_content = {
+                status: 'done',
+                started_at: bcStarted,
+                finished_at: Math.floor(Date.now() / 1000),
+                data: bcResult,
+              };
+              if (bcResult.opportunities.length > 0) {
+                const top = bcResult.opportunities[0]!;
+                console.log(
+                  `[best_content] top: ${top.source_label} ${top.slot} item ${top.item_id} ` +
+                    `@ ${top.target_ilvl} → +${top.delta_dps} DPS (${top.delta_pct.toFixed(2)}%) ` +
+                    `(${bcResult.candidates_evaluated} candidates, ${bcResult.opportunities.length} simmed)`,
+                );
+              } else {
+                console.log(
+                  `[best_content] no upgradeable candidates from enabled content ` +
+                    `(${bcResult.candidates_evaluated} considered)`,
+                );
+              }
+            } catch (err) {
+              bcProgress.stop();
+              console.warn('[best_content] failed:', (err as Error).message);
+              scans.best_content = {
+                status: 'failed',
+                started_at: bcStarted,
+                finished_at: Math.floor(Date.now() / 1000),
+                error: (err as Error).message,
+              };
+            }
+          }
+        } catch (err) {
+          console.warn(
+            '[best_content] could not resolve composed gear:',
             (err as Error).message,
           );
         }

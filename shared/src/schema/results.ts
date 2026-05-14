@@ -225,6 +225,13 @@ export interface ScanCollection {
    * to answer "which slot pays off most from the next upgrade."
    */
   upgrade_priority?: ScanRecord<UpgradePriorityResult>;
+  /**
+   * Phase 7 — best-content scan. For each item the player could acquire
+   * from the content they enabled in the picker (M+ + raid difficulties
+   * via KeystoneLoot data), sims its max-upgrade ilvl as a slot swap
+   * against the winner and ranks by DPS gain.
+   */
+  best_content?: ScanRecord<BestContentResult>;
   /** Catch-all so future scans don't require a schema bump. */
   [scanId: string]: ScanRecord<unknown> | undefined;
 }
@@ -259,6 +266,39 @@ export interface UpgradePriorityResult {
   ilvl_per_tier: number;
   /** Sorted descending by `delta_dps`. Empty when every item is at the assumed max ceiling. */
   opportunities: UpgradeOpportunity[];
+}
+
+// ---------------------------------------------------------------------------
+// best_content scan (Phase 7 — third slice)
+// ---------------------------------------------------------------------------
+
+/**
+ * One acquirable item the player could chase from enabled content,
+ * with a sim'd DPS gain vs the current winning loadout. `source_label`
+ * is what we render in the UI (e.g. "M+ +10", "Heroic raid").
+ */
+export interface ContentOpportunity {
+  item_id: number;
+  name?: string;
+  slot: string;
+  target_ilvl: number;
+  source_label: string;
+  /** 'mplus' or 'raid'. Used for grouping in the UI. */
+  source_category: 'mplus' | 'raid';
+  current_dps: number;
+  upgraded_dps: number;
+  delta_dps: number;
+  delta_pct: number;
+}
+
+export interface BestContentResult {
+  label: string;
+  /** DPS of the converged winning loadout, no overrides. */
+  baseline_dps: number;
+  /** Candidates considered before capping at maxCombos. */
+  candidates_evaluated: number;
+  /** Sorted descending by `delta_dps`. Items that lost DPS still appear; UI may filter. */
+  opportunities: ContentOpportunity[];
 }
 
 /**

@@ -1,6 +1,10 @@
 import React from 'react';
 import { useQueueState } from '../useQueueState';
-import type { ComposedLoadout, UpgradePriorityResult } from '@simly/shared';
+import type {
+  BestContentResult,
+  ComposedLoadout,
+  UpgradePriorityResult,
+} from '@simly/shared';
 
 // WoW's character screen slot order
 const GEAR_SLOTS = [
@@ -143,6 +147,63 @@ function UpgradePriorityView({ data }: { data: UpgradePriorityResult }): JSX.Ele
   );
 }
 
+function BestContentView({ data }: { data: BestContentResult }): JSX.Element {
+  if (data.opportunities.length === 0) {
+    return (
+      <p style={{ color: '#5a5a64', fontSize: 13, padding: '6px 16px' }}>
+        Nothing in your enabled content beats what you're already wearing.
+        Either tighten your content prefs or upgrade what you have.
+      </p>
+    );
+  }
+  return (
+    <div style={{ ...card, padding: 0 }}>
+      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+        <thead>
+          <tr style={{ color: '#a0a0a8', borderBottom: '1px solid #3a3a42' }}>
+            <th style={th}>Slot</th>
+            <th style={th}>Item ID</th>
+            <th style={th}>Source</th>
+            <th style={th}>ilvl</th>
+            <th style={th}>Δ DPS</th>
+            <th style={th}>Δ %</th>
+          </tr>
+        </thead>
+        <tbody>
+          {data.opportunities.slice(0, 25).map((o) => {
+            const color = o.delta_dps > 0 ? '#66bb6a' : '#a0a0a8';
+            return (
+              <tr key={`${o.slot}-${o.item_id}`} style={{ borderBottom: '1px solid #2e2e36' }}>
+                <td style={td}>{SLOT_LABELS[o.slot] ?? o.slot}</td>
+                <td style={{ ...td, color: '#5a5a64', fontFamily: 'Consolas, monospace' }}>
+                  {o.item_id}
+                </td>
+                <td style={td}>
+                  <span style={{ color: o.source_category === 'raid' ? '#ce93d8' : '#90caf9' }}>
+                    {o.source_label}
+                  </span>
+                </td>
+                <td style={td}>{o.target_ilvl}</td>
+                <td style={{ ...td, color }}>
+                  {o.delta_dps > 0 ? '+' : ''}{o.delta_dps.toLocaleString()}
+                </td>
+                <td style={{ ...td, color }}>
+                  {o.delta_pct > 0 ? '+' : ''}{o.delta_pct.toFixed(2)}%
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+      {data.opportunities.length > 25 && (
+        <p style={{ color: '#5a5a64', fontSize: 11, padding: '6px 12px' }}>
+          {data.opportunities.length - 25} more not shown.
+        </p>
+      )}
+    </div>
+  );
+}
+
 export function Composed(): JSX.Element {
   const state = useQueueState();
   const activeScenario = state.scenario ?? 'single_target_patchwerk';
@@ -150,6 +211,9 @@ export function Composed(): JSX.Element {
   const composed = scenarioData?.composed ?? state.results?.composed; // v2 fallback
   const upgradePriority = scenarioData?.scans?.upgrade_priority?.data as
     | UpgradePriorityResult
+    | undefined;
+  const bestContent = scenarioData?.scans?.best_content?.data as
+    | BestContentResult
     | undefined;
 
   return (
@@ -167,6 +231,17 @@ export function Composed(): JSX.Element {
                 Approximate — actual gain depends on the upgrade track.
               </p>
               <UpgradePriorityView data={upgradePriority} />
+            </>
+          )}
+          {bestContent && (
+            <>
+              <h3 style={subheading}>Best content to chase</h3>
+              <p style={{ color: '#5a5a64', fontSize: 11, margin: '0 0 6px 0' }}>
+                For each item the content you enabled could drop, simmed at its track's
+                max-upgrade ilvl. {bestContent.candidates_evaluated} candidates considered;
+                shown sorted by DPS gain.
+              </p>
+              <BestContentView data={bestContent} />
             </>
           )}
         </>
