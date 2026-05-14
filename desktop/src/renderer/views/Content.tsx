@@ -64,14 +64,19 @@ export function Content(): JSX.Element {
     });
   }
 
-  function setAllForRaid(raid: RaidId, value: boolean): void {
-    void patch({
-      ...prefs,
-      raids: {
-        ...prefs.raids,
-        [raid]: { lfr: value, normal: value, heroic: value, mythic: value },
-      },
-    });
+  function setAllForDifficulty(diff: keyof RaidDiff, value: boolean): void {
+    const nextRaids = {} as ContentPrefs['raids'];
+    for (const raid of RAID_CATALOG) {
+      nextRaids[raid.id] = { ...prefs.raids[raid.id], [diff]: value };
+    }
+    void patch({ ...prefs, raids: nextRaids });
+  }
+
+  function difficultyAllOn(diff: keyof RaidDiff): boolean {
+    return RAID_CATALOG.every((r) => prefs.raids[r.id][diff]);
+  }
+  function difficultyAllOff(diff: keyof RaidDiff): boolean {
+    return RAID_CATALOG.every((r) => !prefs.raids[r.id][diff]);
   }
 
   return (
@@ -92,19 +97,41 @@ export function Content(): JSX.Element {
       <div style={card}>
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
           <thead>
-            <tr style={{ color: '#a0a0a8', borderBottom: '1px solid #3a3a42' }}>
+            <tr style={{ color: '#a0a0a8' }}>
               <th style={{ ...th, textAlign: 'left' }}>Raid</th>
               {DIFFICULTIES.map((d) => (
                 <th key={d.key} style={th}>{d.label}</th>
               ))}
-              <th style={th}></th>
+            </tr>
+            <tr style={{ borderBottom: '1px solid #3a3a42' }}>
+              <th style={{ ...th, textAlign: 'left', color: '#5a5a64', fontWeight: 400, fontSize: 11 }}>
+                toggle all raids
+              </th>
+              {DIFFICULTIES.map((d) => (
+                <th key={d.key} style={{ ...th, paddingTop: 0, paddingBottom: 8 }}>
+                  <button
+                    style={smallBtn}
+                    disabled={difficultyAllOn(d.key)}
+                    onClick={() => setAllForDifficulty(d.key, true)}
+                    title={`Enable ${d.label} for every raid`}
+                  >
+                    All
+                  </button>
+                  <button
+                    style={{ ...smallBtn, marginLeft: 4 }}
+                    disabled={difficultyAllOff(d.key)}
+                    onClick={() => setAllForDifficulty(d.key, false)}
+                    title={`Disable ${d.label} for every raid`}
+                  >
+                    None
+                  </button>
+                </th>
+              ))}
             </tr>
           </thead>
           <tbody>
             {RAID_CATALOG.map((raid) => {
               const row = prefs.raids[raid.id];
-              const allOn = row.lfr && row.normal && row.heroic && row.mythic;
-              const allOff = !row.lfr && !row.normal && !row.heroic && !row.mythic;
               return (
                 <tr key={raid.id} style={{ borderBottom: '1px solid #2e2e36' }}>
                   <td style={{ ...td, textAlign: 'left' }}>
@@ -123,24 +150,6 @@ export function Content(): JSX.Element {
                       />
                     </td>
                   ))}
-                  <td style={{ ...td, whiteSpace: 'nowrap' }}>
-                    <button
-                      style={smallBtn}
-                      disabled={allOn}
-                      onClick={() => setAllForRaid(raid.id, true)}
-                      title="Check every difficulty"
-                    >
-                      All
-                    </button>
-                    <button
-                      style={{ ...smallBtn, marginLeft: 4 }}
-                      disabled={allOff}
-                      onClick={() => setAllForRaid(raid.id, false)}
-                      title="Uncheck every difficulty"
-                    >
-                      None
-                    </button>
-                  </td>
                 </tr>
               );
             })}
@@ -180,7 +189,9 @@ export function Content(): JSX.Element {
             style={selectStyle(prefs.mplus.enabled)}
           >
             {MPLUS_LEVELS.map((lvl) => (
-              <option key={lvl} value={lvl}>+{lvl}</option>
+              <option key={lvl} value={lvl}>
+                {lvl === 10 ? '+10 or above' : `+${lvl}`}
+              </option>
             ))}
           </select>
         </div>
