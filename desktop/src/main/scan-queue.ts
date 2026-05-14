@@ -53,6 +53,10 @@ import {
 } from './scans/ring-pre-scan';
 import { runGreedyGearPipeline } from './scans/gear-greedy-pipeline';
 import {
+  resolveComposedToParsedItems,
+  runUpgradePriorityScan,
+} from './scans/upgrade-priority';
+import {
   type TrinketLock,
 } from './scans/gear-pruner';
 import { TIE_WINDOW_PCT } from './gear-config';
@@ -1895,6 +1899,65 @@ export class ScanQueue {
         scans,
         this.gearCatalog?.get(args.characterKey, args.scenario),
       );
+
+      // ─── Phase 7 — upgrade priority scan ──────────────────────────────
+      // For each slot in the composed winner, sim a +1 tier ilvl-override
+      // variant and rank by DPS gain. Defensive: failures here are
+      // non-fatal — the rest of the queue's already settled.
+      if (args.useRealExport && args.parsedExport && composed?.gear) {
+        try {
+          const composedItems = resolveComposedToParsedItems(
+            composed.gear,
+            args.parsedExport,
+          );
+          if (Object.keys(composedItems).length > 0) {
+            const upStarted = Math.floor(Date.now() / 1000);
+            scans.upgrade_priority = { status: 'running', started_at: upStarted };
+            const upProgress = makeStageProgressLogger(
+              'upgrade_priority',
+              args.characterKey,
+            );
+            try {
+              const upResult = await runUpgradePriorityScan({
+                paths: runnerPaths,
+                baseProfile: lockedBaseProfile,
+                composedGear: composedItems,
+                onProgress: upProgress.onProgress,
+              });
+              upProgress.stop();
+              scans.upgrade_priority = {
+                status: 'done',
+                started_at: upStarted,
+                finished_at: Math.floor(Date.now() / 1000),
+                data: upResult,
+              };
+              if (upResult.opportunities.length > 0) {
+                const top = upResult.opportunities[0]!;
+                console.log(
+                  `[upgrade_priority] top: ${top.slot} (${top.name}) ` +
+                    `+${top.delta_dps} DPS (${top.delta_pct.toFixed(2)}%)`,
+                );
+              } else {
+                console.log('[upgrade_priority] no upgradeable items (all at ceiling or invalid)');
+              }
+            } catch (err) {
+              upProgress.stop();
+              console.warn('[upgrade_priority] failed:', (err as Error).message);
+              scans.upgrade_priority = {
+                status: 'failed',
+                started_at: upStarted,
+                finished_at: Math.floor(Date.now() / 1000),
+                error: (err as Error).message,
+              };
+            }
+          }
+        } catch (err) {
+          console.warn(
+            '[upgrade_priority] could not resolve composed gear:',
+            (err as Error).message,
+          );
+        }
+      }
 
       // Load existing results to preserve other scenarios' data
       let existingScenarios: Partial<Record<Scenario, ScenarioResults>> = {};

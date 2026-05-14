@@ -1,6 +1,6 @@
 import React from 'react';
 import { useQueueState } from '../useQueueState';
-import type { ComposedLoadout } from '@simly/shared';
+import type { ComposedLoadout, UpgradePriorityResult } from '@simly/shared';
 
 // WoW's character screen slot order
 const GEAR_SLOTS = [
@@ -101,11 +101,56 @@ function LoadoutView({ composed }: { composed: ComposedLoadout }): JSX.Element {
   );
 }
 
+function UpgradePriorityView({ data }: { data: UpgradePriorityResult }): JSX.Element {
+  if (data.opportunities.length === 0) {
+    return (
+      <p style={{ color: '#5a5a64', fontSize: 13, padding: '6px 16px' }}>
+        Every simmed slot is at the ilvl ceiling — nothing to upgrade.
+      </p>
+    );
+  }
+  return (
+    <div style={{ ...card, padding: 0 }}>
+      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+        <thead>
+          <tr style={{ color: '#a0a0a8', borderBottom: '1px solid #3a3a42' }}>
+            <th style={th}>Slot</th>
+            <th style={th}>Item</th>
+            <th style={th}>ilvl</th>
+            <th style={th}>Δ DPS</th>
+            <th style={th}>Δ %</th>
+          </tr>
+        </thead>
+        <tbody>
+          {data.opportunities.map((o) => (
+            <tr key={`${o.slot}-${o.item_id}`} style={{ borderBottom: '1px solid #2e2e36' }}>
+              <td style={td}>{SLOT_LABELS[o.slot] ?? o.slot}</td>
+              <td style={td}>{o.name}</td>
+              <td style={{ ...td, color: '#a0a0a8' }}>
+                {o.current_ilvl} → <span style={{ color: '#e8e8ec' }}>{o.next_ilvl}</span>
+              </td>
+              <td style={{ ...td, color: o.delta_dps > 0 ? '#66bb6a' : '#a0a0a8' }}>
+                +{o.delta_dps.toLocaleString()}
+              </td>
+              <td style={{ ...td, color: o.delta_pct > 0 ? '#66bb6a' : '#a0a0a8' }}>
+                +{o.delta_pct.toFixed(2)}%
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 export function Composed(): JSX.Element {
   const state = useQueueState();
   const activeScenario = state.scenario ?? 'single_target_patchwerk';
-  const composed = (state.results?.scenarios as any)?.[activeScenario]?.composed
-    ?? state.results?.composed;  // v2 fallback
+  const scenarioData = (state.results?.scenarios as any)?.[activeScenario];
+  const composed = scenarioData?.composed ?? state.results?.composed; // v2 fallback
+  const upgradePriority = scenarioData?.scans?.upgrade_priority?.data as
+    | UpgradePriorityResult
+    | undefined;
 
   return (
     <div>
@@ -114,6 +159,16 @@ export function Composed(): JSX.Element {
         <>
           <p style={{ color: '#a0a0a8', fontSize: 13, marginBottom: 16 }}>{composed.label}</p>
           <LoadoutView composed={composed} />
+          {upgradePriority && (
+            <>
+              <h3 style={subheading}>Upgrade priority</h3>
+              <p style={{ color: '#5a5a64', fontSize: 11, margin: '0 0 6px 0' }}>
+                Each slot simmed at +{upgradePriority.ilvl_per_tier} ilvl (one tier).
+                Approximate — actual gain depends on the upgrade track.
+              </p>
+              <UpgradePriorityView data={upgradePriority} />
+            </>
+          )}
         </>
       ) : (
         <p style={{ color: '#a0a0a8' }}>
@@ -123,6 +178,18 @@ export function Composed(): JSX.Element {
     </div>
   );
 }
+
+const th: React.CSSProperties = {
+  textAlign: 'left',
+  padding: '6px 12px',
+  fontWeight: 500,
+  fontSize: 11,
+};
+
+const td: React.CSSProperties = {
+  padding: '5px 12px',
+  color: '#e8e8ec',
+};
 
 const heading: React.CSSProperties = { fontSize: 16, color: '#ffd700', marginTop: 24, marginBottom: 8 };
 const subheading: React.CSSProperties = { fontSize: 14, color: '#ffd700', marginTop: 16, marginBottom: 6 };

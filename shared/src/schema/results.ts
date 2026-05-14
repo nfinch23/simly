@@ -218,8 +218,47 @@ export interface ScanCollection {
   best_flask?: ScanRecord<BestFlaskResult>;
   best_food?: ScanRecord<BestFoodResult>;
   consumables_gems_enchants?: ScanRecord<unknown>;
+  /**
+   * Phase 7 — per-slot "+1 tier" upgrade priority ranking. Estimated via
+   * an ilvl override against the converged winning loadout. Approximate
+   * (we don't model real bonus_id rewriting yet), but rank-correct enough
+   * to answer "which slot pays off most from the next upgrade."
+   */
+  upgrade_priority?: ScanRecord<UpgradePriorityResult>;
   /** Catch-all so future scans don't require a schema bump. */
   [scanId: string]: ScanRecord<unknown> | undefined;
+}
+
+// ---------------------------------------------------------------------------
+// upgrade_priority scan (Phase 7 — second slice)
+// ---------------------------------------------------------------------------
+
+/**
+ * One slot's projected gain from a +1 tier upgrade. `current_dps` is the
+ * baseline actor's DPS (same value across every opportunity in a result —
+ * duplicated here so the addon can render the row without cross-referencing).
+ */
+export interface UpgradeOpportunity {
+  slot: string;
+  item_id: number;
+  name: string;
+  current_ilvl: number;
+  /** Projected ilvl after a +1 tier upgrade. `current_ilvl + ILVL_PER_TIER`. */
+  next_ilvl: number;
+  current_dps: number;
+  upgraded_dps: number;
+  delta_dps: number;
+  delta_pct: number;
+}
+
+export interface UpgradePriorityResult {
+  label: string;
+  /** DPS of the converged winning loadout, no overrides. */
+  baseline_dps: number;
+  /** Per-tier ilvl bump assumed when simulating "+1 tier". Captured here for transparency in the UI. */
+  ilvl_per_tier: number;
+  /** Sorted descending by `delta_dps`. Empty when every item is at the assumed max ceiling. */
+  opportunities: UpgradeOpportunity[];
 }
 
 /**
