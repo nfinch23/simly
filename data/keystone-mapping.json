@@ -1,0 +1,100 @@
+{
+  "schema_version": 1,
+  "source": "https://github.com/Wolkenschutz/KeystoneLoot@main",
+  "generated_at": "2026-05-14T03:51:16.066Z",
+  "rules": [
+    {
+      "keystones": [
+        2,
+        3
+      ],
+      "end_of_run": {
+        "track": "champion",
+        "rank": 2
+      },
+      "great_vault": {
+        "track": "hero",
+        "rank": 1
+      }
+    },
+    {
+      "keystones": [
+        4
+      ],
+      "end_of_run": {
+        "track": "champion",
+        "rank": 3
+      },
+      "great_vault": {
+        "track": "hero",
+        "rank": 2
+      }
+    },
+    {
+      "keystones": [
+        5
+      ],
+      "end_of_run": {
+        "track": "champion",
+        "rank": 4
+      },
+      "great_vault": {
+        "track": "hero",
+        "rank": 2
+      }
+    },
+    {
+      "keystones": [
+        6
+      ],
+      "end_of_run": {
+        "track": "hero",
+        "rank": 1
+      },
+      "great_vault": {
+        "track": "hero",
+        "rank": 3
+      }
+    },
+    {
+      "keystones": [
+        7
+      ],
+      "end_of_run": {
+        "track": "hero",
+        "rank": 1
+      },
+      "great_vault": {
+        "track": "hero",
+        "rank": 4
+      }
+    },
+    {
+      "keystones": [
+        8,
+        9
+      ],
+      "end_of_run": {
+        "track": "hero",
+        "rank": 2
+      },
+      "great_vault": {
+        "track": "hero",
+        "rank": 4
+      }
+    },
+    {
+      "keystones": [
+        10
+      ],
+      "end_of_run": {
+        "track": "hero",
+        "rank": 3
+      },
+      "great_vault": {
+        "track": "greatvault",
+        "rank": 1
+      }
+    }
+  ]
+}

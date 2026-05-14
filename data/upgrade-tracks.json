@@ -1,0 +1,193 @@
+{
+  "schema_version": 1,
+  "source": "https://github.com/Wolkenschutz/KeystoneLoot@main",
+  "generated_at": "2026-05-14T03:51:16.066Z",
+  "tracks": {
+    "dungeon": {
+      "champion": [
+        {
+          "ilvl": 246,
+          "bonus_id": 12785
+        },
+        {
+          "ilvl": 250,
+          "bonus_id": 12786
+        },
+        {
+          "ilvl": 253,
+          "bonus_id": 12787
+        },
+        {
+          "ilvl": 256,
+          "bonus_id": 12788
+        },
+        {
+          "ilvl": 259,
+          "bonus_id": 12789
+        },
+        {
+          "ilvl": 263,
+          "bonus_id": 12790
+        }
+      ],
+      "hero": [
+        {
+          "ilvl": 259,
+          "bonus_id": 12793
+        },
+        {
+          "ilvl": 263,
+          "bonus_id": 12794
+        },
+        {
+          "ilvl": 266,
+          "bonus_id": 12795
+        },
+        {
+          "ilvl": 269,
+          "bonus_id": 12796
+        },
+        {
+          "ilvl": 272,
+          "bonus_id": 12797
+        },
+        {
+          "ilvl": 276,
+          "bonus_id": 12798
+        }
+      ],
+      "greatvault": [
+        {
+          "ilvl": 272,
+          "bonus_id": 12801
+        },
+        {
+          "ilvl": 276,
+          "bonus_id": 12802
+        },
+        {
+          "ilvl": 279,
+          "bonus_id": 12803
+        },
+        {
+          "ilvl": 282,
+          "bonus_id": 12804
+        },
+        {
+          "ilvl": 285,
+          "bonus_id": 12805
+        },
+        {
+          "ilvl": 289,
+          "bonus_id": 12806
+        }
+      ]
+    },
+    "raid": {
+      "lfr": [
+        {
+          "ilvl": 233,
+          "bonus_id": 12777
+        },
+        {
+          "ilvl": 237,
+          "bonus_id": 12778
+        },
+        {
+          "ilvl": 240,
+          "bonus_id": 12779
+        },
+        {
+          "ilvl": 243,
+          "bonus_id": 12780
+        },
+        {
+          "ilvl": 246,
+          "bonus_id": 12781
+        },
+        {
+          "ilvl": 250,
+          "bonus_id": 12782
+        }
+      ],
+      "normal": [
+        {
+          "ilvl": 246,
+          "bonus_id": 12785
+        },
+        {
+          "ilvl": 250,
+          "bonus_id": 12786
+        },
+        {
+          "ilvl": 253,
+          "bonus_id": 12787
+        },
+        {
+          "ilvl": 256,
+          "bonus_id": 12788
+        },
+        {
+          "ilvl": 259,
+          "bonus_id": 12789
+        },
+        {
+          "ilvl": 263,
+          "bonus_id": 12790
+        }
+      ],
+      "heroic": [
+        {
+          "ilvl": 259,
+          "bonus_id": 12793
+        },
+        {
+          "ilvl": 263,
+          "bonus_id": 12794
+        },
+        {
+          "ilvl": 266,
+          "bonus_id": 12795
+        },
+        {
+          "ilvl": 269,
+          "bonus_id": 12796
+        },
+        {
+          "ilvl": 272,
+          "bonus_id": 12797
+        },
+        {
+          "ilvl": 276,
+          "bonus_id": 12798
+        }
+      ],
+      "mythic": [
+        {
+          "ilvl": 272,
+          "bonus_id": 12801
+        },
+        {
+          "ilvl": 276,
+          "bonus_id": 12802
+        },
+        {
+          "ilvl": 279,
+          "bonus_id": 12803
+        },
+        {
+          "ilvl": 282,
+          "bonus_id": 12804
+        },
+        {
+          "ilvl": 285,
+          "bonus_id": 12805
+        },
+        {
+          "ilvl": 289,
+          "bonus_id": 12806
+        }
+      ]
+    }
+  }
+}
