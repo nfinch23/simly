@@ -36,6 +36,50 @@ import {
   SWAP_TEST_ITERATIONS,
 } from './gear-config';
 
+// ---------------------------------------------------------------------------
+// Content preferences — Phase 7 picker
+//
+// Captures which content the player is willing to run. Future `best_content`
+// scan reads this to scope its loot pool. Defaults are all-on so unconfigured
+// users still get full coverage.
+// ---------------------------------------------------------------------------
+
+export type RaidId = 'voidspire' | 'dreamrift' | 'march_on_queldanas';
+
+export interface RaidDifficultyMap {
+  lfr: boolean;
+  normal: boolean;
+  heroic: boolean;
+  mythic: boolean;
+}
+
+export interface ContentPrefs {
+  raids: Record<RaidId, RaidDifficultyMap>;
+  mplus: {
+    enabled: boolean;
+    /** Max keystone level the player is willing to time. 1..10 inclusive. */
+    max_level: number;
+  };
+  world: {
+    /** Master toggle. False = ignore all world loot. */
+    enabled: boolean;
+    /** 1..11 inclusive. */
+    max_delve_tier: number;
+    /** 1..5 inclusive. */
+    max_ritual_tier: number;
+  };
+}
+
+export const CONTENT_PREFS_DEFAULTS: Readonly<ContentPrefs> = Object.freeze({
+  raids: {
+    voidspire: { lfr: true, normal: true, heroic: true, mythic: true },
+    dreamrift: { lfr: true, normal: true, heroic: true, mythic: true },
+    march_on_queldanas: { lfr: true, normal: true, heroic: true, mythic: true },
+  },
+  mplus: { enabled: true, max_level: 10 },
+  world: { enabled: true, max_delve_tier: 11, max_ritual_tier: 5 },
+});
+
 export interface SimlySettings {
   /** Coarse-stage pruner multiplier. Items with score × multiplier < slot_max are dropped. */
   prunerMultiplier: number;
@@ -69,6 +113,8 @@ export interface SimlySettings {
   swapTestIterations: number;
   /** Override for the WoW retail root path. Undefined = auto-detect. */
   wowRetailRoot?: string;
+  /** Phase 7 — content the player is willing to run (gates `best_content` scan). */
+  contentPrefs: ContentPrefs;
 }
 
 export const SETTINGS_DEFAULTS: Readonly<Required<Omit<SimlySettings, 'wowRetailRoot'>>> = {
@@ -87,6 +133,7 @@ export const SETTINGS_DEFAULTS: Readonly<Required<Omit<SimlySettings, 'wowRetail
   ringIterations: RING_ITERATIONS,
   topRingsToKeep: TOP_RINGS_TO_KEEP,
   swapTestIterations: SWAP_TEST_ITERATIONS,
+  contentPrefs: CONTENT_PREFS_DEFAULTS,
 };
 
 // Same ESM/CJS interop dance as ignore-list.ts — electron-store@11 is
@@ -115,8 +162,31 @@ function getStore(): ElectronStore<Schema> {
   return _store;
 }
 
+/**
+ * Deep-merges stored `contentPrefs` against defaults so a partially-shaped
+ * persisted object (e.g. from an older app build that didn't have one of
+ * the nested fields yet) still surfaces as a fully-populated ContentPrefs.
+ */
+export function mergeContentPrefs(stored: Partial<ContentPrefs> | undefined): ContentPrefs {
+  const d = CONTENT_PREFS_DEFAULTS;
+  return {
+    raids: {
+      voidspire: { ...d.raids.voidspire, ...stored?.raids?.voidspire },
+      dreamrift: { ...d.raids.dreamrift, ...stored?.raids?.dreamrift },
+      march_on_queldanas: { ...d.raids.march_on_queldanas, ...stored?.raids?.march_on_queldanas },
+    },
+    mplus: { ...d.mplus, ...stored?.mplus },
+    world: { ...d.world, ...stored?.world },
+  };
+}
+
 export function getSettings(): SimlySettings {
-  return { ...SETTINGS_DEFAULTS, ...getStore().get('settings') };
+  const stored = getStore().get('settings');
+  return {
+    ...SETTINGS_DEFAULTS,
+    ...stored,
+    contentPrefs: mergeContentPrefs(stored?.contentPrefs),
+  };
 }
 
 export function setSettings(updates: Partial<SimlySettings>): SimlySettings {

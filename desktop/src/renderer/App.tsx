@@ -2,16 +2,18 @@ import React, { useState } from 'react';
 import { Status } from './views/Status';
 import { Scans } from './views/Scans';
 import { Composed } from './views/Composed';
+import { Content } from './views/Content';
 import { PasteInput } from './views/PasteInput';
 import { Settings } from './views/Settings';
 import { useQueueState } from './useQueueState';
 
-type Tab = 'status' | 'scans' | 'composed' | 'paste' | 'settings';
+type Tab = 'status' | 'scans' | 'composed' | 'content' | 'paste' | 'settings';
 
 const TABS: Array<{ id: Tab; label: string }> = [
   { id: 'status', label: 'Status' },
   { id: 'scans', label: 'Scans' },
   { id: 'composed', label: 'Composed' },
+  { id: 'content', label: 'Content' },
   { id: 'paste', label: 'Paste' },
   { id: 'settings', label: 'Settings' },
 ];
@@ -49,6 +51,7 @@ export function App(): JSX.Element {
         {tab === 'status' && <Status />}
         {tab === 'scans' && <Scans />}
         {tab === 'composed' && <Composed />}
+        {tab === 'content' && <Content />}
         {tab === 'paste' && <PasteInput />}
         {tab === 'settings' && <Settings />}
       </main>
