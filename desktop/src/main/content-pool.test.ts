@@ -74,7 +74,7 @@ describe('maxIlvlForTrack', () => {
 
 describe('isItemRelevant', () => {
   it('returns true when the item lists the class+spec', () => {
-    // 249275 is a trinket for class 1 (warrior) spec 73, class 2 specs 65/66, class 7 specs 262/264.
+    // 249275 is an off-hand for class 1 (warrior) spec 73, class 2 specs 65/66, class 7 specs 262/264.
     expect(isItemRelevant(249275, 1, 73)).toBe(true);
     expect(isItemRelevant(249275, 2, 65)).toBe(true);
     expect(isItemRelevant(249275, 7, 262)).toBe(true);
@@ -94,8 +94,8 @@ describe('getItemMeta', () => {
   it('returns metadata for known items', () => {
     const meta = getItemMeta(249275);
     expect(meta).toBeDefined();
-    expect(meta!.slot_id).toBe(11); // trinket
-    expect(meta!.slot_name).toBe('trinket');
+    expect(meta!.slot_id).toBe(11); // INVTYPE_WEAPONOFFHAND (0-based KeystoneLoot index)
+    expect(meta!.slot_name).toBe('off_hand');
   });
 
   it('returns undefined for unknown items', () => {
