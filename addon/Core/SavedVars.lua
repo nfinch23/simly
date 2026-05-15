@@ -96,6 +96,11 @@ end
 function SavedVars.RequestUpdate()
 	SavedVars.WriteSnapshot()
 	SimlyDB.update_requested_at = time()
+	-- Record which scenario this request targets so the addon can scope
+	-- the "Scan running" indicator to the right tab. Without this the
+	-- request stamp is global and every tab shows yellow until ANY
+	-- scenario completes — even though only one is actually queued.
+	SimlyDB.update_requested_scenario = SimlyDB.active_scenario
 end
 
 -- Returns the currently selected scenario key, defaulting to
@@ -118,6 +123,9 @@ function SavedVars.RequestUpdateAll()
 	SavedVars.WriteSnapshot()
 	SimlyDB.update_requested_at = time()
 	SimlyDB.update_all_requested_at = time()
+	-- Update All targets every scenario; clear the single-scenario hint
+	-- so the addon shows "running" on every tab (not just one).
+	SimlyDB.update_requested_scenario = nil
 end
 
 -- Called by the dev-only "Run Full Sim" button. Triggers the normal

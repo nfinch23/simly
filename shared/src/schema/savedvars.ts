@@ -44,6 +44,14 @@ export interface SimlyDB {
    * this value is newer than the last completed run. 0 = no request.
    */
   update_requested_at: number;
+  /**
+   * Which scenario the user had selected when they clicked Update
+   * sims. The desktop already runs `active_scenario` (same value), so
+   * the desktop doesn't read this — it's solely a hint for the addon's
+   * own UI to scope the "Scan running" indicator to the right tab.
+   * Cleared on Update All (every tab shows running).
+   */
+  update_requested_scenario?: Scenario;
   /** Scenario the user has selected. v1 only single_target_patchwerk. */
   active_scenario: Scenario;
   /**

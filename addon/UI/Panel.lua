@@ -697,14 +697,34 @@ local function statusBlock()
 		return "|cffaaaaaaStatus:|r |cffaaaaaaIdle (no sims have run yet — click Update sims to start one)|r"
 	end
 	if req > globalMaxGen then
-		local age = formatAge(req)
-		-- Scan in flight. If the active character has no results yet,
-		-- clarify that this will be its first sim.
-		if not resultsAreForActiveCharacter() then
-			return "|cffaaaaaaStatus:|r |cffffff00\226\151\143 Scan running on desktop|r |cffaaaaaa(first sim for " ..
-				activeCharacterKey() .. ", started " .. age .. " — wait for desktop notification, then /reload)|r"
+		-- A scan is in-flight, but it may not be for the scenario the
+		-- user is currently viewing. update_requested_scenario tells us
+		-- which scenario the request targeted (set by RequestUpdate at
+		-- click time; nil for Update All which targets every tab).
+		local reqScenario = SimlyDB and SimlyDB.update_requested_scenario
+		local scanIsForThisTab = (reqScenario == nil) or (reqScenario == activeScenario)
+		if scanIsForThisTab then
+			local age = formatAge(req)
+			-- Scan in flight. If the active character has no results yet,
+			-- clarify that this will be its first sim.
+			if not resultsAreForActiveCharacter() then
+				return "|cffaaaaaaStatus:|r |cffffff00\226\151\143 Scan running on desktop|r |cffaaaaaa(first sim for " ..
+					activeCharacterKey() .. ", started " .. age .. " — wait for desktop notification, then /reload)|r"
+			end
+			return "|cffaaaaaaStatus:|r |cffffff00\226\151\143 Scan running on desktop|r |cffaaaaaa(started " .. age .. " — wait for desktop notification, then /reload)|r"
 		end
-		return "|cffaaaaaaStatus:|r |cffffff00\226\151\143 Scan running on desktop|r |cffaaaaaa(started " .. age .. " — wait for desktop notification, then /reload)|r"
+		-- Scan running for a different scenario. Fall through to this
+		-- scenario's own freshness display below. (Append a small hint
+		-- so the user knows another tab is mid-sim.)
+		-- SCENARIO_LABELS_FOR_DOLL is declared above statusBlock so it's
+		-- in scope here; the longer SCENARIO_LABELS lives below and would
+		-- be out-of-scope (Lua local-scope is lexical).
+		local otherLabel = SCENARIO_LABELS_FOR_DOLL[reqScenario] or reqScenario
+		local hint = " |cffaaaaaa(other scan running: " .. otherLabel .. ")|r"
+		if activeGen == 0 then
+			return "|cffaaaaaaStatus:|r |cffff8c00\226\151\143 No results for this scenario yet|r |cffaaaaaa(click Update sims while on this scenario)|r" .. hint
+		end
+		return "|cffaaaaaaStatus:|r |cff00ff00\226\151\143 Up to date|r |cffaaaaaa(results " .. formatAge(activeGen) .. ")|r" .. hint
 	end
 	-- Desktop is idle.
 	-- Cross-character bleed-through guard. SimlyResults.lua is a single
