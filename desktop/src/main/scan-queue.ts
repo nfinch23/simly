@@ -22,6 +22,7 @@ import { appendFullSimHistory, type FullSimHistoryEntry } from './full-sim-histo
 import { hashGearContext, replaceGearInProfile, setConsumablesInProfile } from './profile-builder';
 import { pickWinningFlaskSimcKey } from './scans/best-flask';
 import { pickWinningFoodSimcKey } from './scans/best-food';
+import { pickWinningPotionSimcKey } from './scans/best-potion';
 import {
   computeHerdMedian,
   computeWeightDeltas,
@@ -1014,7 +1015,7 @@ export class ScanQueue {
       // bail earlier).
       let consumablesRun: import('./simc-runner').SimcRunResult | undefined;
 
-      let consumablesLock: { flask?: string; food?: string } = {};
+      let consumablesLock: { flask?: string; food?: string; potion?: string } = {};
       let lockedBaseProfile = args.baseProfile;
       if (args.useRealExport) {
         const cpStarted = Math.floor(Date.now() / 1000);
@@ -1035,7 +1036,8 @@ export class ScanQueue {
           consumablesRun = cpRun;
           const flaskKey = pickWinningFlaskSimcKey(cpRun);
           const foodKey = pickWinningFoodSimcKey(cpRun);
-          consumablesLock = { flask: flaskKey, food: foodKey };
+          const potionKey = pickWinningPotionSimcKey(cpRun);
+          consumablesLock = { flask: flaskKey, food: foodKey, potion: potionKey };
           lockedBaseProfile = setConsumablesInProfile(
             args.baseProfile,
             consumablesLock,
@@ -1048,7 +1050,7 @@ export class ScanQueue {
           Object.assign(scans, cpScans);
           const cpDt = ((Date.now() - cp0) / 1000).toFixed(1);
           console.log(
-            `[sim] consumables (prescan, ${cpDt}s): flask=${flaskKey ?? '(none)'}, food=${foodKey ?? '(none)'}`,
+            `[sim] consumables (prescan, ${cpDt}s): flask=${flaskKey ?? '(none)'}, food=${foodKey ?? '(none)'}, potion=${potionKey ?? '(none)'}`,
           );
         } catch (err) {
           cpProgress.stop();
@@ -1533,6 +1535,7 @@ export class ScanQueue {
         // answer (replacing the prescan records).
         let flaskV2Key: string | undefined;
         let foodV2Key: string | undefined;
+        let potionV2Key: string | undefined;
         const reStarted = Math.floor(Date.now() / 1000);
         const re0 = Date.now();
         const reProgress = makeStageProgressLogger(
@@ -1551,12 +1554,13 @@ export class ScanQueue {
           consumablesRun = reRun;
           flaskV2Key = pickWinningFlaskSimcKey(reRun);
           foodV2Key = pickWinningFoodSimcKey(reRun);
+          potionV2Key = pickWinningPotionSimcKey(reRun);
           const reFinished = Math.floor(Date.now() / 1000);
           const reScans = parseAllScanRecords(reRun, reStarted, reFinished);
           Object.assign(scans, reScans);
           const reDt = ((Date.now() - re0) / 1000).toFixed(1);
           console.log(
-            `[sim] consumables (post-pass-1 re-eval, ${reDt}s): flask=${flaskV2Key ?? '(none)'}, food=${foodV2Key ?? '(none)'}`,
+            `[sim] consumables (post-pass-1 re-eval, ${reDt}s): flask=${flaskV2Key ?? '(none)'}, food=${foodV2Key ?? '(none)'}, potion=${potionV2Key ?? '(none)'}`,
           );
         } catch (err) {
           reProgress.stop();
@@ -1573,6 +1577,8 @@ export class ScanQueue {
           flask_v2_item_id: flaskV2Key,
           food_v1_item_id: consumablesLock.food,
           food_v2_item_id: foodV2Key,
+          potion_v1_item_id: consumablesLock.potion,
+          potion_v2_item_id: potionV2Key,
         });
         // Debug override: `SIMLY_FORCE_PASS2=1 npm run dev` forces the
         // dispatch path regardless of gate verdict. Useful for live-
@@ -1639,6 +1645,7 @@ export class ScanQueue {
           const pass2Consumables = {
             flask: flaskV2Key ?? consumablesLock.flask,
             food: foodV2Key ?? consumablesLock.food,
+            potion: potionV2Key ?? consumablesLock.potion,
           };
           const pass2BaseProfile = setConsumablesInProfile(
             args.baseProfile,

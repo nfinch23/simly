@@ -144,12 +144,13 @@ export function replaceGearInProfile(
  */
 export function setConsumablesInProfile(
   baseProfile: string,
-  consumables: { flask?: string; food?: string },
+  consumables: { flask?: string; food?: string; potion?: string },
 ): string {
   const lines = baseProfile.split('\n');
   const result: string[] = [];
   let flaskHandled = false;
   let foodHandled = false;
+  let potionHandled = false;
 
   for (const line of lines) {
     if (line.startsWith('#')) {
@@ -170,6 +171,13 @@ export function setConsumablesInProfile(
       foodHandled = true;
       continue;
     }
+    if (/^potion=/.test(line)) {
+      if (consumables.potion !== undefined) {
+        result.push(`potion=${consumables.potion}`);
+      }
+      potionHandled = true;
+      continue;
+    }
     result.push(line);
   }
 
@@ -178,6 +186,9 @@ export function setConsumablesInProfile(
   }
   if (!foodHandled && consumables.food !== undefined) {
     result.push(`food=${consumables.food}`);
+  }
+  if (!potionHandled && consumables.potion !== undefined) {
+    result.push(`potion=${consumables.potion}`);
   }
 
   return result.join('\n');

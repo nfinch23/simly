@@ -130,7 +130,7 @@ export type ReconvergeReason =
     }
   | {
       kind: 'consumables';
-      consumable: 'flask' | 'food';
+      consumable: 'flask' | 'food' | 'potion';
       /**
        * v1/v2 identifiers for the consumable. Accepts either the SimC
        * key string (e.g. `flask_of_the_magisters_2`) or a numeric
@@ -356,6 +356,8 @@ export interface ReconvergeGateInput {
   flask_v2_item_id?: string | number;
   food_v1_item_id?: string | number;
   food_v2_item_id?: string | number;
+  potion_v1_item_id?: string | number;
+  potion_v2_item_id?: string | number;
   /**
    * Pre-computed result of "does stat-vector × new-actor-stats predict
    * a different trinket pair than the locked pair?" The caller owns
@@ -439,6 +441,18 @@ export function shouldTriggerPass2(
       consumable: 'food',
       v1_item_id: input.food_v1_item_id,
       v2_item_id: input.food_v2_item_id,
+    });
+  }
+  if (
+    input.potion_v1_item_id !== undefined &&
+    input.potion_v2_item_id !== undefined &&
+    input.potion_v1_item_id !== input.potion_v2_item_id
+  ) {
+    reasons.push({
+      kind: 'consumables',
+      consumable: 'potion',
+      v1_item_id: input.potion_v1_item_id,
+      v2_item_id: input.potion_v2_item_id,
     });
   }
 

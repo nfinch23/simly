@@ -43,6 +43,7 @@ export interface BestConsumableResult {
 
 export type BestFlaskResult = BestConsumableResult;
 export type BestFoodResult = BestConsumableResult;
+export type BestPotionResult = BestConsumableResult;
 
 /** Compact identifier for an item slot, used in scan results that name specific items. */
 export interface ScannedItemRef {
@@ -217,6 +218,7 @@ export interface ScanCollection {
    */
   best_flask?: ScanRecord<BestFlaskResult>;
   best_food?: ScanRecord<BestFoodResult>;
+  best_potion?: ScanRecord<BestPotionResult>;
   consumables_gems_enchants?: ScanRecord<unknown>;
   /**
    * Phase 7 — per-slot "+1 tier" upgrade priority ranking. Estimated via
