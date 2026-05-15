@@ -48,28 +48,35 @@ const RAID_DIFFICULTY_BY_ID = {
 };
 
 /**
- * WoW equipment slotId enum (INVTYPE values). Maps to SimC slot names.
- * Keep in sync with desktop/src/main/simc-export-parser.ts SlotName.
+ * KeystoneLoot's `slotId` is a 0-based index into an INVTYPE_* list,
+ * NOT WoW's INVTYPE enum or any inventory-slot id. The canonical list
+ * lives in their `ui/keystoneloot_frame/mixins/slot_dropdown.lua`:
+ *
+ *   { HEAD, NECK, SHOULDER, CLOAK, CHEST, WRIST, HAND, WAIST, LEGS, FEET,
+ *     WEAPONMAINHAND, WEAPONOFFHAND, FINGER, TRINKET, OTHER }
+ *
+ * We translate to SimC slot names. `back` and `hands`/`feet` reflect the
+ * SimC convention (matches desktop/src/main/simc-export-parser.ts
+ * SlotName). `finger`/`trinket` are ambiguous between 1/2 numbered slots
+ * — caller picks at sim time. `other` is KeystoneLoot's catch-all
+ * (shirt, tabard, miscellaneous) — filter these out at the consumer.
  */
 const SLOT_ID_TO_NAME = {
   0: 'head',
   1: 'neck',
   2: 'shoulder',
-  3: 'shirt',
+  3: 'back',        // INVTYPE_CLOAK
   4: 'chest',
-  5: 'waist',
-  6: 'legs',
-  7: 'feet',
-  8: 'wrist',
-  9: 'hands',
-  10: 'finger', // (finger1/finger2 — ambiguous; resolved at sim time)
-  11: 'trinket', // (trinket1/trinket2 — ambiguous; resolved at sim time)
-  12: 'back',
-  13: 'main_hand',
-  14: 'off_hand',
-  15: 'ranged',
-  16: 'tabard',
-  17: 'bag',
+  5: 'wrist',
+  6: 'hands',       // INVTYPE_HAND
+  7: 'waist',
+  8: 'legs',
+  9: 'feet',
+  10: 'main_hand',  // INVTYPE_WEAPONMAINHAND
+  11: 'off_hand',   // INVTYPE_WEAPONOFFHAND
+  12: 'finger',     // (finger1/finger2 — caller resolves)
+  13: 'trinket',    // (trinket1/trinket2 — caller resolves)
+  14: 'other',      // EJ_LOOT_SLOT_FILTER_OTHER (cosmetic/misc)
 };
 
 async function fetchText(path) {

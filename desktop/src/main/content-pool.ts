@@ -260,7 +260,11 @@ function mergeCandidate(
 ): void {
   const meta = getItemMeta(itemId);
   const slotName = meta?.slot_name;
-  if (!slotName || slotName === 'tabard' || slotName === 'shirt' || slotName === 'bag') return;
+  // 'other' is KeystoneLoot's catch-all for cosmetic/miscellaneous items
+  // (shirts, tabards, etc.) — exclude them from sim candidates since they
+  // contribute no stats. Any future slot name we don't recognize is also
+  // silently dropped.
+  if (!slotName || slotName === 'other') return;
   const prior = map.get(itemId);
   if (prior && prior.target_ilvl >= partial.target_ilvl) return; // keep best source
   map.set(itemId, { item_id: itemId, slot: slotName, ...partial });

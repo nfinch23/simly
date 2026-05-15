@@ -1,11 +1,11 @@
 {
   "schema_version": 1,
   "source": "https://github.com/Wolkenschutz/KeystoneLoot@main",
-  "generated_at": "2026-05-14T03:51:16.060Z",
+  "generated_at": "2026-05-14T23:56:03.953Z",
   "items": {
     "49802": {
       "slot_id": 10,
-      "slot_name": "finger",
+      "slot_name": "main_hand",
       "icon": 133563,
       "classes": {
         "1": [
@@ -28,7 +28,7 @@
     },
     "49805": {
       "slot_id": 9,
-      "slot_name": "hands",
+      "slot_name": "feet",
       "icon": 341559,
       "classes": {
         "5": [
@@ -54,7 +54,7 @@
     },
     "49806": {
       "slot_id": 7,
-      "slot_name": "feet",
+      "slot_name": "waist",
       "icon": 340331,
       "classes": {
         "4": [
@@ -86,7 +86,7 @@
     },
     "49807": {
       "slot_id": 10,
-      "slot_name": "finger",
+      "slot_name": "main_hand",
       "icon": 135715,
       "classes": {
         "3": [
@@ -104,7 +104,7 @@
     },
     "49808": {
       "slot_id": 7,
-      "slot_name": "feet",
+      "slot_name": "waist",
       "icon": 343662,
       "classes": {
         "1": [
@@ -130,7 +130,7 @@
     },
     "49809": {
       "slot_id": 5,
-      "slot_name": "waist",
+      "slot_name": "wrist",
       "icon": 236990,
       "classes": {
         "5": [
@@ -156,7 +156,7 @@
     },
     "49810": {
       "slot_id": 7,
-      "slot_name": "feet",
+      "slot_name": "waist",
       "icon": 342513,
       "classes": {
         "3": [
@@ -182,7 +182,7 @@
     },
     "49811": {
       "slot_id": 8,
-      "slot_name": "wrist",
+      "slot_name": "legs",
       "icon": 342519,
       "classes": {
         "3": [
@@ -208,7 +208,7 @@
     },
     "49812": {
       "slot_id": 12,
-      "slot_name": "back",
+      "slot_name": "finger",
       "icon": 133384,
       "classes": {
         "1": [
@@ -285,7 +285,7 @@
     },
     "49813": {
       "slot_id": 10,
-      "slot_name": "finger",
+      "slot_name": "main_hand",
       "icon": 135621,
       "classes": {
         "3": [
@@ -300,7 +300,7 @@
     },
     "49817": {
       "slot_id": 8,
-      "slot_name": "wrist",
+      "slot_name": "legs",
       "icon": 312652,
       "classes": {
         "4": [
@@ -358,7 +358,7 @@
     },
     "49823": {
       "slot_id": 3,
-      "slot_name": "shirt",
+      "slot_name": "back",
       "icon": 133770,
       "classes": {
         "1": [
@@ -487,7 +487,7 @@
     },
     "50227": {
       "slot_id": 10,
-      "slot_name": "finger",
+      "slot_name": "main_hand",
       "icon": 307037,
       "classes": {
         "5": [
@@ -655,7 +655,7 @@
     },
     "50259": {
       "slot_id": 13,
-      "slot_name": "main_hand",
+      "slot_name": "trinket",
       "icon": 132783,
       "classes": {
         "2": [
@@ -700,7 +700,7 @@
     },
     "50263": {
       "slot_id": 7,
-      "slot_name": "feet",
+      "slot_name": "waist",
       "icon": 341558,
       "classes": {
         "5": [
@@ -726,7 +726,7 @@
     },
     "50264": {
       "slot_id": 5,
-      "slot_name": "waist",
+      "slot_name": "wrist",
       "icon": 236962,
       "classes": {
         "4": [
@@ -810,7 +810,7 @@
     },
     "151300": {
       "slot_id": 6,
-      "slot_name": "legs",
+      "slot_name": "hands",
       "icon": 1575406,
       "classes": {
         "5": [
@@ -836,7 +836,7 @@
     },
     "151301": {
       "slot_id": 9,
-      "slot_name": "hands",
+      "slot_name": "feet",
       "icon": 1575403,
       "classes": {
         "5": [
@@ -862,7 +862,7 @@
     },
     "151302": {
       "slot_id": 7,
-      "slot_name": "feet",
+      "slot_name": "waist",
       "icon": 1575402,
       "classes": {
         "5": [
@@ -914,7 +914,7 @@
     },
     "151305": {
       "slot_id": 5,
-      "slot_name": "waist",
+      "slot_name": "wrist",
       "icon": 1575404,
       "classes": {
         "5": [
@@ -940,7 +940,7 @@
     },
     "151307": {
       "slot_id": 13,
-      "slot_name": "main_hand",
+      "slot_name": "trinket",
       "icon": 237018,
       "classes": {
         "1": [
@@ -981,7 +981,7 @@
     },
     "151308": {
       "slot_id": 12,
-      "slot_name": "back",
+      "slot_name": "finger",
       "icon": 1408441,
       "classes": {
         "1": [
@@ -1135,7 +1135,7 @@
     },
     "151310": {
       "slot_id": 13,
-      "slot_name": "main_hand",
+      "slot_name": "trinket",
       "icon": 1119888,
       "classes": {
         "5": [
@@ -1170,7 +1170,7 @@
     },
     "151311": {
       "slot_id": 12,
-      "slot_name": "back",
+      "slot_name": "finger",
       "icon": 1408436,
       "classes": {
         "1": [
@@ -1247,7 +1247,7 @@
     },
     "151312": {
       "slot_id": 13,
-      "slot_name": "main_hand",
+      "slot_name": "trinket",
       "icon": 1379235,
       "classes": {
         "1": [
@@ -1305,7 +1305,7 @@
     },
     "151314": {
       "slot_id": 8,
-      "slot_name": "wrist",
+      "slot_name": "legs",
       "icon": 1544138,
       "classes": {
         "4": [
@@ -1337,7 +1337,7 @@
     },
     "151317": {
       "slot_id": 9,
-      "slot_name": "hands",
+      "slot_name": "feet",
       "icon": 1544133,
       "classes": {
         "4": [
@@ -1369,7 +1369,7 @@
     },
     "151318": {
       "slot_id": 6,
-      "slot_name": "legs",
+      "slot_name": "hands",
       "icon": 1544136,
       "classes": {
         "4": [
@@ -1433,7 +1433,7 @@
     },
     "151320": {
       "slot_id": 9,
-      "slot_name": "hands",
+      "slot_name": "feet",
       "icon": 1574621,
       "classes": {
         "3": [
@@ -1459,7 +1459,7 @@
     },
     "151321": {
       "slot_id": 5,
-      "slot_name": "waist",
+      "slot_name": "wrist",
       "icon": 1574622,
       "classes": {
         "3": [
@@ -1485,7 +1485,7 @@
     },
     "151322": {
       "slot_id": 6,
-      "slot_name": "legs",
+      "slot_name": "hands",
       "icon": 1574624,
       "classes": {
         "3": [
@@ -1563,7 +1563,7 @@
     },
     "151327": {
       "slot_id": 7,
-      "slot_name": "feet",
+      "slot_name": "waist",
       "icon": 1586618,
       "classes": {
         "1": [
@@ -1589,7 +1589,7 @@
     },
     "151328": {
       "slot_id": 5,
-      "slot_name": "waist",
+      "slot_name": "wrist",
       "icon": 1586620,
       "classes": {
         "1": [
@@ -1641,7 +1641,7 @@
     },
     "151330": {
       "slot_id": 9,
-      "slot_name": "hands",
+      "slot_name": "feet",
       "icon": 1586619,
       "classes": {
         "1": [
@@ -1667,7 +1667,7 @@
     },
     "151332": {
       "slot_id": 6,
-      "slot_name": "legs",
+      "slot_name": "hands",
       "icon": 1586622,
       "classes": {
         "1": [
@@ -1777,7 +1777,7 @@
     },
     "151340": {
       "slot_id": 13,
-      "slot_name": "main_hand",
+      "slot_name": "trinket",
       "icon": 1708140,
       "classes": {
         "2": [
@@ -1804,7 +1804,7 @@
     },
     "193701": {
       "slot_id": 13,
-      "slot_name": "main_hand",
+      "slot_name": "trinket",
       "icon": 133876,
       "classes": {
         "1": [
@@ -1929,7 +1929,7 @@
     },
     "193706": {
       "slot_id": 8,
-      "slot_name": "wrist",
+      "slot_name": "legs",
       "icon": 4295889,
       "classes": {
         "1": [
@@ -1955,7 +1955,7 @@
     },
     "193707": {
       "slot_id": 10,
-      "slot_name": "finger",
+      "slot_name": "main_hand",
       "icon": 4526264,
       "classes": {
         "5": [
@@ -1997,7 +1997,7 @@
     },
     "193708": {
       "slot_id": 12,
-      "slot_name": "back",
+      "slot_name": "finger",
       "icon": 4635186,
       "classes": {
         "1": [
@@ -2074,7 +2074,7 @@
     },
     "193709": {
       "slot_id": 11,
-      "slot_name": "trinket",
+      "slot_name": "off_hand",
       "icon": 4526077,
       "classes": {
         "5": [
@@ -2112,7 +2112,7 @@
     },
     "193710": {
       "slot_id": 10,
-      "slot_name": "finger",
+      "slot_name": "main_hand",
       "icon": 4214741,
       "classes": {
         "2": [
@@ -2147,7 +2147,7 @@
     },
     "193711": {
       "slot_id": 10,
-      "slot_name": "finger",
+      "slot_name": "main_hand",
       "icon": 4391287,
       "classes": {
         "1": [
@@ -2167,7 +2167,7 @@
     },
     "193712": {
       "slot_id": 3,
-      "slot_name": "shirt",
+      "slot_name": "back",
       "icon": 4095087,
       "classes": {
         "1": [
@@ -2244,7 +2244,7 @@
     },
     "193713": {
       "slot_id": 6,
-      "slot_name": "legs",
+      "slot_name": "hands",
       "icon": 4182960,
       "classes": {
         "5": [
@@ -2270,7 +2270,7 @@
     },
     "193714": {
       "slot_id": 5,
-      "slot_name": "waist",
+      "slot_name": "wrist",
       "icon": 4095086,
       "classes": {
         "4": [
@@ -2302,7 +2302,7 @@
     },
     "193715": {
       "slot_id": 9,
-      "slot_name": "hands",
+      "slot_name": "feet",
       "icon": 4326054,
       "classes": {
         "3": [
@@ -2328,7 +2328,7 @@
     },
     "193716": {
       "slot_id": 10,
-      "slot_name": "finger",
+      "slot_name": "main_hand",
       "icon": 4394687,
       "classes": {
         "1": [
@@ -2351,7 +2351,7 @@
     },
     "193717": {
       "slot_id": 10,
-      "slot_name": "finger",
+      "slot_name": "main_hand",
       "icon": 4359414,
       "classes": {
         "12": [
@@ -2367,7 +2367,7 @@
     },
     "193718": {
       "slot_id": 13,
-      "slot_name": "main_hand",
+      "slot_name": "trinket",
       "icon": 134157,
       "classes": {
         "2": [
@@ -2396,7 +2396,7 @@
     },
     "193719": {
       "slot_id": 13,
-      "slot_name": "main_hand",
+      "slot_name": "trinket",
       "icon": 4641307,
       "classes": {
         "1": [
@@ -2444,7 +2444,7 @@
     },
     "193721": {
       "slot_id": 6,
-      "slot_name": "legs",
+      "slot_name": "hands",
       "icon": 4095089,
       "classes": {
         "4": [
@@ -2476,7 +2476,7 @@
     },
     "193722": {
       "slot_id": 7,
-      "slot_name": "feet",
+      "slot_name": "waist",
       "icon": 4326056,
       "classes": {
         "3": [
@@ -2502,7 +2502,7 @@
     },
     "193723": {
       "slot_id": 10,
-      "slot_name": "finger",
+      "slot_name": "main_hand",
       "icon": 4526297,
       "classes": {
         "3": [
@@ -2524,7 +2524,7 @@
     },
     "241044": {
       "slot_id": 14,
-      "slot_name": "off_hand",
+      "slot_name": "other",
       "icon": 7416341,
       "classes": {
         "1": [
@@ -2598,7 +2598,7 @@
     },
     "246590": {
       "slot_id": 14,
-      "slot_name": "off_hand",
+      "slot_name": "other",
       "icon": 7049048,
       "classes": {
         "1": [
@@ -2672,7 +2672,7 @@
     },
     "249275": {
       "slot_id": 11,
-      "slot_name": "trinket",
+      "slot_name": "off_hand",
       "icon": 7412729,
       "classes": {
         "1": [
@@ -2694,7 +2694,7 @@
     },
     "249276": {
       "slot_id": 11,
-      "slot_name": "trinket",
+      "slot_name": "off_hand",
       "icon": 7427980,
       "classes": {
         "5": [
@@ -2732,7 +2732,7 @@
     },
     "249277": {
       "slot_id": 10,
-      "slot_name": "finger",
+      "slot_name": "main_hand",
       "icon": 7451506,
       "classes": {
         "1": [
@@ -2755,7 +2755,7 @@
     },
     "249278": {
       "slot_id": 10,
-      "slot_name": "finger",
+      "slot_name": "main_hand",
       "icon": 7393531,
       "classes": {
         "3": [
@@ -2777,7 +2777,7 @@
     },
     "249279": {
       "slot_id": 10,
-      "slot_name": "finger",
+      "slot_name": "main_hand",
       "icon": 7525805,
       "classes": {
         "3": [
@@ -2792,7 +2792,7 @@
     },
     "249280": {
       "slot_id": 10,
-      "slot_name": "finger",
+      "slot_name": "main_hand",
       "icon": 7463452,
       "classes": {
         "12": [
@@ -2808,7 +2808,7 @@
     },
     "249281": {
       "slot_id": 10,
-      "slot_name": "finger",
+      "slot_name": "main_hand",
       "icon": 7490210,
       "classes": {
         "1": [
@@ -2828,7 +2828,7 @@
     },
     "249283": {
       "slot_id": 10,
-      "slot_name": "finger",
+      "slot_name": "main_hand",
       "icon": 7428175,
       "classes": {
         "5": [
@@ -2867,7 +2867,7 @@
     },
     "249284": {
       "slot_id": 10,
-      "slot_name": "finger",
+      "slot_name": "main_hand",
       "icon": 7363535,
       "classes": {
         "3": [
@@ -2885,7 +2885,7 @@
     },
     "249286": {
       "slot_id": 10,
-      "slot_name": "finger",
+      "slot_name": "main_hand",
       "icon": 7374933,
       "classes": {
         "5": [
@@ -2926,7 +2926,7 @@
     },
     "249287": {
       "slot_id": 10,
-      "slot_name": "finger",
+      "slot_name": "main_hand",
       "icon": 7460404,
       "classes": {
         "4": [
@@ -2947,7 +2947,7 @@
     },
     "249288": {
       "slot_id": 10,
-      "slot_name": "finger",
+      "slot_name": "main_hand",
       "icon": 7431982,
       "classes": {
         "3": [
@@ -2962,7 +2962,7 @@
     },
     "249293": {
       "slot_id": 10,
-      "slot_name": "finger",
+      "slot_name": "main_hand",
       "icon": 7456191,
       "classes": {
         "2": [
@@ -2997,7 +2997,7 @@
     },
     "249294": {
       "slot_id": 10,
-      "slot_name": "finger",
+      "slot_name": "main_hand",
       "icon": 7490210,
       "classes": {
         "2": [
@@ -3032,7 +3032,7 @@
     },
     "249295": {
       "slot_id": 10,
-      "slot_name": "finger",
+      "slot_name": "main_hand",
       "icon": 7460404,
       "classes": {
         "1": [
@@ -3052,7 +3052,7 @@
     },
     "249296": {
       "slot_id": 10,
-      "slot_name": "finger",
+      "slot_name": "main_hand",
       "icon": 7390185,
       "classes": {
         "1": [
@@ -3074,7 +3074,7 @@
     },
     "249298": {
       "slot_id": 10,
-      "slot_name": "finger",
+      "slot_name": "main_hand",
       "icon": 7428132,
       "classes": {
         "4": [
@@ -3099,7 +3099,7 @@
     },
     "249302": {
       "slot_id": 10,
-      "slot_name": "finger",
+      "slot_name": "main_hand",
       "icon": 7439627,
       "classes": {
         "3": [
@@ -3121,7 +3121,7 @@
     },
     "249303": {
       "slot_id": 7,
-      "slot_name": "feet",
+      "slot_name": "waist",
       "icon": 7307672,
       "classes": {
         "3": [
@@ -3147,7 +3147,7 @@
     },
     "249304": {
       "slot_id": 5,
-      "slot_name": "waist",
+      "slot_name": "wrist",
       "icon": 7384532,
       "classes": {
         "3": [
@@ -3173,7 +3173,7 @@
     },
     "249305": {
       "slot_id": 9,
-      "slot_name": "hands",
+      "slot_name": "feet",
       "icon": 7367698,
       "classes": {
         "5": [
@@ -3231,7 +3231,7 @@
     },
     "249307": {
       "slot_id": 6,
-      "slot_name": "legs",
+      "slot_name": "hands",
       "icon": 7319582,
       "classes": {
         "1": [
@@ -3335,7 +3335,7 @@
     },
     "249311": {
       "slot_id": 8,
-      "slot_name": "wrist",
+      "slot_name": "legs",
       "icon": 7319584,
       "classes": {
         "1": [
@@ -3361,7 +3361,7 @@
     },
     "249312": {
       "slot_id": 8,
-      "slot_name": "wrist",
+      "slot_name": "legs",
       "icon": 7446696,
       "classes": {
         "4": [
@@ -3419,7 +3419,7 @@
     },
     "249314": {
       "slot_id": 7,
-      "slot_name": "feet",
+      "slot_name": "waist",
       "icon": 7388201,
       "classes": {
         "4": [
@@ -3451,7 +3451,7 @@
     },
     "249315": {
       "slot_id": 5,
-      "slot_name": "waist",
+      "slot_name": "wrist",
       "icon": 7448849,
       "classes": {
         "5": [
@@ -3555,7 +3555,7 @@
     },
     "249319": {
       "slot_id": 7,
-      "slot_name": "feet",
+      "slot_name": "waist",
       "icon": 7448847,
       "classes": {
         "5": [
@@ -3581,7 +3581,7 @@
     },
     "249320": {
       "slot_id": 9,
-      "slot_name": "hands",
+      "slot_name": "feet",
       "icon": 7307673,
       "classes": {
         "3": [
@@ -3607,7 +3607,7 @@
     },
     "249321": {
       "slot_id": 6,
-      "slot_name": "legs",
+      "slot_name": "hands",
       "icon": 7445747,
       "classes": {
         "4": [
@@ -3671,7 +3671,7 @@
     },
     "249323": {
       "slot_id": 8,
-      "slot_name": "wrist",
+      "slot_name": "legs",
       "icon": 7444044,
       "classes": {
         "5": [
@@ -3697,7 +3697,7 @@
     },
     "249324": {
       "slot_id": 8,
-      "slot_name": "wrist",
+      "slot_name": "legs",
       "icon": 7371094,
       "classes": {
         "3": [
@@ -3723,7 +3723,7 @@
     },
     "249325": {
       "slot_id": 6,
-      "slot_name": "legs",
+      "slot_name": "hands",
       "icon": 7371092,
       "classes": {
         "3": [
@@ -3749,7 +3749,7 @@
     },
     "249326": {
       "slot_id": 5,
-      "slot_name": "waist",
+      "slot_name": "wrist",
       "icon": 7413822,
       "classes": {
         "1": [
@@ -3775,7 +3775,7 @@
     },
     "249327": {
       "slot_id": 5,
-      "slot_name": "waist",
+      "slot_name": "wrist",
       "icon": 7446700,
       "classes": {
         "4": [
@@ -3859,7 +3859,7 @@
     },
     "249330": {
       "slot_id": 6,
-      "slot_name": "legs",
+      "slot_name": "hands",
       "icon": 7367702,
       "classes": {
         "5": [
@@ -3885,7 +3885,7 @@
     },
     "249331": {
       "slot_id": 7,
-      "slot_name": "feet",
+      "slot_name": "waist",
       "icon": 7413820,
       "classes": {
         "1": [
@@ -3911,7 +3911,7 @@
     },
     "249332": {
       "slot_id": 9,
-      "slot_name": "hands",
+      "slot_name": "feet",
       "icon": 7319578,
       "classes": {
         "1": [
@@ -3969,7 +3969,7 @@
     },
     "249334": {
       "slot_id": 9,
-      "slot_name": "hands",
+      "slot_name": "feet",
       "icon": 7388202,
       "classes": {
         "4": [
@@ -4001,7 +4001,7 @@
     },
     "249335": {
       "slot_id": 3,
-      "slot_name": "shirt",
+      "slot_name": "back",
       "icon": 7382325,
       "classes": {
         "1": [
@@ -4078,7 +4078,7 @@
     },
     "249336": {
       "slot_id": 12,
-      "slot_name": "back",
+      "slot_name": "finger",
       "icon": 7636590,
       "classes": {
         "1": [
@@ -4232,7 +4232,7 @@
     },
     "249339": {
       "slot_id": 13,
-      "slot_name": "main_hand",
+      "slot_name": "trinket",
       "icon": 7636711,
       "classes": {
         "1": [
@@ -4260,7 +4260,7 @@
     },
     "249340": {
       "slot_id": 13,
-      "slot_name": "main_hand",
+      "slot_name": "trinket",
       "icon": 7636708,
       "classes": {
         "5": [
@@ -4294,7 +4294,7 @@
     },
     "249341": {
       "slot_id": 13,
-      "slot_name": "main_hand",
+      "slot_name": "trinket",
       "icon": 7636704,
       "classes": {
         "2": [
@@ -4323,7 +4323,7 @@
     },
     "249342": {
       "slot_id": 13,
-      "slot_name": "main_hand",
+      "slot_name": "trinket",
       "icon": 7636710,
       "classes": {
         "1": [
@@ -4345,7 +4345,7 @@
     },
     "249343": {
       "slot_id": 13,
-      "slot_name": "main_hand",
+      "slot_name": "trinket",
       "icon": 7636702,
       "classes": {
         "1": [
@@ -4421,7 +4421,7 @@
     },
     "249344": {
       "slot_id": 13,
-      "slot_name": "main_hand",
+      "slot_name": "trinket",
       "icon": 7636709,
       "classes": {
         "1": [
@@ -4468,7 +4468,7 @@
     },
     "249345": {
       "slot_id": 13,
-      "slot_name": "main_hand",
+      "slot_name": "trinket",
       "icon": 7636703,
       "classes": {
         "3": [
@@ -4498,7 +4498,7 @@
     },
     "249346": {
       "slot_id": 13,
-      "slot_name": "main_hand",
+      "slot_name": "trinket",
       "icon": 7636706,
       "classes": {
         "2": [
@@ -4641,7 +4641,7 @@
     },
     "249351": {
       "slot_id": 6,
-      "slot_name": "legs",
+      "slot_name": "hands",
       "icon": 7636684,
       "classes": {
         "5": [
@@ -4664,7 +4664,7 @@
     },
     "249352": {
       "slot_id": 6,
-      "slot_name": "legs",
+      "slot_name": "hands",
       "icon": 7636684,
       "classes": {
         "4": [
@@ -4693,7 +4693,7 @@
     },
     "249353": {
       "slot_id": 6,
-      "slot_name": "legs",
+      "slot_name": "hands",
       "icon": 7636683,
       "classes": {
         "3": [
@@ -4716,7 +4716,7 @@
     },
     "249354": {
       "slot_id": 6,
-      "slot_name": "legs",
+      "slot_name": "hands",
       "icon": 7636682,
       "classes": {
         "1": [
@@ -4837,7 +4837,7 @@
     },
     "249359": {
       "slot_id": 8,
-      "slot_name": "wrist",
+      "slot_name": "legs",
       "icon": 7636681,
       "classes": {
         "5": [
@@ -4860,7 +4860,7 @@
     },
     "249360": {
       "slot_id": 8,
-      "slot_name": "wrist",
+      "slot_name": "legs",
       "icon": 7636680,
       "classes": {
         "4": [
@@ -4889,7 +4889,7 @@
     },
     "249361": {
       "slot_id": 8,
-      "slot_name": "wrist",
+      "slot_name": "legs",
       "icon": 7636679,
       "classes": {
         "3": [
@@ -4912,7 +4912,7 @@
     },
     "249362": {
       "slot_id": 8,
-      "slot_name": "wrist",
+      "slot_name": "legs",
       "icon": 7636678,
       "classes": {
         "1": [
@@ -5033,7 +5033,7 @@
     },
     "249367": {
       "slot_id": 14,
-      "slot_name": "off_hand",
+      "slot_name": "other",
       "icon": 458245,
       "classes": {
         "1": [
@@ -5184,7 +5184,7 @@
     },
     "249369": {
       "slot_id": 12,
-      "slot_name": "back",
+      "slot_name": "finger",
       "icon": 7636620,
       "classes": {
         "1": [
@@ -5261,7 +5261,7 @@
     },
     "249370": {
       "slot_id": 3,
-      "slot_name": "shirt",
+      "slot_name": "back",
       "icon": 7319580,
       "classes": {
         "1": [
@@ -5338,7 +5338,7 @@
     },
     "249371": {
       "slot_id": 7,
-      "slot_name": "feet",
+      "slot_name": "waist",
       "icon": 7371087,
       "classes": {
         "3": [
@@ -5364,7 +5364,7 @@
     },
     "249373": {
       "slot_id": 9,
-      "slot_name": "hands",
+      "slot_name": "feet",
       "icon": 7444038,
       "classes": {
         "5": [
@@ -5390,7 +5390,7 @@
     },
     "249374": {
       "slot_id": 7,
-      "slot_name": "feet",
+      "slot_name": "waist",
       "icon": 7430728,
       "classes": {
         "4": [
@@ -5422,7 +5422,7 @@
     },
     "249376": {
       "slot_id": 7,
-      "slot_name": "feet",
+      "slot_name": "waist",
       "icon": 7444037,
       "classes": {
         "5": [
@@ -5448,7 +5448,7 @@
     },
     "249377": {
       "slot_id": 9,
-      "slot_name": "hands",
+      "slot_name": "feet",
       "icon": 7371088,
       "classes": {
         "3": [
@@ -5474,7 +5474,7 @@
     },
     "249380": {
       "slot_id": 7,
-      "slot_name": "feet",
+      "slot_name": "waist",
       "icon": 7382319,
       "classes": {
         "1": [
@@ -5500,7 +5500,7 @@
     },
     "249381": {
       "slot_id": 9,
-      "slot_name": "hands",
+      "slot_name": "feet",
       "icon": 7413821,
       "classes": {
         "1": [
@@ -5526,7 +5526,7 @@
     },
     "249382": {
       "slot_id": 9,
-      "slot_name": "hands",
+      "slot_name": "feet",
       "icon": 7445739,
       "classes": {
         "4": [
@@ -5558,7 +5558,7 @@
     },
     "249805": {
       "slot_id": 13,
-      "slot_name": "main_hand",
+      "slot_name": "trinket",
       "icon": 7636701,
       "classes": {
         "1": [
@@ -5599,7 +5599,7 @@
     },
     "249806": {
       "slot_id": 13,
-      "slot_name": "main_hand",
+      "slot_name": "trinket",
       "icon": 7636520,
       "classes": {
         "1": [
@@ -5646,7 +5646,7 @@
     },
     "249807": {
       "slot_id": 13,
-      "slot_name": "main_hand",
+      "slot_name": "trinket",
       "icon": 7636699,
       "classes": {
         "1": [
@@ -5672,7 +5672,7 @@
     },
     "249808": {
       "slot_id": 13,
-      "slot_name": "main_hand",
+      "slot_name": "trinket",
       "icon": 7636705,
       "classes": {
         "2": [
@@ -5699,7 +5699,7 @@
     },
     "249809": {
       "slot_id": 13,
-      "slot_name": "main_hand",
+      "slot_name": "trinket",
       "icon": 7636707,
       "classes": {
         "2": [
@@ -5746,7 +5746,7 @@
     },
     "249810": {
       "slot_id": 13,
-      "slot_name": "main_hand",
+      "slot_name": "trinket",
       "icon": 7636696,
       "classes": {
         "5": [
@@ -5780,7 +5780,7 @@
     },
     "249811": {
       "slot_id": 13,
-      "slot_name": "main_hand",
+      "slot_name": "trinket",
       "icon": 7636700,
       "classes": {
         "2": [
@@ -5888,7 +5888,7 @@
     },
     "249915": {
       "slot_id": 8,
-      "slot_name": "wrist",
+      "slot_name": "legs",
       "icon": 7382331,
       "classes": {
         "1": [
@@ -5913,7 +5913,7 @@
     },
     "249919": {
       "slot_id": 12,
-      "slot_name": "back",
+      "slot_name": "finger",
       "icon": 7636624,
       "classes": {
         "1": [
@@ -5990,7 +5990,7 @@
     },
     "249920": {
       "slot_id": 12,
-      "slot_name": "back",
+      "slot_name": "finger",
       "icon": 7636584,
       "classes": {
         "1": [
@@ -6066,7 +6066,7 @@
     },
     "249921": {
       "slot_id": 11,
-      "slot_name": "trinket",
+      "slot_name": "off_hand",
       "icon": 7412729,
       "classes": {
         "1": [
@@ -6088,7 +6088,7 @@
     },
     "249922": {
       "slot_id": 11,
-      "slot_name": "trinket",
+      "slot_name": "off_hand",
       "icon": 7427980,
       "classes": {
         "5": [
@@ -6126,7 +6126,7 @@
     },
     "249925": {
       "slot_id": 10,
-      "slot_name": "finger",
+      "slot_name": "main_hand",
       "icon": 7428175,
       "classes": {
         "3": [
@@ -6144,7 +6144,7 @@
     },
     "250144": {
       "slot_id": 13,
-      "slot_name": "main_hand",
+      "slot_name": "trinket",
       "icon": 2103819,
       "classes": {
         "2": [
@@ -6206,7 +6206,7 @@
     },
     "250223": {
       "slot_id": 13,
-      "slot_name": "main_hand",
+      "slot_name": "trinket",
       "icon": 133323,
       "classes": {
         "5": [
@@ -6240,7 +6240,7 @@
     },
     "250226": {
       "slot_id": 13,
-      "slot_name": "main_hand",
+      "slot_name": "trinket",
       "icon": 1379246,
       "classes": {
         "1": [
@@ -6279,7 +6279,7 @@
     },
     "250227": {
       "slot_id": 13,
-      "slot_name": "main_hand",
+      "slot_name": "trinket",
       "icon": 4624619,
       "classes": {
         "1": [
@@ -6318,7 +6318,7 @@
     },
     "250241": {
       "slot_id": 13,
-      "slot_name": "main_hand",
+      "slot_name": "trinket",
       "icon": 7578260,
       "classes": {
         "1": [
@@ -6340,7 +6340,7 @@
     },
     "250242": {
       "slot_id": 13,
-      "slot_name": "main_hand",
+      "slot_name": "trinket",
       "icon": 7578264,
       "classes": {
         "1": [
@@ -6366,7 +6366,7 @@
     },
     "250246": {
       "slot_id": 13,
-      "slot_name": "main_hand",
+      "slot_name": "trinket",
       "icon": 4914670,
       "classes": {
         "2": [
@@ -6470,7 +6470,7 @@
     },
     "250253": {
       "slot_id": 13,
-      "slot_name": "main_hand",
+      "slot_name": "trinket",
       "icon": 4914671,
       "classes": {
         "2": [
@@ -6497,7 +6497,7 @@
     },
     "250256": {
       "slot_id": 13,
-      "slot_name": "main_hand",
+      "slot_name": "trinket",
       "icon": 4644003,
       "classes": {
         "1": [
@@ -6571,7 +6571,7 @@
     },
     "250257": {
       "slot_id": 13,
-      "slot_name": "main_hand",
+      "slot_name": "trinket",
       "icon": 237298,
       "classes": {
         "3": [
@@ -6621,7 +6621,7 @@
     },
     "250258": {
       "slot_id": 13,
-      "slot_name": "main_hand",
+      "slot_name": "trinket",
       "icon": 461138,
       "classes": {
         "1": [
@@ -6697,7 +6697,7 @@
     },
     "250446": {
       "slot_id": 11,
-      "slot_name": "trinket",
+      "slot_name": "off_hand",
       "icon": 7523136,
       "classes": {
         "1": [
@@ -6719,7 +6719,7 @@
     },
     "250447": {
       "slot_id": 11,
-      "slot_name": "trinket",
+      "slot_name": "off_hand",
       "icon": 7319164,
       "classes": {
         "5": [
@@ -6757,7 +6757,7 @@
     },
     "250448": {
       "slot_id": 10,
-      "slot_name": "finger",
+      "slot_name": "main_hand",
       "icon": 6994496,
       "classes": {
         "5": [
@@ -6799,7 +6799,7 @@
     },
     "250449": {
       "slot_id": 10,
-      "slot_name": "finger",
+      "slot_name": "main_hand",
       "icon": 7012521,
       "classes": {
         "3": [
@@ -6817,7 +6817,7 @@
     },
     "250450": {
       "slot_id": 10,
-      "slot_name": "finger",
+      "slot_name": "main_hand",
       "icon": 6989930,
       "classes": {
         "3": [
@@ -6832,7 +6832,7 @@
     },
     "250451": {
       "slot_id": 10,
-      "slot_name": "finger",
+      "slot_name": "main_hand",
       "icon": 7260419,
       "classes": {
         "3": [
@@ -6860,7 +6860,7 @@
     },
     "250452": {
       "slot_id": 10,
-      "slot_name": "finger",
+      "slot_name": "main_hand",
       "icon": 7009471,
       "classes": {
         "2": [
@@ -6895,7 +6895,7 @@
     },
     "250453": {
       "slot_id": 10,
-      "slot_name": "finger",
+      "slot_name": "main_hand",
       "icon": 7281355,
       "classes": {
         "1": [
@@ -6915,7 +6915,7 @@
     },
     "250454": {
       "slot_id": 10,
-      "slot_name": "finger",
+      "slot_name": "main_hand",
       "icon": 6994475,
       "classes": {
         "1": [
@@ -6938,7 +6938,7 @@
     },
     "250455": {
       "slot_id": 10,
-      "slot_name": "finger",
+      "slot_name": "main_hand",
       "icon": 7117445,
       "classes": {
         "3": [
@@ -6986,7 +6986,7 @@
     },
     "250457": {
       "slot_id": 8,
-      "slot_name": "wrist",
+      "slot_name": "legs",
       "icon": 7388208,
       "classes": {
         "4": [
@@ -7070,7 +7070,7 @@
     },
     "250460": {
       "slot_id": 12,
-      "slot_name": "back",
+      "slot_name": "finger",
       "icon": 3536116,
       "classes": {
         "1": [
@@ -7224,7 +7224,7 @@
     },
     "250462": {
       "slot_id": 13,
-      "slot_name": "main_hand",
+      "slot_name": "trinket",
       "icon": 255126,
       "classes": {
         "1": [
@@ -7298,7 +7298,7 @@
     },
     "251077": {
       "slot_id": 10,
-      "slot_name": "finger",
+      "slot_name": "main_hand",
       "icon": 6936235,
       "classes": {
         "3": [
@@ -7320,7 +7320,7 @@
     },
     "251078": {
       "slot_id": 10,
-      "slot_name": "finger",
+      "slot_name": "main_hand",
       "icon": 6994575,
       "classes": {
         "1": [
@@ -7343,7 +7343,7 @@
     },
     "251079": {
       "slot_id": 5,
-      "slot_name": "waist",
+      "slot_name": "wrist",
       "icon": 7259232,
       "classes": {
         "3": [
@@ -7395,7 +7395,7 @@
     },
     "251081": {
       "slot_id": 6,
-      "slot_name": "legs",
+      "slot_name": "hands",
       "icon": 7135736,
       "classes": {
         "1": [
@@ -7421,7 +7421,7 @@
     },
     "251082": {
       "slot_id": 7,
-      "slot_name": "feet",
+      "slot_name": "waist",
       "icon": 7278019,
       "classes": {
         "4": [
@@ -7453,7 +7453,7 @@
     },
     "251083": {
       "slot_id": 10,
-      "slot_name": "finger",
+      "slot_name": "main_hand",
       "icon": 6936236,
       "classes": {
         "2": [
@@ -7488,7 +7488,7 @@
     },
     "251084": {
       "slot_id": 9,
-      "slot_name": "hands",
+      "slot_name": "feet",
       "icon": 7259231,
       "classes": {
         "3": [
@@ -7540,7 +7540,7 @@
     },
     "251086": {
       "slot_id": 7,
-      "slot_name": "feet",
+      "slot_name": "waist",
       "icon": 7135731,
       "classes": {
         "1": [
@@ -7566,7 +7566,7 @@
     },
     "251087": {
       "slot_id": 8,
-      "slot_name": "wrist",
+      "slot_name": "legs",
       "icon": 7232474,
       "classes": {
         "4": [
@@ -7598,7 +7598,7 @@
     },
     "251088": {
       "slot_id": 10,
-      "slot_name": "finger",
+      "slot_name": "main_hand",
       "icon": 6981232,
       "classes": {
         "1": [
@@ -7618,7 +7618,7 @@
     },
     "251089": {
       "slot_id": 6,
-      "slot_name": "legs",
+      "slot_name": "hands",
       "icon": 7259235,
       "classes": {
         "3": [
@@ -7644,7 +7644,7 @@
     },
     "251090": {
       "slot_id": 8,
-      "slot_name": "wrist",
+      "slot_name": "legs",
       "icon": 7252748,
       "classes": {
         "5": [
@@ -7670,7 +7670,7 @@
     },
     "251091": {
       "slot_id": 9,
-      "slot_name": "hands",
+      "slot_name": "feet",
       "icon": 7135732,
       "classes": {
         "1": [
@@ -7728,7 +7728,7 @@
     },
     "251093": {
       "slot_id": 12,
-      "slot_name": "back",
+      "slot_name": "finger",
       "icon": 7636676,
       "classes": {
         "1": [
@@ -7805,7 +7805,7 @@
     },
     "251094": {
       "slot_id": 11,
-      "slot_name": "trinket",
+      "slot_name": "off_hand",
       "icon": 7431122,
       "classes": {
         "5": [
@@ -7843,7 +7843,7 @@
     },
     "251095": {
       "slot_id": 10,
-      "slot_name": "finger",
+      "slot_name": "main_hand",
       "icon": 6998205,
       "classes": {
         "3": [
@@ -8019,7 +8019,7 @@
     },
     "251100": {
       "slot_id": 10,
-      "slot_name": "finger",
+      "slot_name": "main_hand",
       "icon": 7267173,
       "classes": {
         "1": [
@@ -8065,7 +8065,7 @@
     },
     "251102": {
       "slot_id": 7,
-      "slot_name": "feet",
+      "slot_name": "waist",
       "icon": 7252741,
       "classes": {
         "5": [
@@ -8091,7 +8091,7 @@
     },
     "251103": {
       "slot_id": 5,
-      "slot_name": "waist",
+      "slot_name": "wrist",
       "icon": 7232469,
       "classes": {
         "4": [
@@ -8123,7 +8123,7 @@
     },
     "251104": {
       "slot_id": 8,
-      "slot_name": "wrist",
+      "slot_name": "legs",
       "icon": 7259237,
       "classes": {
         "3": [
@@ -8149,7 +8149,7 @@
     },
     "251105": {
       "slot_id": 11,
-      "slot_name": "trinket",
+      "slot_name": "off_hand",
       "icon": 7392266,
       "classes": {
         "1": [
@@ -8171,7 +8171,7 @@
     },
     "251106": {
       "slot_id": 10,
-      "slot_name": "finger",
+      "slot_name": "main_hand",
       "icon": 2398172,
       "classes": {
         "12": [
@@ -8187,7 +8187,7 @@
     },
     "251107": {
       "slot_id": 9,
-      "slot_name": "hands",
+      "slot_name": "feet",
       "icon": 7135732,
       "classes": {
         "1": [
@@ -8213,7 +8213,7 @@
     },
     "251108": {
       "slot_id": 5,
-      "slot_name": "waist",
+      "slot_name": "wrist",
       "icon": 7252743,
       "classes": {
         "5": [
@@ -8271,7 +8271,7 @@
     },
     "251110": {
       "slot_id": 7,
-      "slot_name": "feet",
+      "slot_name": "waist",
       "icon": 7259230,
       "classes": {
         "3": [
@@ -8297,7 +8297,7 @@
     },
     "251111": {
       "slot_id": 10,
-      "slot_name": "finger",
+      "slot_name": "main_hand",
       "icon": 7065189,
       "classes": {
         "5": [
@@ -8336,7 +8336,7 @@
     },
     "251112": {
       "slot_id": 7,
-      "slot_name": "feet",
+      "slot_name": "waist",
       "icon": 7135731,
       "classes": {
         "1": [
@@ -8362,7 +8362,7 @@
     },
     "251113": {
       "slot_id": 6,
-      "slot_name": "legs",
+      "slot_name": "hands",
       "icon": 7232472,
       "classes": {
         "4": [
@@ -8420,7 +8420,7 @@
     },
     "251115": {
       "slot_id": 12,
-      "slot_name": "back",
+      "slot_name": "finger",
       "icon": 7636681,
       "classes": {
         "1": [
@@ -8497,7 +8497,7 @@
     },
     "251117": {
       "slot_id": 10,
-      "slot_name": "finger",
+      "slot_name": "main_hand",
       "icon": 6994475,
       "classes": {
         "1": [
@@ -8520,7 +8520,7 @@
     },
     "251118": {
       "slot_id": 8,
-      "slot_name": "wrist",
+      "slot_name": "legs",
       "icon": 7135738,
       "classes": {
         "1": [
@@ -8598,7 +8598,7 @@
     },
     "251121": {
       "slot_id": 9,
-      "slot_name": "hands",
+      "slot_name": "feet",
       "icon": 7232468,
       "classes": {
         "4": [
@@ -8630,7 +8630,7 @@
     },
     "251122": {
       "slot_id": 10,
-      "slot_name": "finger",
+      "slot_name": "main_hand",
       "icon": 6994479,
       "classes": {
         "3": [
@@ -8681,7 +8681,7 @@
     },
     "251161": {
       "slot_id": 3,
-      "slot_name": "shirt",
+      "slot_name": "back",
       "icon": 7264163,
       "classes": {
         "1": [
@@ -8758,7 +8758,7 @@
     },
     "251162": {
       "slot_id": 10,
-      "slot_name": "finger",
+      "slot_name": "main_hand",
       "icon": 6929479,
       "classes": {
         "3": [
@@ -8780,7 +8780,7 @@
     },
     "251163": {
       "slot_id": 10,
-      "slot_name": "finger",
+      "slot_name": "main_hand",
       "icon": 7259089,
       "classes": {
         "7": [
@@ -8836,7 +8836,7 @@
     },
     "251166": {
       "slot_id": 7,
-      "slot_name": "feet",
+      "slot_name": "waist",
       "icon": 7278019,
       "classes": {
         "4": [
@@ -8868,7 +8868,7 @@
     },
     "251167": {
       "slot_id": 9,
-      "slot_name": "hands",
+      "slot_name": "feet",
       "icon": 7252742,
       "classes": {
         "5": [
@@ -8894,7 +8894,7 @@
     },
     "251168": {
       "slot_id": 10,
-      "slot_name": "finger",
+      "slot_name": "main_hand",
       "icon": 6994575,
       "classes": {
         "1": [
@@ -8917,7 +8917,7 @@
     },
     "251169": {
       "slot_id": 9,
-      "slot_name": "hands",
+      "slot_name": "feet",
       "icon": 7135732,
       "classes": {
         "1": [
@@ -8943,7 +8943,7 @@
     },
     "251170": {
       "slot_id": 8,
-      "slot_name": "wrist",
+      "slot_name": "legs",
       "icon": 7259237,
       "classes": {
         "3": [
@@ -9001,7 +9001,7 @@
     },
     "251172": {
       "slot_id": 6,
-      "slot_name": "legs",
+      "slot_name": "hands",
       "icon": 7252746,
       "classes": {
         "5": [
@@ -9027,7 +9027,7 @@
     },
     "251174": {
       "slot_id": 10,
-      "slot_name": "finger",
+      "slot_name": "main_hand",
       "icon": 6989930,
       "classes": {
         "3": [
@@ -9042,7 +9042,7 @@
     },
     "251175": {
       "slot_id": 10,
-      "slot_name": "finger",
+      "slot_name": "main_hand",
       "icon": 7389567,
       "classes": {
         "3": [
@@ -9128,7 +9128,7 @@
     },
     "251178": {
       "slot_id": 10,
-      "slot_name": "finger",
+      "slot_name": "main_hand",
       "icon": 7065189,
       "classes": {
         "5": [
@@ -9193,7 +9193,7 @@
     },
     "251201": {
       "slot_id": 10,
-      "slot_name": "finger",
+      "slot_name": "main_hand",
       "icon": 6994496,
       "classes": {
         "5": [
@@ -9235,7 +9235,7 @@
     },
     "251202": {
       "slot_id": 11,
-      "slot_name": "trinket",
+      "slot_name": "off_hand",
       "icon": 7433369,
       "classes": {
         "1": [
@@ -9257,7 +9257,7 @@
     },
     "251203": {
       "slot_id": 5,
-      "slot_name": "waist",
+      "slot_name": "wrist",
       "icon": 7135733,
       "classes": {
         "1": [
@@ -9283,7 +9283,7 @@
     },
     "251204": {
       "slot_id": 6,
-      "slot_name": "legs",
+      "slot_name": "hands",
       "icon": 7232472,
       "classes": {
         "4": [
@@ -9315,7 +9315,7 @@
     },
     "251205": {
       "slot_id": 8,
-      "slot_name": "wrist",
+      "slot_name": "legs",
       "icon": 7252748,
       "classes": {
         "5": [
@@ -9341,7 +9341,7 @@
     },
     "251206": {
       "slot_id": 3,
-      "slot_name": "shirt",
+      "slot_name": "back",
       "icon": 7252744,
       "classes": {
         "1": [
@@ -9418,7 +9418,7 @@
     },
     "251207": {
       "slot_id": 10,
-      "slot_name": "finger",
+      "slot_name": "main_hand",
       "icon": 5547326,
       "classes": {
         "4": [
@@ -9439,7 +9439,7 @@
     },
     "251208": {
       "slot_id": 8,
-      "slot_name": "wrist",
+      "slot_name": "legs",
       "icon": 7135738,
       "classes": {
         "1": [
@@ -9465,7 +9465,7 @@
     },
     "251209": {
       "slot_id": 5,
-      "slot_name": "waist",
+      "slot_name": "wrist",
       "icon": 7259232,
       "classes": {
         "3": [
@@ -9491,7 +9491,7 @@
     },
     "251210": {
       "slot_id": 9,
-      "slot_name": "hands",
+      "slot_name": "feet",
       "icon": 7232468,
       "classes": {
         "4": [
@@ -9523,7 +9523,7 @@
     },
     "251211": {
       "slot_id": 6,
-      "slot_name": "legs",
+      "slot_name": "hands",
       "icon": 7252746,
       "classes": {
         "5": [
@@ -9549,7 +9549,7 @@
     },
     "251212": {
       "slot_id": 10,
-      "slot_name": "finger",
+      "slot_name": "main_hand",
       "icon": 7009181,
       "classes": {
         "3": [
@@ -9593,7 +9593,7 @@
     },
     "251215": {
       "slot_id": 8,
-      "slot_name": "wrist",
+      "slot_name": "legs",
       "icon": 7259237,
       "classes": {
         "3": [
@@ -9651,7 +9651,7 @@
     },
     "251217": {
       "slot_id": 12,
-      "slot_name": "back",
+      "slot_name": "finger",
       "icon": 7636674,
       "classes": {
         "1": [
@@ -9728,7 +9728,7 @@
     },
     "252411": {
       "slot_id": 13,
-      "slot_name": "main_hand",
+      "slot_name": "trinket",
       "icon": 134909,
       "classes": {
         "2": [
@@ -9755,7 +9755,7 @@
     },
     "252418": {
       "slot_id": 13,
-      "slot_name": "main_hand",
+      "slot_name": "trinket",
       "icon": 132847,
       "classes": {
         "1": [
@@ -9781,7 +9781,7 @@
     },
     "252420": {
       "slot_id": 13,
-      "slot_name": "main_hand",
+      "slot_name": "trinket",
       "icon": 132873,
       "classes": {
         "1": [
@@ -9828,7 +9828,7 @@
     },
     "252421": {
       "slot_id": 13,
-      "slot_name": "main_hand",
+      "slot_name": "trinket",
       "icon": 3459798,
       "classes": {
         "1": [
@@ -9854,7 +9854,7 @@
     },
     "256683": {
       "slot_id": 14,
-      "slot_name": "off_hand",
+      "slot_name": "other",
       "icon": 7425933,
       "classes": {
         "1": [
@@ -9928,7 +9928,7 @@
     },
     "258046": {
       "slot_id": 10,
-      "slot_name": "finger",
+      "slot_name": "main_hand",
       "icon": 947135,
       "classes": {
         "1": [
@@ -9951,7 +9951,7 @@
     },
     "258047": {
       "slot_id": 10,
-      "slot_name": "finger",
+      "slot_name": "main_hand",
       "icon": 947159,
       "classes": {
         "5": [
@@ -9993,7 +9993,7 @@
     },
     "258048": {
       "slot_id": 10,
-      "slot_name": "finger",
+      "slot_name": "main_hand",
       "icon": 943308,
       "classes": {
         "1": [
@@ -10013,7 +10013,7 @@
     },
     "258049": {
       "slot_id": 11,
-      "slot_name": "trinket",
+      "slot_name": "off_hand",
       "icon": 943306,
       "classes": {
         "1": [
@@ -10035,7 +10035,7 @@
     },
     "258050": {
       "slot_id": 10,
-      "slot_name": "finger",
+      "slot_name": "main_hand",
       "icon": 939346,
       "classes": {
         "7": [
@@ -10065,7 +10065,7 @@
     },
     "258218": {
       "slot_id": 10,
-      "slot_name": "finger",
+      "slot_name": "main_hand",
       "icon": 4680187,
       "classes": {
         "2": [
@@ -10100,7 +10100,7 @@
     },
     "258412": {
       "slot_id": 10,
-      "slot_name": "finger",
+      "slot_name": "main_hand",
       "icon": 946949,
       "classes": {
         "3": [
@@ -10115,7 +10115,7 @@
     },
     "258436": {
       "slot_id": 10,
-      "slot_name": "finger",
+      "slot_name": "main_hand",
       "icon": 942781,
       "classes": {
         "3": [
@@ -10133,7 +10133,7 @@
     },
     "258438": {
       "slot_id": 10,
-      "slot_name": "finger",
+      "slot_name": "main_hand",
       "icon": 940809,
       "classes": {
         "4": [
@@ -10158,7 +10158,7 @@
     },
     "258472": {
       "slot_id": 11,
-      "slot_name": "trinket",
+      "slot_name": "off_hand",
       "icon": 946906,
       "classes": {
         "5": [
@@ -10196,7 +10196,7 @@
     },
     "258484": {
       "slot_id": 10,
-      "slot_name": "finger",
+      "slot_name": "main_hand",
       "icon": 944531,
       "classes": {
         "3": [
@@ -10218,7 +10218,7 @@
     },
     "258514": {
       "slot_id": 10,
-      "slot_name": "finger",
+      "slot_name": "main_hand",
       "icon": 3461503,
       "classes": {
         "5": [
@@ -10260,7 +10260,7 @@
     },
     "258516": {
       "slot_id": 10,
-      "slot_name": "finger",
+      "slot_name": "main_hand",
       "icon": 1003750,
       "classes": {
         "5": [
@@ -10286,7 +10286,7 @@
     },
     "258523": {
       "slot_id": 11,
-      "slot_name": "trinket",
+      "slot_name": "off_hand",
       "icon": 3229469,
       "classes": {
         "5": [
@@ -10324,7 +10324,7 @@
     },
     "258524": {
       "slot_id": 10,
-      "slot_name": "finger",
+      "slot_name": "main_hand",
       "icon": 976063,
       "classes": {
         "4": [
@@ -10349,7 +10349,7 @@
     },
     "258525": {
       "slot_id": 10,
-      "slot_name": "finger",
+      "slot_name": "main_hand",
       "icon": 463830,
       "classes": {
         "1": [
@@ -10369,7 +10369,7 @@
     },
     "258529": {
       "slot_id": 10,
-      "slot_name": "finger",
+      "slot_name": "main_hand",
       "icon": 4322743,
       "classes": {
         "3": [
@@ -10391,7 +10391,7 @@
     },
     "258531": {
       "slot_id": 11,
-      "slot_name": "trinket",
+      "slot_name": "off_hand",
       "icon": 4181501,
       "classes": {
         "1": [
@@ -10413,7 +10413,7 @@
     },
     "258574": {
       "slot_id": 8,
-      "slot_name": "wrist",
+      "slot_name": "legs",
       "icon": 961490,
       "classes": {
         "5": [
@@ -10439,7 +10439,7 @@
     },
     "258575": {
       "slot_id": 3,
-      "slot_name": "shirt",
+      "slot_name": "back",
       "icon": 1043737,
       "classes": {
         "1": [
@@ -10542,7 +10542,7 @@
     },
     "258577": {
       "slot_id": 9,
-      "slot_name": "hands",
+      "slot_name": "feet",
       "icon": 960145,
       "classes": {
         "4": [
@@ -10626,7 +10626,7 @@
     },
     "258580": {
       "slot_id": 5,
-      "slot_name": "waist",
+      "slot_name": "wrist",
       "icon": 961486,
       "classes": {
         "5": [
@@ -10684,7 +10684,7 @@
     },
     "258582": {
       "slot_id": 9,
-      "slot_name": "hands",
+      "slot_name": "feet",
       "icon": 960037,
       "classes": {
         "3": [
@@ -10710,7 +10710,7 @@
     },
     "258583": {
       "slot_id": 6,
-      "slot_name": "legs",
+      "slot_name": "hands",
       "icon": 960786,
       "classes": {
         "1": [
@@ -10736,7 +10736,7 @@
     },
     "258584": {
       "slot_id": 9,
-      "slot_name": "hands",
+      "slot_name": "feet",
       "icon": 961485,
       "classes": {
         "5": [
@@ -10846,7 +10846,7 @@
     },
     "258744": {
       "slot_id": 14,
-      "slot_name": "off_hand",
+      "slot_name": "other",
       "icon": 7445502,
       "classes": {
         "1": [
@@ -10920,7 +10920,7 @@
     },
     "260231": {
       "slot_id": 14,
-      "slot_name": "off_hand",
+      "slot_name": "other",
       "icon": 7454937,
       "classes": {
         "1": [
@@ -10994,7 +10994,7 @@
     },
     "260235": {
       "slot_id": 13,
-      "slot_name": "main_hand",
+      "slot_name": "trinket",
       "icon": 7636525,
       "classes": {
         "1": [
@@ -11041,7 +11041,7 @@
     },
     "260312": {
       "slot_id": 3,
-      "slot_name": "shirt",
+      "slot_name": "back",
       "icon": 7135734,
       "classes": {
         "1": [
@@ -11118,7 +11118,7 @@
     },
     "260359": {
       "slot_id": 14,
-      "slot_name": "off_hand",
+      "slot_name": "other",
       "icon": 7423589,
       "classes": {
         "1": [
@@ -11192,7 +11192,7 @@
     },
     "260408": {
       "slot_id": 10,
-      "slot_name": "finger",
+      "slot_name": "main_hand",
       "icon": 7451177,
       "classes": {
         "12": [
@@ -11207,7 +11207,7 @@
     },
     "260423": {
       "slot_id": 10,
-      "slot_name": "finger",
+      "slot_name": "main_hand",
       "icon": 7490210,
       "classes": {
         "3": [
@@ -11232,7 +11232,7 @@
     },
     "262914": {
       "slot_id": 14,
-      "slot_name": "off_hand",
+      "slot_name": "other",
       "icon": 6996382,
       "classes": {
         "1": [
@@ -11306,7 +11306,7 @@
     },
     "262957": {
       "slot_id": 14,
-      "slot_name": "off_hand",
+      "slot_name": "other",
       "icon": 7489659,
       "classes": {
         "1": [
@@ -11380,7 +11380,7 @@
     },
     "263193": {
       "slot_id": 5,
-      "slot_name": "waist",
+      "slot_name": "wrist",
       "icon": 7135733,
       "classes": {
         "1": [
@@ -11406,7 +11406,7 @@
     },
     "263230": {
       "slot_id": 14,
-      "slot_name": "off_hand",
+      "slot_name": "other",
       "icon": 7494535,
       "classes": {
         "1": [
@@ -11480,7 +11480,7 @@
     },
     "264187": {
       "slot_id": 14,
-      "slot_name": "off_hand",
+      "slot_name": "other",
       "icon": 7506601,
       "classes": {
         "1": [
@@ -11554,7 +11554,7 @@
     },
     "264246": {
       "slot_id": 14,
-      "slot_name": "off_hand",
+      "slot_name": "other",
       "icon": 7506640,
       "classes": {
         "1": [
@@ -11628,7 +11628,7 @@
     },
     "264338": {
       "slot_id": 14,
-      "slot_name": "off_hand",
+      "slot_name": "other",
       "icon": 7509095,
       "classes": {
         "1": [
@@ -11702,7 +11702,7 @@
     },
     "264491": {
       "slot_id": 14,
-      "slot_name": "off_hand",
+      "slot_name": "other",
       "icon": 7514974,
       "classes": {
         "1": [
@@ -11776,7 +11776,7 @@
     },
     "264492": {
       "slot_id": 14,
-      "slot_name": "off_hand",
+      "slot_name": "other",
       "icon": 7514978,
       "classes": {
         "1": [
@@ -11850,7 +11850,7 @@
     },
     "264494": {
       "slot_id": 14,
-      "slot_name": "off_hand",
+      "slot_name": "other",
       "icon": 7514964,
       "classes": {
         "1": [
@@ -11924,7 +11924,7 @@
     },
     "264497": {
       "slot_id": 14,
-      "slot_name": "off_hand",
+      "slot_name": "other",
       "icon": 7514938,
       "classes": {
         "1": [
@@ -11998,7 +11998,7 @@
     },
     "264498": {
       "slot_id": 14,
-      "slot_name": "off_hand",
+      "slot_name": "other",
       "icon": 7514962,
       "classes": {
         "1": [
@@ -12072,7 +12072,7 @@
     },
     "264672": {
       "slot_id": 14,
-      "slot_name": "off_hand",
+      "slot_name": "other",
       "icon": 7501330,
       "classes": {
         "1": [
@@ -12146,7 +12146,7 @@
     },
     "264717": {
       "slot_id": 14,
-      "slot_name": "off_hand",
+      "slot_name": "other",
       "icon": 7517838,
       "classes": {
         "1": [
@@ -12220,7 +12220,7 @@
     },
     "265949": {
       "slot_id": 14,
-      "slot_name": "off_hand",
+      "slot_name": "other",
       "icon": 7551593,
       "classes": {
         "1": [
@@ -12294,7 +12294,7 @@
     },
     "265950": {
       "slot_id": 14,
-      "slot_name": "off_hand",
+      "slot_name": "other",
       "icon": 7551595,
       "classes": {
         "1": [
@@ -12368,7 +12368,7 @@
     },
     "265951": {
       "slot_id": 14,
-      "slot_name": "off_hand",
+      "slot_name": "other",
       "icon": 7551590,
       "classes": {
         "1": [
@@ -12442,7 +12442,7 @@
     },
     "266885": {
       "slot_id": 14,
-      "slot_name": "off_hand",
+      "slot_name": "other",
       "icon": 7562220,
       "classes": {
         "1": [
@@ -12516,7 +12516,7 @@
     },
     "266886": {
       "slot_id": 14,
-      "slot_name": "off_hand",
+      "slot_name": "other",
       "icon": 7562227,
       "classes": {
         "1": [
@@ -12590,7 +12590,7 @@
     },
     "266887": {
       "slot_id": 14,
-      "slot_name": "off_hand",
+      "slot_name": "other",
       "icon": 7562224,
       "classes": {
         "1": [
@@ -12664,7 +12664,7 @@
     },
     "267007": {
       "slot_id": 14,
-      "slot_name": "off_hand",
+      "slot_name": "other",
       "icon": 7568384,
       "classes": {
         "1": [
@@ -12738,7 +12738,7 @@
     },
     "267645": {
       "slot_id": 14,
-      "slot_name": "off_hand",
+      "slot_name": "other",
       "icon": 7633619,
       "classes": {
         "1": [
@@ -12812,7 +12812,7 @@
     },
     "267646": {
       "slot_id": 14,
-      "slot_name": "off_hand",
+      "slot_name": "other",
       "icon": 7633623,
       "classes": {
         "1": [
@@ -12886,7 +12886,7 @@
     },
     "268049": {
       "slot_id": 14,
-      "slot_name": "off_hand",
+      "slot_name": "other",
       "icon": 7633625,
       "classes": {
         "1": [
@@ -12960,7 +12960,7 @@
     },
     "269269": {
       "slot_id": 14,
-      "slot_name": "off_hand",
+      "slot_name": "other",
       "icon": 7696309,
       "classes": {
         "1": [
