@@ -84,7 +84,7 @@ These shipped during live testing on Felfriend (Demo Warlock, Zul'jin):
 ### What's next
 
 - **Phase 7 — content recommender** (v2 territory; deferred per SCOPE).
-- **Pre-v1 polish slices** are the active work today. Live tracking lives in session memory + the `/loop` skill todos. Known open items at this snapshot: stale desktop window title after scan ends, optional "Force full sim" toggle to bypass quick-sim during testing, end-to-end live verification of the calibrated pruner on a real M+ gear_coarse run.
+- **Pre-v1 polish slices** are the active work today. Live tracking lives in session memory + the `/loop` skill todos. Known open items at this snapshot: end-to-end live verification of the calibrated pruner on a real M+ gear_coarse run (deferred until next in-game M+ session).
 
 ### Phase 2 prep TODOs (still open)
 
