@@ -11,6 +11,7 @@ import { ScanQueue } from './scan-queue';
 import { RESULTS_SCHEMA_VERSION, type SimlyResults } from '@simly/shared';
 import { getSettings, setSettings, resetSettings } from './settings';
 import { IgnoreListStore } from './ignore-list';
+import { startHeartbeat, ensureHeartbeatToc, type HeartbeatHandle } from './heartbeat';
 import {
   IPC_QUEUE_STATE_CHANGED,
   IPC_QUEUE_GET_STATE,
@@ -53,10 +54,12 @@ const RESULTS_TOC = `## Interface: 120005
 ## Dependencies: Simly
 
 SimlyResults.lua
+SimlyHeartbeat.lua
 `;
 
 let watcher: WatcherHandle | undefined;
 let queue: ScanQueue | undefined;
+let heartbeat: HeartbeatHandle | undefined;
 // Set during the before-quit handler so the close-to-hide intercept
 // knows to actually let the window go when the app is genuinely quitting
 // (Ctrl+C, Task Manager kill, etc.) vs. just the user clicking X.
@@ -199,9 +202,27 @@ async function startRoundTrip(): Promise<WowPaths | undefined> {
     if (!existsSync(tocPath)) {
       await writeFile(tocPath, RESULTS_TOC, 'utf8');
       console.log('[main] wrote SimlyResults.toc (was missing)');
+    } else if (ensureHeartbeatToc(tocPath)) {
+      // Existing installs predate the heartbeat file; patch their toc
+      // to list it so the addon can detect desktop liveness. Safe: the
+      // helper only appends if the line is missing.
+      console.log('[main] patched SimlyResults.toc to load SimlyHeartbeat.lua');
     }
   } catch (err) {
     console.error('[main] failed to ensure results .toc:', err);
+  }
+
+  // Start the desktop-liveness heartbeat. Writes SimlyHeartbeat.lua
+  // every 60s; the addon reads it at PLAYER_LOGIN and warns the user
+  // if the timestamp is stale (desktop crashed / not running).
+  try {
+    heartbeat = startHeartbeat({
+      resultsAddonDir: paths.resultsAddonDir,
+      version: app.getVersion(),
+    });
+    console.log('[main] heartbeat started');
+  } catch (err) {
+    console.warn('[main] failed to start heartbeat:', (err as Error).message);
   }
 
   // Seed a placeholder file so the addon loads cleanly on first /reload
@@ -316,5 +337,6 @@ app.on('activate', () => {
 
 app.on('before-quit', async () => {
   isQuitting = true;
+  if (heartbeat) heartbeat.stop();
   if (watcher) await watcher.close();
 });

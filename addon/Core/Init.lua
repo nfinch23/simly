@@ -32,9 +32,49 @@ end
 local frame = CreateFrame("Frame")
 frame:RegisterEvent("PLAYER_LOGIN")
 
+-- Staleness threshold for the desktop heartbeat. The desktop writes
+-- SimlyHeartbeat.alive_at every 60s; we warn if the value at login
+-- is more than 5 minutes behind wall-clock. That's enough margin for
+-- a brief desktop restart, but small enough to flag a real crash.
+local HEARTBEAT_STALE_AFTER_SECONDS = 300
+
+local function isDesktopAlive()
+	local heartbeat = _G.SimlyHeartbeat
+	if not heartbeat or type(heartbeat.alive_at) ~= "number" then
+		return false, nil
+	end
+	local age = time() - heartbeat.alive_at
+	if age > HEARTBEAT_STALE_AFTER_SECONDS then
+		return false, age
+	end
+	return true, age
+end
+-- Expose for the panel — Panel.lua checks this to surface a banner
+-- inside /simly so the user sees the warning even if they missed the
+-- chat line.
+ns.IsDesktopAlive = isDesktopAlive
+ns.HEARTBEAT_STALE_AFTER_SECONDS = HEARTBEAT_STALE_AFTER_SECONDS
+
 frame:SetScript("OnEvent", function(self, event)
 	if event == "PLAYER_LOGIN" then
 		DEFAULT_CHAT_FRAME:AddMessage("Simly loaded")
+
+		-- Desktop liveness check. The desktop writes a heartbeat file
+		-- every 60s; if it's missing or stale we warn the user so they
+		-- don't sit waiting on a sim that will never run.
+		local alive, age = isDesktopAlive()
+		if not alive then
+			if age then
+				DEFAULT_CHAT_FRAME:AddMessage(
+					"|cffffcc00Simly:|r desktop app not running (last seen " .. math.floor(age / 60) ..
+					"m ago). Launch it and /reload to start simming."
+				)
+			else
+				DEFAULT_CHAT_FRAME:AddMessage(
+					"|cffffcc00Simly:|r desktop app not running. Launch it and /reload to start simming."
+				)
+			end
+		end
 
 		-- Defer the snapshot until spec data is ready (see comment
 		-- above). /reload re-fires this handler, so users can refresh
