@@ -7,6 +7,29 @@ ns.Panel = Panel
 -- ADDON_LOADED for addons that load before us (cleaner addon list).
 local frame
 
+-- Build the character_key the desktop stamps into SimlyResults. Must
+-- match scan-queue.ts's construction: `${name}-${realm}-${region}`.
+-- Region comes from GetCurrentRegion() (1=us, 2=kr, 3=eu, 4=tw, 5=cn).
+local function activeCharacterKey()
+	local name  = UnitName("player") or ""
+	local realm = GetRealmName() or ""
+	local regionIdx = (GetCurrentRegion and GetCurrentRegion()) or 1
+	local region = ({ "us", "kr", "eu", "tw", "cn" })[regionIdx] or "us"
+	return name .. "-" .. realm .. "-" .. region
+end
+
+-- True when SimlyResults exists AND its character_key matches the
+-- currently-logged-in character. False on first login for any
+-- character that hasn't been simmed yet, OR when the file holds
+-- another character's data (one global per WoW account → bleed-through
+-- across alts before each one's first scan).
+local function resultsAreForActiveCharacter()
+	if not SimlyResults then return false end
+	local stamped = SimlyResults.character_key
+	if not stamped or stamped == "" then return false end
+	return stamped == activeCharacterKey()
+end
+
 local function formatAge(unixTime)
 	if not unixTime or unixTime == 0 then return "never" end
 	local age = time() - unixTime
@@ -675,9 +698,29 @@ local function statusBlock()
 	end
 	if req > globalMaxGen then
 		local age = formatAge(req)
+		-- Scan in flight. If the active character has no results yet,
+		-- clarify that this will be its first sim.
+		if not resultsAreForActiveCharacter() then
+			return "|cffaaaaaaStatus:|r |cffffff00\226\151\143 Scan running on desktop|r |cffaaaaaa(first sim for " ..
+				activeCharacterKey() .. ", started " .. age .. " — wait for desktop notification, then /reload)|r"
+		end
 		return "|cffaaaaaaStatus:|r |cffffff00\226\151\143 Scan running on desktop|r |cffaaaaaa(started " .. age .. " — wait for desktop notification, then /reload)|r"
 	end
-	-- Desktop is idle. Surface this scenario's own freshness.
+	-- Desktop is idle.
+	-- Cross-character bleed-through guard. SimlyResults.lua is a single
+	-- global per WoW account; logging into a fresh alt shows the prior
+	-- toon's results unless we gate here. Distinguish "no results at
+	-- all" from "results exist but for another character" so the user
+	-- can tell why the panel is empty.
+	if not resultsAreForActiveCharacter() then
+		if SimlyResults and SimlyResults.character_key and SimlyResults.character_key ~= "" then
+			return "|cffaaaaaaStatus:|r |cffff8c00\226\151\143 No sims for " .. activeCharacterKey() ..
+				" yet|r |cffaaaaaa(last sim was for " .. SimlyResults.character_key ..
+				" — click Update sims to run for this character)|r"
+		end
+		return "|cffaaaaaaStatus:|r |cffaaaaaaIdle (no sims have run yet — click Update sims to start one)|r"
+	end
+	-- Surface this scenario's own freshness.
 	if activeGen == 0 then
 		return "|cffaaaaaaStatus:|r |cffff8c00\226\151\143 No results for this scenario yet|r |cffaaaaaa(click Update sims while on this scenario)|r"
 	end
@@ -703,9 +746,16 @@ function Panel.RefreshPaperDoll()
 	local doll = frame.paperDoll
 
 	local activeScenario = ns.SavedVars.GetScenario()
-	local scenarioData = (SimlyResults and SimlyResults.scenarios and SimlyResults.scenarios[activeScenario]) or nil
-	if not scenarioData and SimlyResults and SimlyResults.scans then
-		scenarioData = SimlyResults
+	-- Cross-character bleed-through guard (Slice A). Force scenarioData
+	-- to nil when results aren't for the active character so every slot
+	-- renders as dim "no rec" instead of yellow-suggesting another
+	-- character's items.
+	local scenarioData
+	if resultsAreForActiveCharacter() then
+		scenarioData = (SimlyResults and SimlyResults.scenarios and SimlyResults.scenarios[activeScenario]) or nil
+		if not scenarioData and SimlyResults and SimlyResults.scans then
+			scenarioData = SimlyResults
+		end
 	end
 	local gear = (scenarioData and scenarioData.composed and scenarioData.composed.gear) or {}
 
@@ -848,12 +898,19 @@ function Panel.Refresh()
 	table.insert(lines, statusBlock())
 	table.insert(lines, "")
 
-	-- Get the result bucket for the currently-viewed scenario.
-	-- Falls back to top-level fields for v2 files (migration compat).
-	local scenarioData = (SimlyResults and SimlyResults.scenarios and SimlyResults.scenarios[activeScenario]) or nil
-	-- v2 fallback: if no scenarios table but top-level scans exist, treat top-level as the scenario data
-	if not scenarioData and SimlyResults and SimlyResults.scans then
-		scenarioData = SimlyResults
+	-- Cross-character bleed-through guard (Slice A). Without this,
+	-- logging into an alt that's never been simmed shows the previously-
+	-- simmed character's recommendations as if they were the alt's.
+	local resultsValid = resultsAreForActiveCharacter()
+	local scenarioData
+	if resultsValid then
+		-- Get the result bucket for the currently-viewed scenario.
+		-- Falls back to top-level fields for v2 files (migration compat).
+		scenarioData = (SimlyResults and SimlyResults.scenarios and SimlyResults.scenarios[activeScenario]) or nil
+		-- v2 fallback: if no scenarios table but top-level scans exist, treat top-level as the scenario data
+		if not scenarioData and SimlyResults and SimlyResults.scans then
+			scenarioData = SimlyResults
+		end
 	end
 
 	if scenarioData and scenarioData.composed then
