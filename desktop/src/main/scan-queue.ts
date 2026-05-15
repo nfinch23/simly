@@ -97,6 +97,7 @@ import {
 } from './simc-export-parser';
 import { STATIC_DESTRO_WARLOCK_PROFILE } from './static-profile';
 import { scenarioProfileLines, resolveTalentLine, applyTalentOverride } from './scenario-config';
+import { buildRaidBuffBlock } from './raid-buffs';
 import {
   composeFromScans,
   composeFromConsumableScans,
@@ -145,8 +146,11 @@ function prependScenarioDirectives(
   talentOverride: string | null = null,
 ): string {
   const profile = applyTalentOverride(baseProfile, talentOverride);
-  const lines = scenarioProfileLines(scenario);
-  if (lines.length === 0) return profile;
+  const lines = [
+    ...scenarioProfileLines(scenario),
+    '',
+    ...buildRaidBuffBlock(),
+  ];
   return [...lines, '', profile].join('\n');
 }
 
@@ -1018,7 +1022,7 @@ export class ScanQueue {
           const cpRun = await runSimc({
             paths: runnerPaths,
             profileScript: [args.baseProfile, '', buildAllScanLines()].join('\n'),
-            iterations: 1000,
+            iterations: 3000,
             scratchTag: `consumables-prescan-${Date.now()}`,
             onProgress: cpProgress.onProgress,
           });
