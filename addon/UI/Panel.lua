@@ -847,6 +847,87 @@ function Panel.Refresh()
 	end
 	table.insert(lines, "")
 
+	-- Upgrade priority (Phase 7) — for each equipped piece that isn't
+	-- at the track ceiling, the projected DPS gain from a +1 rank
+	-- upgrade. Sorted desc by delta_dps. Renders the top 6 to keep
+	-- the panel from getting busy; the desktop window shows all.
+	if scenarioData and scenarioData.scans
+		and scenarioData.scans.upgrade_priority
+		and scenarioData.scans.upgrade_priority.status == "done"
+		and scenarioData.scans.upgrade_priority.data
+	then
+		local data = scenarioData.scans.upgrade_priority.data
+		local ops = data.opportunities or {}
+		table.insert(lines, "|cffffd700Upgrade priority|r |cffaaaaaa(your next-rank wins)|r")
+		if #ops == 0 then
+			table.insert(lines, "  |cffaaaaaa(every slot is at the track ceiling)|r")
+		else
+			for i = 1, math.min(6, #ops) do
+				local o = ops[i]
+				local slot = o.slot or "?"
+				local name = o.name or ("Item #" .. tostring(o.item_id))
+				local gainColor = (o.delta_dps and o.delta_dps > 0) and "|cff66bb6a" or "|cffaaaaaa"
+				table.insert(lines, string.format(
+					"  |cffaaaaaa%s|r %s |cffaaaaaa(%d->%d)|r %s+%d|r |cffaaaaaa(%+.2f%%)|r",
+					slot,
+					name,
+					o.current_ilvl or 0,
+					o.next_ilvl or 0,
+					gainColor,
+					o.delta_dps or 0,
+					o.delta_pct or 0
+				))
+			end
+			if #ops > 6 then
+				table.insert(lines, string.format("  |cffaaaaaa(+%d more in the desktop window)|r", #ops - 6))
+			end
+		end
+		table.insert(lines, "")
+	end
+
+	-- Best content to chase (Phase 7) — for each item you could acquire
+	-- from enabled content (Content tab in desktop), the projected DPS
+	-- gain. Color-coded by source: 'mplus' yellow, 'raid' purple.
+	-- Top 6 only; desktop shows top 25.
+	if scenarioData and scenarioData.scans
+		and scenarioData.scans.best_content
+		and scenarioData.scans.best_content.status == "done"
+		and scenarioData.scans.best_content.data
+	then
+		local data = scenarioData.scans.best_content.data
+		local ops = data.opportunities or {}
+		table.insert(lines, string.format(
+			"|cffffd700Best content to chase|r |cffaaaaaa(%d candidates evaluated)|r",
+			data.candidates_evaluated or 0
+		))
+		if #ops == 0 then
+			table.insert(lines, "  |cffaaaaaa(nothing in enabled content beats your current gear)|r")
+		else
+			for i = 1, math.min(6, #ops) do
+				local o = ops[i]
+				local slot = o.slot or "?"
+				local name = o.name or ("Item #" .. tostring(o.item_id))
+				local sourceColor = (o.source_category == "raid") and "|cffce93d8" or "|cffffd966"
+				local gainColor = (o.delta_dps and o.delta_dps > 0) and "|cff66bb6a" or "|cffaaaaaa"
+				table.insert(lines, string.format(
+					"  |cffaaaaaa%s|r %s %s%s|r |cffaaaaaa(ilvl %d)|r %s+%d|r |cffaaaaaa(%+.2f%%)|r",
+					slot,
+					name,
+					sourceColor,
+					o.source_label or "?",
+					o.target_ilvl or 0,
+					gainColor,
+					o.delta_dps or 0,
+					o.delta_pct or 0
+				))
+			end
+			if #ops > 6 then
+				table.insert(lines, string.format("  |cffaaaaaa(+%d more in the desktop window)|r", #ops - 6))
+			end
+		end
+		table.insert(lines, "")
+	end
+
 	table.insert(lines, "|cffffd700Scans|r")
 	if scenarioData and scenarioData.scans and next(scenarioData.scans) then
 		for id, record in pairs(scenarioData.scans) do

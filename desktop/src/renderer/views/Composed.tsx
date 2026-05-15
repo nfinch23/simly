@@ -162,7 +162,7 @@ function BestContentView({ data }: { data: BestContentResult }): JSX.Element {
         <thead>
           <tr style={{ color: '#a0a0a8', borderBottom: '1px solid #3a3a42' }}>
             <th style={th}>Slot</th>
-            <th style={th}>Item ID</th>
+            <th style={th}>Item</th>
             <th style={th}>Source</th>
             <th style={th}>ilvl</th>
             <th style={th}>Δ DPS</th>
@@ -172,11 +172,12 @@ function BestContentView({ data }: { data: BestContentResult }): JSX.Element {
         <tbody>
           {data.opportunities.slice(0, 25).map((o) => {
             const color = o.delta_dps > 0 ? '#66bb6a' : '#a0a0a8';
+            const displayName = o.name ?? `Item #${o.item_id}`;
             return (
               <tr key={`${o.slot}-${o.item_id}`} style={{ borderBottom: '1px solid #2e2e36' }}>
                 <td style={td}>{SLOT_LABELS[o.slot] ?? o.slot}</td>
-                <td style={{ ...td, color: '#5a5a64', fontFamily: 'Consolas, monospace' }}>
-                  {o.item_id}
+                <td style={td} title={`item id ${o.item_id}`}>
+                  {displayName}
                 </td>
                 <td style={td}>
                   <span style={{ color: o.source_category === 'raid' ? '#ce93d8' : '#90caf9' }}>
