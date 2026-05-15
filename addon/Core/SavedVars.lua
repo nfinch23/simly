@@ -94,8 +94,19 @@ end
 -- predates the bag changes — and the desktop's quick-sim would see
 -- "pool unchanged" and short-circuit.
 function SavedVars.RequestUpdate()
+	SavedVars.RequestSim("all")
+end
+
+-- Generic sim-type request. Stamps update_requested_at + the sim type
+-- so the desktop can gate stage execution. Used by every per-sim
+-- button in Panel.lua. `simType` matches the SimGroup union in
+-- shared/schema/savedvars.ts: "all" / "gear" / "consumables" / "bis"
+-- / "dungeons" / "raids" / "crests" (gems/enchants/voidcore reserved
+-- for net-new scans in later slices; buttons render disabled today).
+function SavedVars.RequestSim(simType)
 	SavedVars.WriteSnapshot()
 	SimlyDB.update_requested_at = time()
+	SimlyDB.requested_sim_type = simType or "all"
 	-- Record which scenario this request targets so the addon can scope
 	-- the "Scan running" indicator to the right tab. Without this the
 	-- request stamp is global and every tab shows yellow until ANY

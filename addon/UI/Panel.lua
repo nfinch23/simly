@@ -463,55 +463,117 @@ local function createFrame()
 	f.scrollContent = content
 	f.scroll = scroll
 
-	-- "Update sims" needs to call ReloadUI(), which is protected in
-	-- modern WoW — calling it from a plain OnClick handler trips
-	-- ADDON_ACTION_BLOCKED. The supported pattern is a
-	-- SecureActionButton with `type=macro` + macrotext "/reload";
-	-- the secure macro action invokes the slash command without
-	-- tainting our addon. PreClick (unsecure) runs first to bump the
-	-- request stamp before the reload flushes SimlyDB to disk.
-	-- "Update sims" and "/reload" moved up one row (y=44) to make room
-	-- for the scenario toggle row below them (y=14).
-	local updateBtn = CreateFrame("Button", nil, f, "SecureActionButtonTemplate,UIPanelButtonTemplate")
-	updateBtn:SetSize(120, 26)
-	updateBtn:SetPoint("BOTTOMLEFT", 18, 174)
-	updateBtn:SetText("Update sims")
-	updateBtn:RegisterForClicks("AnyUp", "AnyDown")
-	updateBtn:SetAttribute("type1", "macro")
-	updateBtn:SetAttribute("macrotext1", "/reload")
-	updateBtn:SetScript("PreClick", function()
-		ns.SavedVars.RequestUpdate()
-		DEFAULT_CHAT_FRAME:AddMessage(
-			"|cff00ffffSimly:|r reloading to start scan. Wait for the desktop notification, then /reload again to see results."
-		)
-	end)
+	-- Sim-type button grid (Slice F). 9 buttons in a 3-col grid,
+	-- replacing the old single "Update sims" / "Update all sims"
+	-- buttons. Each button targets a specific scan family:
+	--   Sim Gear         — gear ladder
+	--   Sim Consumables  — flask + food (+ potion/augrune in Slice I)
+	--   Sim Gems         — gem combinations (Slice G; disabled today)
+	--   Sim Enchants     — enchant variants (Slice H; disabled today)
+	--   Sim BiS          — best achievable loadout from all content
+	--   Sim Dungeons     — per-dungeon upgrade list
+	--   Sim Raids        — per-raid-encounter upgrade list
+	--   Sim Crests       — upgrade-priority (where to spend crests)
+	--   Sim Voidcore     — Nebulous Voidcore variants (Slice K; disabled)
+	--
+	-- All buttons are SecureActionButtons with macrotext=/reload so the
+	-- protected reload call doesn't taint our addon. PreClick stamps
+	-- the request via SavedVars.RequestSim(simType) which the desktop
+	-- scan-queue gates on.
+	--
+	-- Net-new buttons (gems / enchants / voidcore) render disabled with
+	-- a tooltip indicating which slice unlocks them.
+	local SIM_BUTTONS = {
+		{ label = "Sim Gear",        sim = "gear",        enabled = true,  msg = "gear ladder" },
+		{ label = "Sim Consumables", sim = "consumables", enabled = true,  msg = "flask + food" },
+		{ label = "Sim Gems",        sim = "gems",        enabled = false, tooltip = "Coming in Slice G" },
+		{ label = "Sim Enchants",    sim = "enchants",    enabled = false, tooltip = "Coming in Slice H" },
+		{ label = "Sim BiS",         sim = "bis",         enabled = true,  msg = "best content" },
+		{ label = "Sim Dungeons",    sim = "dungeons",    enabled = true,  msg = "per-dungeon upgrades" },
+		{ label = "Sim Raids",       sim = "raids",       enabled = true,  msg = "per-raid upgrades" },
+		{ label = "Sim Crests",      sim = "crests",      enabled = true,  msg = "upgrade priority" },
+		{ label = "Sim Voidcore",    sim = "voidcore",    enabled = false, tooltip = "Coming in Slice K" },
+	}
 
-	-- "Update all sims" — queues scans for all 4 scenarios back-to-back.
-	local updateAllBtn = CreateFrame("Button", nil, f, "SecureActionButtonTemplate,UIPanelButtonTemplate")
-	updateAllBtn:SetSize(140, 26)
-	updateAllBtn:SetPoint("BOTTOMLEFT", 146, 174)
-	updateAllBtn:SetText("Update all sims")
-	updateAllBtn:RegisterForClicks("AnyUp", "AnyDown")
-	updateAllBtn:SetAttribute("type1", "macro")
-	updateAllBtn:SetAttribute("macrotext1", "/reload")
-	updateAllBtn:SetScript("PreClick", function()
-		ns.SavedVars.RequestUpdateAll()
-		DEFAULT_CHAT_FRAME:AddMessage(
-			"|cff00ffffSimly:|r reloading to start all-scenario scan. Wait for the desktop notification, then /reload again to see results."
-		)
-	end)
+	-- 3-column grid. Total usable width = 440 - 18 - 18 = 404 px;
+	-- gap=4 → btnW=132. Button height 22; row gap 4 → row stride 26.
+	-- Grid base y matches the old update-button row (y=174) so the
+	-- talent dropdowns below at y=44-134 stay where they are.
+	local simBtnW = math.floor((404 - 4 * 2) / 3)
+	local simBtnH = 22
+	local simRowStride = 26
+	local simGridBaseY = 174
 
-	-- The plain "/reload" button has the same protected-function
-	-- problem, so it also needs the SecureActionButton path. No
-	-- PreClick on this one — it's purely a manual reload after the
-	-- desktop notification fires.
+	for i, def in ipairs(SIM_BUTTONS) do
+		local col = (i - 1) % 3       -- 0, 1, 2
+		local row = math.floor((i - 1) / 3)  -- 0, 1, 2 (top row first)
+		-- Rows count up from bottom-anchored grid: row 0 is the BOTTOM row
+		-- of the 3, so its y matches simGridBaseY. Row 2 (top) gets
+		-- +2*stride. This keeps the visual order top-to-bottom = list order.
+		local y = simGridBaseY + (2 - row) * simRowStride
+		local x = 18 + col * (simBtnW + 4)
+
+		local btn = CreateFrame("Button", nil, f, "SecureActionButtonTemplate,UIPanelButtonTemplate")
+		btn:SetSize(simBtnW, simBtnH)
+		btn:SetPoint("BOTTOMLEFT", x, y)
+		btn:SetText(def.label)
+		if def.enabled then
+			btn:RegisterForClicks("AnyUp", "AnyDown")
+			btn:SetAttribute("type1", "macro")
+			btn:SetAttribute("macrotext1", "/reload")
+			local capturedSim = def.sim
+			local capturedMsg = def.msg
+			btn:SetScript("PreClick", function()
+				ns.SavedVars.RequestSim(capturedSim)
+				DEFAULT_CHAT_FRAME:AddMessage(
+					"|cff00ffffSimly:|r reloading to start " .. capturedMsg ..
+					" sim. Wait for the desktop notification, then /reload again to see results."
+				)
+			end)
+		else
+			-- Disabled state. Tooltip says when it's coming.
+			btn:Disable()
+			local capturedTip = def.tooltip
+			btn:SetScript("OnEnter", function(self)
+				GameTooltip:SetOwner(self, "ANCHOR_TOP")
+				GameTooltip:SetText(def.label)
+				GameTooltip:AddLine(capturedTip, 1, 0.82, 0, true)
+				GameTooltip:Show()
+			end)
+			btn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+			-- Tooltips don't fire on disabled secure buttons by default;
+			-- enabling mouse without re-enabling clicks gets us the hover.
+			btn:EnableMouse(true)
+		end
+	end
+
+	-- Row above the sim grid: /reload (narrow, left) + Sim All (wide,
+	-- right). Sim All replaces "Update all sims" — runs every sim type
+	-- across every scenario in dependency order.
+	local controlRowY = simGridBaseY + 3 * simRowStride + 4  -- y=174 + 78 + 4 = 256
 	local reloadBtn = CreateFrame("Button", nil, f, "SecureActionButtonTemplate,UIPanelButtonTemplate")
-	reloadBtn:SetSize(80, 26)
-	reloadBtn:SetPoint("BOTTOMRIGHT", -18, 174)
+	reloadBtn:SetSize(simBtnW, simBtnH)
+	reloadBtn:SetPoint("BOTTOMLEFT", 18, controlRowY)
 	reloadBtn:SetText("/reload")
 	reloadBtn:RegisterForClicks("AnyUp", "AnyDown")
 	reloadBtn:SetAttribute("type1", "macro")
 	reloadBtn:SetAttribute("macrotext1", "/reload")
+
+	local simAllBtn = CreateFrame("Button", nil, f, "SecureActionButtonTemplate,UIPanelButtonTemplate")
+	-- Width: panel inner (404) minus reload width minus 2× gap.
+	local simAllW = 404 - simBtnW - 8
+	simAllBtn:SetSize(simAllW, simBtnH)
+	simAllBtn:SetPoint("BOTTOMRIGHT", -18, controlRowY)
+	simAllBtn:SetText("Sim All (every sim, every scenario)")
+	simAllBtn:RegisterForClicks("AnyUp", "AnyDown")
+	simAllBtn:SetAttribute("type1", "macro")
+	simAllBtn:SetAttribute("macrotext1", "/reload")
+	simAllBtn:SetScript("PreClick", function()
+		ns.SavedVars.RequestUpdateAll()
+		DEFAULT_CHAT_FRAME:AddMessage(
+			"|cff00ffffSimly:|r reloading to start ALL sims across every scenario. This will take several minutes."
+		)
+	end)
 
 	-- Per-scenario talent loadout pickers, one per scenario. Stacked
 	-- vertically above the Update buttons so the user can stage all 4
@@ -585,7 +647,7 @@ local function createFrame()
 	-- desktop sets only when running under electron-vite dev.
 	local fullSimBtn = CreateFrame("Button", nil, f, "SecureActionButtonTemplate,UIPanelButtonTemplate")
 	fullSimBtn:SetSize(180, 22)
-	fullSimBtn:SetPoint("BOTTOMLEFT", 18, 204)
+	fullSimBtn:SetPoint("BOTTOMLEFT", 18, 286)
 	fullSimBtn:SetText("Run Full Sim (dev)")
 	fullSimBtn:RegisterForClicks("AnyUp", "AnyDown")
 	fullSimBtn:SetAttribute("type1", "macro")
@@ -887,12 +949,12 @@ function Panel.Refresh()
 		local devMode = SimlyResults and SimlyResults.dev_mode
 		if devMode then
 			frame.fullSimBtn:Show()
-			-- Full-sim button sits at y=204 + 22 tall + 14 gap = y=240.
-			frame.scroll:SetPoint("BOTTOMRIGHT", -32, 240)
+			-- Full-sim button at y=286 + 22 tall + 8 gap = y=316.
+			frame.scroll:SetPoint("BOTTOMRIGHT", -32, 316)
 		else
 			frame.fullSimBtn:Hide()
-			-- Top of update buttons at y=174 + 26 tall + 10 gap = y=210.
-			frame.scroll:SetPoint("BOTTOMRIGHT", -32, 210)
+			-- /reload + Sim All row at y=256 + 22 tall + 8 gap = y=286.
+			frame.scroll:SetPoint("BOTTOMRIGHT", -32, 286)
 		end
 	end
 

@@ -83,7 +83,38 @@ export interface SimlyDB {
    * version bump needed.
    */
   talent_loadout_per_scenario?: Partial<Record<Scenario, string>>;
+  /**
+   * Which sim-type button the user clicked. Desktop reads this in the
+   * scan-queue to gate stage execution — e.g. `"crests"` runs only the
+   * upgrade-priority scan, not the full gear ladder.
+   *
+   * Defaults to `"all"` when missing (backward compat: pre-Slice-F
+   * SavedVars files without this field still trigger the full pipeline).
+   */
+  requested_sim_type?: SimGroup;
 }
 
 /** Sentinel for "use the currently-equipped talent string" in the per-scenario picker. */
 export const TALENT_LOADOUT_EQUIPPED = 'equipped';
+
+/**
+ * Sim-type groups. Each maps to a button in the in-game panel and a
+ * subset of the desktop scan pipeline. `all` is the catch-all (today's
+ * Update Sims behavior; runs every group in dependency order).
+ *
+ * Net-new groups (gems, enchants, voidcore) are reserved here so the
+ * schema is forward-compatible when their scan modules land in
+ * Slices G/H/K. They are currently never written by the addon —
+ * the buttons backed by these groups render disabled.
+ */
+export type SimGroup =
+  | 'all'
+  | 'gear'
+  | 'consumables'
+  | 'gems'
+  | 'enchants'
+  | 'bis'
+  | 'dungeons'
+  | 'raids'
+  | 'crests'
+  | 'voidcore';
