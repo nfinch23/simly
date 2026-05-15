@@ -29,6 +29,22 @@ import {
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
+// Swallow EPIPE on stdout/stderr writes. The Electron main process
+// inherits stdout from electron-vite's dev wrapper; when that pipe
+// closes (window reload, dev script exit, etc.) any subsequent
+// console.log throws EPIPE and Electron pops a fatal dialog. Tagged
+// per-stream so we still see other errors.
+for (const stream of [process.stdout, process.stderr]) {
+  stream.on('error', (err: NodeJS.ErrnoException) => {
+    if (err.code !== 'EPIPE') throw err;
+  });
+}
+process.on('uncaughtException', (err: NodeJS.ErrnoException) => {
+  if (err.code === 'EPIPE') return;
+  // Re-throw anything else so we still get the fatal dialog for real bugs.
+  throw err;
+});
+
 const RESULTS_TOC = `## Interface: 120005
 ## Title: Simly Results
 ## Notes: Auto-generated results file for Simly. Do not edit manually.
