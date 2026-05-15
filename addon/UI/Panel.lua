@@ -910,6 +910,26 @@ function Panel.Refresh()
 
 	local lines = {}
 
+	-- Desktop-liveness banner. When the heartbeat is missing or stale
+	-- we surface it at the very top so the user notices even if they
+	-- missed the chat line printed on PLAYER_LOGIN. Without this, the
+	-- panel would just look idle and the user would wait indefinitely
+	-- for a sim that's never going to run.
+	if ns.IsDesktopAlive then
+		local alive, age = ns.IsDesktopAlive()
+		if not alive then
+			if age then
+				table.insert(lines,
+					"|cffffcc00\226\154\160 Simly desktop not running|r |cffaaaaaa(last seen " ..
+					math.floor(age / 60) .. "m ago — launch the app and /reload)|r")
+			else
+				table.insert(lines,
+					"|cffffcc00\226\154\160 Simly desktop not running|r |cffaaaaaa(launch the app and /reload)|r")
+			end
+			table.insert(lines, "")
+		end
+	end
+
 	-- Show the currently-selected scenario above the status line so the
 	-- user always knows which scenario the next "Update sims" will run.
 	local activeScenario = ns.SavedVars.GetScenario()
