@@ -437,8 +437,13 @@ export class ScanQueue {
       );
       return;
     }
+    // Slice F: log the sim-type the addon requested. Today the desktop
+    // runs the full pipeline regardless; selective execution per
+    // sim-type is the F2 follow-up. Surfacing the field now means logs
+    // capture user intent for triage even before behavior diverges.
+    const simType = db.requested_sim_type ?? 'all';
     console.log(
-      `[queue] new request from addon (update_requested_at=${db.update_requested_at}); running for ${db.character.name}`,
+      `[queue] new request from addon (update_requested_at=${db.update_requested_at}, sim_type=${simType}); running for ${db.character.name}`,
     );
     void this.runForSavedVars(db);
   }
