@@ -2,6 +2,7 @@ import type { ScanCollection, ScanRecord } from '@simly/shared';
 import type { SimcRunResult } from '../simc-runner';
 import { bestFlaskScan } from './best-flask';
 import { bestFoodScan } from './best-food';
+import { bestPotionScan } from './best-potion';
 import type { Scan } from './index';
 
 /**
@@ -17,6 +18,7 @@ import type { Scan } from './index';
 export const SCANS: readonly Scan<unknown>[] = [
   bestFlaskScan as Scan<unknown>,
   bestFoodScan as Scan<unknown>,
+  bestPotionScan as Scan<unknown>,
 ];
 
 export function buildAllScanLines(): string {
