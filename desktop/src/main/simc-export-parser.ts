@@ -137,6 +137,20 @@ export interface ParsedCharacter {
   role?: string;
 }
 
+/**
+ * A talent loadout saved in the WoW talent UI. The SimC addon emits
+ * the currently-equipped one as an uncommented `talents=<string>` line
+ * and each saved loadout as a `# Saved Loadout: <name>` / `# talents=<string>`
+ * pair. Per-scenario talent selection (Phase 7+) lets the user pick
+ * which saved loadout to sim for each scenario.
+ */
+export interface SavedLoadout {
+  /** Name from `# Saved Loadout: <name>`. Free-form (player-chosen). */
+  name: string;
+  /** The encoded talent string (base64-ish). */
+  talents: string;
+}
+
 export interface ParsedExport {
   character: ParsedCharacter;
   /** All equipped items (everything outside the bags section that has a slot= line). */
@@ -145,6 +159,10 @@ export interface ParsedExport {
   bag: ParsedItem[];
   /** Equipped + bag merged, grouped by slot. Useful for "what can I equip in this slot?" queries. */
   poolBySlot: Record<SlotName, ParsedItem[]>;
+  /** Currently-equipped talent string (uncommented `talents=` line). Null if absent. */
+  equipped_talents: string | null;
+  /** All `# Saved Loadout` blocks. Empty array if the player has none saved. */
+  saved_loadouts: SavedLoadout[];
 }
 
 /** Top-level entry point. */
@@ -170,7 +188,56 @@ export function parseSimcExport(source: string): ParsedExport {
   }
 
   const poolBySlot = buildPoolBySlot(equipped, bag);
-  return { character, equipped, bag, poolBySlot };
+  const { equipped_talents, saved_loadouts } = parseTalents(lines, equippedEnd);
+  return { character, equipped, bag, poolBySlot, equipped_talents, saved_loadouts };
+}
+
+/**
+ * Extract the active talent string + every saved loadout from the
+ * header region (everything before `### Gear from Bags`).
+ *
+ * The SimC addon's export looks like:
+ *
+ *   talents=CoQAMrNP5kak+EBqLfUa3dMm+yMjZGNLmxiZG...        (uncommented = equipped)
+ *
+ *   # Saved Loadout: Raid
+ *   # talents=CoQAMrNP5kak+EBqLfUa3dMm+amhZGmNzYbmZM...     (commented = saved)
+ *   # Saved Loadout: m+
+ *   # talents=CoQAMrNP5kak+EBqLfUa3dMm+yMjZGmFzYxMjZ...
+ *
+ * A loadout is only added if its `# talents=` follows the `# Saved Loadout:`
+ * line on the very next non-blank line — defensive against partial / corrupt
+ * exports.
+ */
+function parseTalents(
+  lines: readonly string[],
+  endIdx: number,
+): { equipped_talents: string | null; saved_loadouts: SavedLoadout[] } {
+  let equipped_talents: string | null = null;
+  const saved_loadouts: SavedLoadout[] = [];
+  for (let i = 0; i < endIdx; i++) {
+    const line = lines[i]!;
+    // Uncommented `talents=...` — the active loadout. Take the first
+    // one we see (defensive against weird exports with duplicates).
+    if (equipped_talents === null) {
+      const m = line.match(/^talents=(.+)$/);
+      if (m) equipped_talents = m[1]!.trim();
+    }
+    const header = line.match(/^#\s+Saved Loadout:\s+(.+?)\s*$/);
+    if (header) {
+      const name = header[1]!.trim();
+      // Look at the next line for `# talents=<string>`. Skip blank
+      // comment-only separators.
+      for (let j = i + 1; j < endIdx; j++) {
+        const next = lines[j]!.trim();
+        if (next === '' || next === '#') continue;
+        const t = next.match(/^#\s+talents=(.+)$/);
+        if (t) saved_loadouts.push({ name, talents: t[1]!.trim() });
+        break;
+      }
+    }
+  }
+  return { equipped_talents, saved_loadouts };
 }
 
 function parseCharacterHeader(lines: string[]): ParsedCharacter {

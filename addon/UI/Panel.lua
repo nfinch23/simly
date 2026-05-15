@@ -490,6 +490,60 @@ local function createFrame()
 	reloadBtn:SetAttribute("type1", "macro")
 	reloadBtn:SetAttribute("macrotext1", "/reload")
 
+	-- Per-scenario talent loadout picker. Always tracks the *currently
+	-- active* scenario — switching scenarios updates the dropdown's
+	-- selection to that scenario's persisted choice. Built with
+	-- UIDropDownMenu so it looks native and handles overflow if the
+	-- player has many saved loadouts.
+	--
+	-- The list of options is rebuilt every time the menu opens, from
+	-- two sources:
+	--   1. The TALENT_EQUIPPED sentinel — always at the top, default
+	--      for any scenario the user hasn't explicitly picked.
+	--   2. SavedVars.GetSavedLoadoutNames() — the `# Saved Loadout: <name>`
+	--      blocks parsed out of the SimC export. Changes per /reload
+	--      (new export = potentially new loadouts).
+	--
+	-- Clicking an option persists via SetTalentLoadoutForScenario.
+	-- Desktop picks it up at the next "Update sims" + /reload cycle.
+	local talentDropdown = CreateFrame("Frame", "SimlyTalentDropdown", f, "UIDropDownMenuTemplate")
+	talentDropdown:SetPoint("BOTTOMLEFT", 2, 70)
+	UIDropDownMenu_SetWidth(talentDropdown, 160)
+	local function talentDropdownInit(self)
+		local activeScenario = ns.SavedVars.GetScenario()
+		local current = ns.SavedVars.GetTalentLoadoutForScenario(activeScenario)
+		local info = UIDropDownMenu_CreateInfo()
+		info.text = "Equipped"
+		info.value = ns.SavedVars.TALENT_EQUIPPED
+		info.checked = (current == ns.SavedVars.TALENT_EQUIPPED)
+		info.func = function()
+			ns.SavedVars.SetTalentLoadoutForScenario(activeScenario, ns.SavedVars.TALENT_EQUIPPED)
+			UIDropDownMenu_SetSelectedValue(talentDropdown, ns.SavedVars.TALENT_EQUIPPED)
+			UIDropDownMenu_SetText(talentDropdown, "Equipped")
+		end
+		UIDropDownMenu_AddButton(info)
+		for _, name in ipairs(ns.SavedVars.GetSavedLoadoutNames()) do
+			local info2 = UIDropDownMenu_CreateInfo()
+			info2.text = name
+			info2.value = name
+			info2.checked = (current == name)
+			local capturedName = name
+			info2.func = function()
+				ns.SavedVars.SetTalentLoadoutForScenario(activeScenario, capturedName)
+				UIDropDownMenu_SetSelectedValue(talentDropdown, capturedName)
+				UIDropDownMenu_SetText(talentDropdown, capturedName)
+			end
+			UIDropDownMenu_AddButton(info2)
+		end
+	end
+	UIDropDownMenu_Initialize(talentDropdown, talentDropdownInit)
+	-- Label rendered to the left of the dropdown widget — UIDropDownMenu
+	-- ships with no built-in label; we add our own FontString.
+	local talentLabel = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+	talentLabel:SetPoint("BOTTOMLEFT", talentDropdown, "TOPLEFT", 16, -4)
+	talentLabel:SetText("Talents (for active scenario)")
+	f.talentDropdown = talentDropdown
+
 	-- Dev-only "Run Full Sim (dev)" button. Triggers the normal quick
 	-- pipeline followed by a Raidbots-Top-Gear-style full cartesian sim
 	-- so we can measure how much DPS the greedy heuristic leaves on the
@@ -498,7 +552,7 @@ local function createFrame()
 	-- desktop sets only when running under electron-vite dev.
 	local fullSimBtn = CreateFrame("Button", nil, f, "SecureActionButtonTemplate,UIPanelButtonTemplate")
 	fullSimBtn:SetSize(180, 22)
-	fullSimBtn:SetPoint("BOTTOMLEFT", 18, 74)
+	fullSimBtn:SetPoint("BOTTOMLEFT", 18, 110)
 	fullSimBtn:SetText("Run Full Sim (dev)")
 	fullSimBtn:RegisterForClicks("AnyUp", "AnyDown")
 	fullSimBtn:SetAttribute("type1", "macro")
@@ -753,11 +807,22 @@ function Panel.Refresh()
 		local devMode = SimlyResults and SimlyResults.dev_mode
 		if devMode then
 			frame.fullSimBtn:Show()
-			frame.scroll:SetPoint("BOTTOMRIGHT", -32, 110)
+			frame.scroll:SetPoint("BOTTOMRIGHT", -32, 146)
 		else
 			frame.fullSimBtn:Hide()
-			frame.scroll:SetPoint("BOTTOMRIGHT", -32, 80)
+			frame.scroll:SetPoint("BOTTOMRIGHT", -32, 110)
 		end
+	end
+
+	-- Sync the talent dropdown's displayed selection with the active
+	-- scenario's persisted choice. Switching scenarios updates this
+	-- text without re-opening the menu.
+	if frame.talentDropdown then
+		local activeScenario = ns.SavedVars.GetScenario()
+		local current = ns.SavedVars.GetTalentLoadoutForScenario(activeScenario)
+		local label = (current == ns.SavedVars.TALENT_EQUIPPED) and "Equipped" or current
+		UIDropDownMenu_SetSelectedValue(frame.talentDropdown, current)
+		UIDropDownMenu_SetText(frame.talentDropdown, label)
 	end
 
 	-- Re-apply scenario button highlight: disable the active one so it

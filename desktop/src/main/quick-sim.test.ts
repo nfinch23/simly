@@ -22,6 +22,8 @@ function exportWith(items: ParsedItem[]): ParsedExport {
     equipped: [],
     bag: [],
     poolBySlot: {} as Record<SlotName, ParsedItem[]>,
+    equipped_talents: null,
+    saved_loadouts: [],
   };
   for (const it of items) {
     const list = e.poolBySlot[it.slot] ?? (e.poolBySlot[it.slot] = []);

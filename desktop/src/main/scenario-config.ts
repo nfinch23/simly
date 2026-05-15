@@ -21,6 +21,8 @@
  */
 
 import type { Scenario } from '@simly/shared';
+import { TALENT_LOADOUT_EQUIPPED } from '@simly/shared';
+import type { ParsedExport } from './simc-export-parser';
 
 export interface ScenarioConfig {
   /** SimC `fight_style=` directive value. */
@@ -96,4 +98,60 @@ export function scenarioProfileLines(scenario: Scenario | string): string[] {
   lines.push(`fight_style=${cfg.fightStyle}`);
   if (cfg.extraDirectives) lines.push(...cfg.extraDirectives);
   return lines;
+}
+
+/**
+ * Resolve which talent string to use for a given scenario. Returns the
+ * raw talent string (without the `talents=` prefix), or null when the
+ * caller should leave the active `talents=` line in the base profile
+ * untouched.
+ *
+ *   - selection missing OR `"equipped"` (TALENT_LOADOUT_EQUIPPED) → null
+ *     (use the export's existing `talents=` line; today's behavior).
+ *   - selection names a saved loadout that exists → its talents string.
+ *   - selection names a loadout that doesn't exist in the export → null
+ *     with a console warning. (Defensive: stale selection from a renamed
+ *     in-game loadout shouldn't break the sim — fall back to equipped.)
+ */
+export function resolveTalentLine(
+  scenario: Scenario | string,
+  parsed: ParsedExport | undefined,
+  selection: Partial<Record<string, string>> | undefined,
+): string | null {
+  if (!parsed || !selection) return null;
+  const chosen = selection[scenario];
+  if (!chosen || chosen === TALENT_LOADOUT_EQUIPPED) return null;
+  const match = parsed.saved_loadouts.find((l) => l.name === chosen);
+  if (!match) {
+    console.warn(
+      `[talents] scenario=${scenario} requested loadout "${chosen}" but it isn't in the export's saved loadouts; falling back to equipped.`,
+    );
+    return null;
+  }
+  return match.talents;
+}
+
+/**
+ * Rewrite a base profile to use a specific talent string. Strips the
+ * existing uncommented `talents=...` line (the equipped one) and appends
+ * the chosen one immediately after the header. SimC accepts the override
+ * because the appended line is the LAST `talents=` assignment in profile
+ * order (later assignments win, by SimC's option-parsing rules).
+ *
+ * Returns the profile unchanged when `talents` is null.
+ */
+export function applyTalentOverride(baseProfile: string, talents: string | null): string {
+  if (talents === null) return baseProfile;
+  const lines = baseProfile.split(/\r?\n/);
+  // Drop the existing uncommented `talents=` line(s). Commented
+  // `# talents=` lines (saved loadouts) stay — they're documentation,
+  // not directives.
+  const filtered = lines.filter((l) => !/^talents=/.test(l));
+  // Inject the new talents line right after the character block. Pick
+  // the index just before the first item line so it stays in the
+  // header region. If there's no item line, append at end.
+  let insertAt = filtered.findIndex((l) => /^(?:#\s+.+\s+\(\d+\)\s*$|[a-z_]+=,id=\d+)/.test(l));
+  if (insertAt < 0) insertAt = filtered.length;
+  filtered.splice(insertAt, 0, `talents=${talents}`, '');
+  return filtered.join('\n');
 }

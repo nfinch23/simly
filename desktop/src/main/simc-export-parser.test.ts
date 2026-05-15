@@ -179,6 +179,44 @@ describe('allUnorderedPairs', () => {
   });
 });
 
+describe('parseSimcExport — talent loadouts', () => {
+  it('extracts the active equipped talent string (uncommented `talents=` line)', () => {
+    const p = getParsed();
+    expect(p.equipped_talents).toBe(
+      'CoQAMrNP5kak+EBqLfUa3dMm+yMjZGNLmxiZGzyAAAAAAAAGzYYDGYb0CNsYMzYZ2mZmxMAwMjxYmZAGzMmZDAAYmZmZmZw2MGwA',
+    );
+  });
+
+  it('extracts every `# Saved Loadout: <name>` / `# talents=<string>` block', () => {
+    const p = getParsed();
+    const names = p.saved_loadouts.map((l) => l.name);
+    expect(names).toEqual(['Raid', 'm+', 'm+2']);
+  });
+
+  it('preserves the talent string for each saved loadout verbatim', () => {
+    const p = getParsed();
+    const raid = p.saved_loadouts.find((l) => l.name === 'Raid');
+    expect(raid).toBeDefined();
+    expect(raid!.talents).toBe(
+      'CoQAMrNP5kak+EBqLfUa3dMm+amhZGmNzYbmZMLDAAAAAAAYMjhFYgthFMsYwMLz2MzMmBAmhZmZmZAGzYmZDAAMzMzMGGzyMGwA',
+    );
+  });
+
+  it('returns empty saved_loadouts + null equipped_talents when both are absent', () => {
+    const minimal = `warlock="Bob"\nlevel=80\nspec=demonology\n\n# Some Item (260)\nhead=,id=1,bonus_id=2/3\n`;
+    const p = parseSimcExport(minimal);
+    expect(p.equipped_talents).toBeNull();
+    expect(p.saved_loadouts).toEqual([]);
+  });
+
+  it('ignores a `# Saved Loadout:` header without a following `# talents=` line', () => {
+    const orphan = `warlock="Bob"\ntalents=ACTIVE\n# Saved Loadout: Orphan\n# Some other comment\nhead=,id=1\n`;
+    const p = parseSimcExport(orphan);
+    expect(p.equipped_talents).toBe('ACTIVE');
+    expect(p.saved_loadouts).toEqual([]);
+  });
+});
+
 describe('makeItemIdentity', () => {
   it('produces stable identity regardless of bonus_id order', () => {
     const a = makeItemIdentity(250042, [6652, 12801, 13534], undefined);

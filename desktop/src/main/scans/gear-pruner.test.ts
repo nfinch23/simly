@@ -51,6 +51,8 @@ function emptyExport(): ParsedExport {
     equipped: [],
     bag: [],
     poolBySlot: {} as Record<SlotName, ParsedItem[]>,
+    equipped_talents: null,
+    saved_loadouts: [],
   };
 }
 
