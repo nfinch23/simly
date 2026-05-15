@@ -18,6 +18,7 @@ import type { BestContentResult, ContentOpportunity } from '@simly/shared';
 import { runSimc, type RunnerPaths, type SimcRunResult } from '../simc-runner';
 import { buildProfilesetLines, matchProfilesetsByPrefix, roundTo } from './index';
 import { resolveContentPool, type ContentCandidate } from '../content-pool';
+import { getItemName } from '../item-names';
 import type { ContentPrefs } from '../settings';
 import type { ParsedItem } from '../simc-export-parser';
 
@@ -182,7 +183,7 @@ export function parseBestContentResult(
     return [
       {
         item_id: c.item_id,
-        name: undefined, // KeystoneLoot doesn't ship item names — UI can resolve later
+        name: getItemName(c.item_id),
         slot: c.simc_slot,
         target_ilvl: c.target_ilvl,
         source_label: c.source_label,
