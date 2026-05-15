@@ -447,7 +447,7 @@ local function createFrame()
 	-- frame so users don't have to drag the bar.
 	local scroll = CreateFrame("ScrollFrame", "SimlyPanelScroll", f, "UIPanelScrollFrameTemplate")
 	scroll:SetPoint("TOPLEFT", 18, -40)
-	scroll:SetPoint("BOTTOMRIGHT", -32, 80)
+	scroll:SetPoint("BOTTOMRIGHT", -32, 210)
 
 	local content = CreateFrame("Frame", nil, scroll)
 	content:SetSize(scroll:GetWidth(), 1) -- height set per-Refresh from text height
@@ -474,7 +474,7 @@ local function createFrame()
 	-- for the scenario toggle row below them (y=14).
 	local updateBtn = CreateFrame("Button", nil, f, "SecureActionButtonTemplate,UIPanelButtonTemplate")
 	updateBtn:SetSize(120, 26)
-	updateBtn:SetPoint("BOTTOMLEFT", 18, 44)
+	updateBtn:SetPoint("BOTTOMLEFT", 18, 174)
 	updateBtn:SetText("Update sims")
 	updateBtn:RegisterForClicks("AnyUp", "AnyDown")
 	updateBtn:SetAttribute("type1", "macro")
@@ -489,7 +489,7 @@ local function createFrame()
 	-- "Update all sims" — queues scans for all 4 scenarios back-to-back.
 	local updateAllBtn = CreateFrame("Button", nil, f, "SecureActionButtonTemplate,UIPanelButtonTemplate")
 	updateAllBtn:SetSize(140, 26)
-	updateAllBtn:SetPoint("BOTTOMLEFT", 146, 44)
+	updateAllBtn:SetPoint("BOTTOMLEFT", 146, 174)
 	updateAllBtn:SetText("Update all sims")
 	updateAllBtn:RegisterForClicks("AnyUp", "AnyDown")
 	updateAllBtn:SetAttribute("type1", "macro")
@@ -507,65 +507,75 @@ local function createFrame()
 	-- desktop notification fires.
 	local reloadBtn = CreateFrame("Button", nil, f, "SecureActionButtonTemplate,UIPanelButtonTemplate")
 	reloadBtn:SetSize(80, 26)
-	reloadBtn:SetPoint("BOTTOMRIGHT", -18, 44)
+	reloadBtn:SetPoint("BOTTOMRIGHT", -18, 174)
 	reloadBtn:SetText("/reload")
 	reloadBtn:RegisterForClicks("AnyUp", "AnyDown")
 	reloadBtn:SetAttribute("type1", "macro")
 	reloadBtn:SetAttribute("macrotext1", "/reload")
 
-	-- Per-scenario talent loadout picker. Always tracks the *currently
-	-- active* scenario — switching scenarios updates the dropdown's
-	-- selection to that scenario's persisted choice. Built with
-	-- UIDropDownMenu so it looks native and handles overflow if the
-	-- player has many saved loadouts.
+	-- Per-scenario talent loadout pickers, one per scenario. Stacked
+	-- vertically above the Update buttons so the user can stage all 4
+	-- picks before clicking "Update all sims" — no need to flip the
+	-- active scenario back and forth (the old single-dropdown design's
+	-- failure mode).
 	--
-	-- The list of options is rebuilt every time the menu opens, from
-	-- two sources:
-	--   1. The TALENT_EQUIPPED sentinel — always at the top, default
-	--      for any scenario the user hasn't explicitly picked.
-	--   2. SavedVars.GetSavedLoadoutNames() — the `# Saved Loadout: <name>`
-	--      blocks parsed out of the SimC export. Changes per /reload
-	--      (new export = potentially new loadouts).
+	-- Each dropdown is independent: its OnInit captures the scenario
+	-- key in a closure so clicks land in the right SavedVars slot.
+	-- Long-form loadout names ("Raid Paladins") fit because we give
+	-- each dropdown the full panel width.
 	--
-	-- Clicking an option persists via SetTalentLoadoutForScenario.
-	-- Desktop picks it up at the next "Update sims" + /reload cycle.
-	local talentDropdown = CreateFrame("Frame", "SimlyTalentDropdown", f, "UIDropDownMenuTemplate")
-	talentDropdown:SetPoint("BOTTOMLEFT", 2, 70)
-	UIDropDownMenu_SetWidth(talentDropdown, 160)
-	local function talentDropdownInit(self)
-		local activeScenario = ns.SavedVars.GetScenario()
-		local current = ns.SavedVars.GetTalentLoadoutForScenario(activeScenario)
-		local info = UIDropDownMenu_CreateInfo()
-		info.text = "Equipped"
-		info.value = ns.SavedVars.TALENT_EQUIPPED
-		info.checked = (current == ns.SavedVars.TALENT_EQUIPPED)
-		info.func = function()
-			ns.SavedVars.SetTalentLoadoutForScenario(activeScenario, ns.SavedVars.TALENT_EQUIPPED)
-			UIDropDownMenu_SetSelectedValue(talentDropdown, ns.SavedVars.TALENT_EQUIPPED)
-			UIDropDownMenu_SetText(talentDropdown, "Equipped")
-		end
-		UIDropDownMenu_AddButton(info)
-		for _, name in ipairs(ns.SavedVars.GetSavedLoadoutNames()) do
-			local info2 = UIDropDownMenu_CreateInfo()
-			info2.text = name
-			info2.value = name
-			info2.checked = (current == name)
-			local capturedName = name
-			info2.func = function()
-				ns.SavedVars.SetTalentLoadoutForScenario(activeScenario, capturedName)
-				UIDropDownMenu_SetSelectedValue(talentDropdown, capturedName)
-				UIDropDownMenu_SetText(talentDropdown, capturedName)
+	-- Layout: 4 rows of 30px each starting at y=70. Update buttons get
+	-- pushed up to y=180, Run Full Sim to y=210, scroll bottom to 240/
+	-- 280 (dev). Re-applied in Panel.Refresh's dev_mode toggle below.
+	local talentRowH = 30
+	-- Bottom of the lowest talent row sits just above the scenario
+	-- button row at y=14, with a 30px gap.
+	local talentRowBaseY = 44
+	local talentDropdowns = {}
+	for i, sc in ipairs(ns.SavedVars.SCENARIOS) do
+		local scenarioKey = sc.key
+		local y = talentRowBaseY + (4 - i) * talentRowH
+		local dd = CreateFrame("Frame", "SimlyTalentDropdown_" .. scenarioKey, f, "UIDropDownMenuTemplate")
+		dd:SetPoint("BOTTOMLEFT", 2, y)
+		UIDropDownMenu_SetWidth(dd, 220)
+		local function init(self)
+			local current = ns.SavedVars.GetTalentLoadoutForScenario(scenarioKey)
+			local info = UIDropDownMenu_CreateInfo()
+			info.text = "Equipped"
+			info.value = ns.SavedVars.TALENT_EQUIPPED
+			info.checked = (current == ns.SavedVars.TALENT_EQUIPPED)
+			info.func = function()
+				ns.SavedVars.SetTalentLoadoutForScenario(scenarioKey, ns.SavedVars.TALENT_EQUIPPED)
+				UIDropDownMenu_SetSelectedValue(dd, ns.SavedVars.TALENT_EQUIPPED)
+				UIDropDownMenu_SetText(dd, "Equipped")
 			end
-			UIDropDownMenu_AddButton(info2)
+			UIDropDownMenu_AddButton(info)
+			for _, name in ipairs(ns.SavedVars.GetSavedLoadoutNames()) do
+				local info2 = UIDropDownMenu_CreateInfo()
+				info2.text = name
+				info2.value = name
+				info2.checked = (current == name)
+				local captured = name
+				info2.func = function()
+					ns.SavedVars.SetTalentLoadoutForScenario(scenarioKey, captured)
+					UIDropDownMenu_SetSelectedValue(dd, captured)
+					UIDropDownMenu_SetText(dd, captured)
+				end
+				UIDropDownMenu_AddButton(info2)
+			end
 		end
+		UIDropDownMenu_Initialize(dd, init)
+		-- Label to the right of the dropdown widget. Each dropdown
+		-- already occupies x=2..~265 (SetWidth(220) + ~45 chrome); the
+		-- panel's inner width is 404, so the label fits at ~275 with
+		-- room to spare. Label says "for: <scenario>" so the user can
+		-- match dropdowns to scenarios at a glance.
+		local label = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+		label:SetPoint("LEFT", dd, "RIGHT", 8, 2)
+		label:SetText("|cffaaaaaafor:|r " .. sc.label)
+		talentDropdowns[scenarioKey] = dd
 	end
-	UIDropDownMenu_Initialize(talentDropdown, talentDropdownInit)
-	-- Label rendered to the left of the dropdown widget — UIDropDownMenu
-	-- ships with no built-in label; we add our own FontString.
-	local talentLabel = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-	talentLabel:SetPoint("BOTTOMLEFT", talentDropdown, "TOPLEFT", 16, -4)
-	talentLabel:SetText("Talents (for active scenario)")
-	f.talentDropdown = talentDropdown
+	f.talentDropdowns = talentDropdowns
 
 	-- Dev-only "Run Full Sim (dev)" button. Triggers the normal quick
 	-- pipeline followed by a Raidbots-Top-Gear-style full cartesian sim
@@ -575,7 +585,7 @@ local function createFrame()
 	-- desktop sets only when running under electron-vite dev.
 	local fullSimBtn = CreateFrame("Button", nil, f, "SecureActionButtonTemplate,UIPanelButtonTemplate")
 	fullSimBtn:SetSize(180, 22)
-	fullSimBtn:SetPoint("BOTTOMLEFT", 18, 110)
+	fullSimBtn:SetPoint("BOTTOMLEFT", 18, 204)
 	fullSimBtn:SetText("Run Full Sim (dev)")
 	fullSimBtn:RegisterForClicks("AnyUp", "AnyDown")
 	fullSimBtn:SetAttribute("type1", "macro")
@@ -877,22 +887,29 @@ function Panel.Refresh()
 		local devMode = SimlyResults and SimlyResults.dev_mode
 		if devMode then
 			frame.fullSimBtn:Show()
-			frame.scroll:SetPoint("BOTTOMRIGHT", -32, 146)
+			-- Full-sim button sits at y=204 + 22 tall + 14 gap = y=240.
+			frame.scroll:SetPoint("BOTTOMRIGHT", -32, 240)
 		else
 			frame.fullSimBtn:Hide()
-			frame.scroll:SetPoint("BOTTOMRIGHT", -32, 110)
+			-- Top of update buttons at y=174 + 26 tall + 10 gap = y=210.
+			frame.scroll:SetPoint("BOTTOMRIGHT", -32, 210)
 		end
 	end
 
-	-- Sync the talent dropdown's displayed selection with the active
-	-- scenario's persisted choice. Switching scenarios updates this
-	-- text without re-opening the menu.
-	if frame.talentDropdown then
-		local activeScenario = ns.SavedVars.GetScenario()
-		local current = ns.SavedVars.GetTalentLoadoutForScenario(activeScenario)
-		local label = (current == ns.SavedVars.TALENT_EQUIPPED) and "Equipped" or current
-		UIDropDownMenu_SetSelectedValue(frame.talentDropdown, current)
-		UIDropDownMenu_SetText(frame.talentDropdown, label)
+	-- Sync each per-scenario talent dropdown with its persisted choice.
+	-- Runs on every Refresh (panel open, scenario change, etc.) so the
+	-- visible text matches the SavedVars value the next sim will
+	-- actually use.
+	if frame.talentDropdowns then
+		for _, sc in ipairs(ns.SavedVars.SCENARIOS) do
+			local dd = frame.talentDropdowns[sc.key]
+			if dd then
+				local current = ns.SavedVars.GetTalentLoadoutForScenario(sc.key)
+				local label = (current == ns.SavedVars.TALENT_EQUIPPED) and "Equipped" or current
+				UIDropDownMenu_SetSelectedValue(dd, current)
+				UIDropDownMenu_SetText(dd, label)
+			end
+		end
 	end
 
 	-- Re-apply scenario button highlight: disable the active one so it
