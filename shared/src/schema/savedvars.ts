@@ -63,4 +63,19 @@ export interface SimlyDB {
    * is true.
    */
   update_full_sim_requested_at?: number;
+  /**
+   * Per-scenario talent loadout selection. Value is either the name of
+   * a `# Saved Loadout: <name>` block from the SimC export, or the
+   * sentinel `"equipped"` (or absent) to use the currently-equipped
+   * `talents=` line. Mirrors Raidbots' per-sim talent picker — lets the
+   * user run M+ sims with M+ talents, raid sims with raid talents, etc.
+   * without swapping in-game first.
+   *
+   * Additive field — desktop reads defensively (`?? {}`); no schema
+   * version bump needed.
+   */
+  talent_loadout_per_scenario?: Partial<Record<Scenario, string>>;
 }
+
+/** Sentinel for "use the currently-equipped talent string" in the per-scenario picker. */
+export const TALENT_LOADOUT_EQUIPPED = 'equipped';

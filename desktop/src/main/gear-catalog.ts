@@ -93,6 +93,18 @@ export interface GearCatalogEntry {
   last_quick_sim_at?: number;
   /** Max ilvl seen per slot across all sims; used by calibrated pruner. */
   best_ilvl_by_slot: Record<string, number>;
+  /**
+   * Signature of the talent loadout the catalog was simmed with.
+   * Format: `equipped:<first16chars>` for the active equipped talents,
+   * `loadout:<name>` for a named saved-loadout selection. Mismatches
+   * invalidate the entry — talents materially change DPS-per-item, so
+   * stale catalog data is misleading.
+   *
+   * Optional for backward compat with pre-talents catalogs; an entry
+   * without this field is treated as a mismatch (invalidates on first
+   * read after the field lands).
+   */
+  talent_signature?: string;
 }
 
 export interface ClassificationThresholds {
@@ -179,9 +191,40 @@ export class GearCatalogStore {
     this.store.set(`entries.${makeKey(entry.character_key, entry.scenario)}`, entry);
   }
 
+  /** Drop the entry for (character, scenario). No-op when absent. */
+  drop(character_key: string, scenario: string): void {
+    const entries = this.store.get('entries') ?? {};
+    delete entries[makeKey(character_key, scenario)];
+    this.store.set('entries', entries);
+  }
+
   clear(): void {
     this.store.set('entries', {});
   }
+}
+
+/**
+ * Stable signature for "which talent loadout was this scenario simmed
+ * with." Used to invalidate the catalog when the user changes their
+ * per-scenario talent selection — talents materially shift DPS-per-item
+ * so stale catalog data lies.
+ *
+ *   - `equipped:<first16chars>` when no per-scenario override is set.
+ *   - `loadout:<name>` when a named saved loadout is selected.
+ *   - `unknown` as a last-resort fallback (no parsed export available).
+ */
+export function buildTalentSignature(
+  resolvedTalents: string | null,
+  equippedTalents: string | null | undefined,
+  loadoutName: string | undefined,
+): string {
+  if (resolvedTalents !== null && loadoutName) {
+    return `loadout:${loadoutName}`;
+  }
+  if (equippedTalents) {
+    return `equipped:${equippedTalents.slice(0, 16)}`;
+  }
+  return 'unknown';
 }
 
 /**

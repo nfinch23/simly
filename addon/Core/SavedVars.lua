@@ -130,5 +130,52 @@ function SavedVars.RequestFullSim()
 	SimlyDB.update_full_sim_requested_at = time()
 end
 
+-- Sentinel value meaning "use the currently-equipped talent string".
+-- Mirrors TALENT_LOADOUT_EQUIPPED in shared/schema/savedvars.ts.
+local TALENT_EQUIPPED = "equipped"
+SavedVars.TALENT_EQUIPPED = TALENT_EQUIPPED
+
+-- Parse the saved loadout names out of a SimC profile string. The
+-- SimulationCraft addon emits each saved loadout as a `# Saved Loadout: <name>`
+-- comment followed by a `# talents=<string>` line. We only need the
+-- names for the picker UI — the desktop side resolves the talent string
+-- itself from the same export.
+--
+-- Returns a Lua array of strings. Empty when the player has no saved
+-- loadouts (or simc_export is missing).
+function SavedVars.GetSavedLoadoutNames()
+	local out = {}
+	local export = (SimlyDB and SimlyDB.simc_export) or ""
+	if export == "" then return out end
+	for name in export:gmatch("#%s+Saved Loadout:%s+([^\n\r]+)") do
+		-- Trim trailing whitespace defensively.
+		local trimmed = name:gsub("%s+$", "")
+		if trimmed ~= "" then
+			table.insert(out, trimmed)
+		end
+	end
+	return out
+end
+
+-- Get the per-scenario talent loadout selection for the given scenario
+-- key. Returns the loadout name (matching one of GetSavedLoadoutNames())
+-- or the TALENT_EQUIPPED sentinel when no selection has been made.
+function SavedVars.GetTalentLoadoutForScenario(scenarioKey)
+	if not SimlyDB or not SimlyDB.talent_loadout_per_scenario then
+		return TALENT_EQUIPPED
+	end
+	return SimlyDB.talent_loadout_per_scenario[scenarioKey] or TALENT_EQUIPPED
+end
+
+-- Set the talent loadout for a given scenario. `loadoutName` is either
+-- TALENT_EQUIPPED (use the equipped talents) or a name returned by
+-- GetSavedLoadoutNames(). Persists in SimlyDB; the desktop picks it up
+-- at the next "Update sims" + /reload cycle.
+function SavedVars.SetTalentLoadoutForScenario(scenarioKey, loadoutName)
+	if not SimlyDB then SavedVars.WriteSnapshot() end
+	SimlyDB.talent_loadout_per_scenario = SimlyDB.talent_loadout_per_scenario or {}
+	SimlyDB.talent_loadout_per_scenario[scenarioKey] = loadoutName or TALENT_EQUIPPED
+end
+
 -- Back-compat alias. Removed in a later phase.
 SavedVars.WritePlaceholder = SavedVars.WriteSnapshot

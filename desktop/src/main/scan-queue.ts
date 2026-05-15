@@ -78,6 +78,7 @@ import {
 } from './ring-cache';
 import {
   buildCatalogSummary,
+  buildTalentSignature,
   fullPoolSignature,
   GearCatalogStore,
   ignoredIdentities,
@@ -95,7 +96,7 @@ import {
   type ParsedItem,
 } from './simc-export-parser';
 import { STATIC_DESTRO_WARLOCK_PROFILE } from './static-profile';
-import { scenarioProfileLines } from './scenario-config';
+import { scenarioProfileLines, resolveTalentLine, applyTalentOverride } from './scenario-config';
 import {
   composeFromScans,
   composeFromConsumableScans,
@@ -138,10 +139,15 @@ export const ADDON_FALLBACK_SENTINELS: ReadonlySet<string> = new Set([
  * style. SimC treats these as global directives, so they propagate
  * to all profilesets defined later in the script.
  */
-function prependScenarioDirectives(baseProfile: string, scenario: Scenario): string {
+function prependScenarioDirectives(
+  baseProfile: string,
+  scenario: Scenario,
+  talentOverride: string | null = null,
+): string {
+  const profile = applyTalentOverride(baseProfile, talentOverride);
   const lines = scenarioProfileLines(scenario);
-  if (lines.length === 0) return baseProfile;
-  return [...lines, '', baseProfile].join('\n');
+  if (lines.length === 0) return profile;
+  return [...lines, '', profile].join('\n');
 }
 
 // Phase 4d-iii ladder thresholds re-exported from gear-config.ts so
@@ -240,6 +246,22 @@ export class ScanQueue {
   private runStartedAt: number | null = null;
   private currentCharacterKey: string | null = null;
   private currentScenario: string | null = null;
+  /**
+   * Talent-loadout signature for the in-flight scan. Stamped onto
+   * every gear-catalog write during the run so subsequent runs can
+   * detect a loadout change and invalidate stale catalog data.
+   * Reset on scan end via the finally block in runScan.
+   */
+  private currentTalentSignature: string | null = null;
+
+  /**
+   * Inject the in-flight scan's talent signature onto a catalog entry
+   * before it's persisted. No-op outside of a scan (signature is null).
+   */
+  private stampTalentSignature(entry: GearCatalogEntry): GearCatalogEntry {
+    if (this.currentTalentSignature === null) return entry;
+    return { ...entry, talent_signature: this.currentTalentSignature };
+  }
 
   constructor(private readonly opts: ScanQueueOptions) {
     this.lastCompletedAt =
@@ -395,7 +417,13 @@ export class ScanQueue {
           console.warn('[queue] failed to parse SimC export for runAllScenarios:', (err as Error).message);
         }
       }
-      void this.runAllScenarios({ useRealExport, parsedExport: parsedExport ?? null, baseProfile, characterKey });
+      void this.runAllScenarios({
+        useRealExport,
+        parsedExport: parsedExport ?? null,
+        baseProfile,
+        characterKey,
+        talentSelection: db.talent_loadout_per_scenario ?? {},
+      });
       return;
     }
 
@@ -416,13 +444,15 @@ export class ScanQueue {
     parsedExport: ParsedExport | null;
     baseProfile: string;
     characterKey: string;
+    talentSelection?: Partial<Record<string, string>>;
   }): Promise<void> {
     const scenarios: Scenario[] = ['single_target_patchwerk', 'm_plus', 'aoe_cleave', 'aoe_funnel'];
     for (const scenario of scenarios) {
+      const talents = resolveTalentLine(scenario, args.parsedExport ?? undefined, args.talentSelection);
       await this.runScan({
         ...args,
         parsedExport: args.parsedExport ?? undefined,
-        baseProfile: prependScenarioDirectives(args.baseProfile, scenario),
+        baseProfile: prependScenarioDirectives(args.baseProfile, scenario, talents),
         scenario,
       });
     }
@@ -488,9 +518,14 @@ export class ScanQueue {
       }
     }
 
+    const talentOverride = resolveTalentLine(
+      db.active_scenario,
+      parsedExport,
+      db.talent_loadout_per_scenario ?? {},
+    );
     try {
       await this.runScan({
-        baseProfile: prependScenarioDirectives(baseProfile, db.active_scenario),
+        baseProfile: prependScenarioDirectives(baseProfile, db.active_scenario, talentOverride),
         useRealExport,
         parsedExport,
         characterKey,
@@ -685,6 +720,26 @@ export class ScanQueue {
     let decision: QuickSimDecision;
     try {
       catalog = this.gearCatalog.get(args.characterKey, args.scenario);
+      // Invalidate the catalog when the talent loadout for this
+      // scenario has changed since the last sim. Stale entries would
+      // mis-classify items because DPS-per-item depends on talents.
+      // Pre-talents entries (no talent_signature stamped) also fall
+      // through — they get re-stamped on the next full sim.
+      if (
+        catalog &&
+        this.currentTalentSignature !== null &&
+        catalog.talent_signature !== this.currentTalentSignature
+      ) {
+        console.log(
+          `[quick-sim] talent change detected (was=${catalog.talent_signature ?? 'unstamped'}, now=${this.currentTalentSignature}); dropping catalog entry for ${args.characterKey}|${args.scenario}`,
+        );
+        this.gearCatalog.drop(args.characterKey, args.scenario);
+        catalog = undefined;
+        // Cached trinket/ring pairs were sim'd under the prior talents
+        // and rank differently now — clear those too.
+        try { this.trinketCache?.invalidate(args.characterKey, args.scenario); } catch { /* non-fatal */ }
+        try { this.ringCache?.invalidate(args.characterKey, args.scenario); } catch { /* non-fatal */ }
+      }
       decision = planQuickSim({ parsed: args.parsedExport, catalog });
     } catch (err) {
       console.warn('[quick-sim] planner threw — falling through:', (err as Error).message);
@@ -697,10 +752,10 @@ export class ScanQueue {
       // when we last verified up-to-date status.
       if (catalog) {
         try {
-          this.gearCatalog.put({
+          this.gearCatalog.put(this.stampTalentSignature({
             ...catalog,
             last_quick_sim_at: Math.floor(Date.now() / 1000),
-          });
+          }));
         } catch (err) {
           console.warn('[catalog] last_quick_sim_at update failed:', (err as Error).message);
         }
@@ -764,7 +819,7 @@ export class ScanQueue {
         prior: catalog,
         swap_results: result.results,
       });
-      this.gearCatalog.put(updated);
+      this.gearCatalog.put(this.stampTalentSignature(updated));
     } catch (err) {
       console.warn('[catalog] swap-test write failed:', (err as Error).message);
     }
@@ -824,12 +879,27 @@ export class ScanQueue {
     parsedExport?: ParsedExport;
     characterKey: string;
     scenario: Scenario;
+    talentSelection?: Partial<Record<string, string>>;
   }): Promise<void> {
     const s = getSettings();
     this.inFlight = true;
     this.runStartedAt = Math.floor(Date.now() / 1000);
     this.currentCharacterKey = args.characterKey;
     this.currentScenario = args.scenario;
+    // Compute the talent signature for this scan up-front so it can
+    // (a) invalidate stale catalog entries in maybeQuickSim, and
+    // (b) stamp every catalog/cache write during the run.
+    const resolvedTalents = resolveTalentLine(
+      args.scenario,
+      args.parsedExport,
+      args.talentSelection,
+    );
+    const loadoutName = args.talentSelection?.[args.scenario];
+    this.currentTalentSignature = buildTalentSignature(
+      resolvedTalents,
+      args.parsedExport?.equipped_talents ?? null,
+      loadoutName && loadoutName !== 'equipped' ? loadoutName : undefined,
+    );
     this.emitState();
     setWindowTitle(`Simly — Scan running for ${args.characterKey}…`);
     let scanOutcome: 'ok' | 'failed' = 'failed';
@@ -1341,7 +1411,7 @@ export class ScanQueue {
                 combos: result.combos,
                 parsedExport: args.parsedExport,
               });
-              this.gearCatalog.put(updated);
+              this.gearCatalog.put(this.stampTalentSignature(updated));
               console.log(
                 `[catalog] updated: best loadout dps=${Math.round(updated.best_loadout_dps ?? 0)}, ` +
                   `${Object.keys(updated.seen_items).length} seen item(s)`,
@@ -1794,7 +1864,7 @@ export class ScanQueue {
                       combos: greedyResult2.result.combos,
                       parsedExport: args.parsedExport,
                     });
-                    this.gearCatalog.put(updated);
+                    this.gearCatalog.put(this.stampTalentSignature(updated));
                   } catch (err) {
                     console.warn(
                       '[catalog] pass-2 update failed:',
@@ -2135,6 +2205,7 @@ export class ScanQueue {
       this.inFlight = false;
       this.runStartedAt = null;
       this.fullSimRequested = false;
+      this.currentTalentSignature = null;
       this.emitState();
     }
   }
