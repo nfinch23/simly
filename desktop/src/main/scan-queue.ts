@@ -28,6 +28,10 @@ import {
   parseBestGems,
 } from './scans/best-gems';
 import {
+  buildEnchantsProfilesetLines,
+  parseBestEnchants,
+} from './scans/best-enchants';
+import {
   computeHerdMedian,
   computeWeightDeltas,
   formatReconvergeReason,
@@ -1028,12 +1032,16 @@ export class ScanQueue {
           'consumables (prescan)',
           args.characterKey,
         );
-        // Gem profilesets need the parsed export to know socket counts
-        // per item — built inline rather than via the SCANS registry
-        // (whose buildLines() is parameterless). Falls back to empty
-        // when parsedExport is absent (static fallback profile path).
+        // Gem + enchant profilesets need the parsed export to know
+        // per-item context (socket counts, slot occupancy). Built
+        // inline rather than via the SCANS registry (whose buildLines
+        // is parameterless). Falls back to empty when parsedExport is
+        // absent (static fallback profile path).
         const gemsBlock = args.parsedExport
           ? buildGemsProfilesetLines(args.parsedExport)
+          : '';
+        const enchantsBlock = args.parsedExport
+          ? buildEnchantsProfilesetLines(args.parsedExport)
           : '';
         try {
           const cpRun = await runSimc({
@@ -1042,8 +1050,8 @@ export class ScanQueue {
               args.baseProfile,
               '',
               buildAllScanLines(),
-              gemsBlock ? '' : '',
               gemsBlock,
+              enchantsBlock,
             ].filter((s) => s.length > 0).join('\n'),
             iterations: 3000,
             scratchTag: `consumables-prescan-${Date.now()}`,
@@ -1055,13 +1063,14 @@ export class ScanQueue {
           const foodKey = pickWinningFoodSimcKey(cpRun);
           const potionKey = pickWinningPotionSimcKey(cpRun);
           const gemsResult = parseBestGems(cpRun);
+          const enchantsResult = parseBestEnchants(cpRun);
           consumablesLock = { flask: flaskKey, food: foodKey, potion: potionKey };
+          const cpFinished = Math.floor(Date.now() / 1000);
           // Surface gem winner in the scans collection so the composer
           // can merge it into composed.gems. Gems aren't part of the
           // consumables lock (they're item-level, not profile-level);
           // composer reads scans.best_gems directly.
           if (gemsResult) {
-            const cpFinished = Math.floor(Date.now() / 1000);
             scans.best_gems = {
               status: 'done',
               started_at: cpStarted,
@@ -1071,6 +1080,18 @@ export class ScanQueue {
             console.log(
               `[sim] best gem stat: ${gemsResult.best.name} (${gemsResult.best.dps} dps)`,
             );
+          }
+          if (enchantsResult) {
+            scans.best_enchants = {
+              status: 'done',
+              started_at: cpStarted,
+              finished_at: cpFinished,
+              data: enchantsResult,
+            };
+            const slotPicks = Object.entries(enchantsResult.per_slot)
+              .map(([slot, r]) => `${slot}=${r.best.name}`)
+              .join(', ');
+            console.log(`[sim] best enchants: ${slotPicks}`);
           }
           lockedBaseProfile = setConsumablesInProfile(
             args.baseProfile,

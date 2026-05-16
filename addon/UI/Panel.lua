@@ -1086,6 +1086,19 @@ function Panel.Refresh()
 		if c.gems then
 			table.insert(lines, "  |cff66ccffGems:|r " .. c.gems.name)
 		end
+		if c.enchants then
+			-- Build a stable display order; iterate every covered slot.
+			local enchantSlots = {}
+			for slot in pairs(c.enchants) do table.insert(enchantSlots, slot) end
+			table.sort(enchantSlots)
+			for _, slot in ipairs(enchantSlots) do
+				local e = c.enchants[slot]
+				table.insert(lines, string.format(
+					"  |cff66ccff%s enchant:|r %s",
+					slot, e.name
+				))
+			end
+		end
 	else
 		table.insert(lines, "|cffaaaaaa(No sim results yet — click \"Update sims\" then /reload.)|r")
 	end
