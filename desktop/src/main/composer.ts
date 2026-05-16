@@ -26,6 +26,7 @@ import {
   type BestFlaskResult,
   type BestFoodResult,
   type BestPotionResult,
+  type BestGemsResult,
   type ComposedGearItem,
   type ComposedLoadout,
   type RingPreScanResult,
@@ -145,6 +146,7 @@ export function composeFromScans(
   const flask = scans.best_flask?.data as BestFlaskResult | undefined;
   const food = scans.best_food?.data as BestFoodResult | undefined;
   const potion = scans.best_potion?.data as BestPotionResult | undefined;
+  const gems = scans.best_gems?.data as BestGemsResult | undefined;
   const gearScan = (scans.gear_final?.data ?? scans.gear_refined?.data ?? scans.gear_coarse?.data) as
     | { winner?: { items: ReadonlyArray<{ slot: string; item: { item_id: number; name: string; identity: string; ilvl: number } }>; mean_dps: number } }
     | undefined;
@@ -221,13 +223,14 @@ export function composeFromScans(
     }
   }
 
-  const hasAnything = flask || food || potion || Object.keys(gear).length > 0;
+  const hasAnything = flask || food || potion || gems || Object.keys(gear).length > 0;
   if (!hasAnything) return undefined;
   return {
     label: 'Best loadout (single-target Patchwerk)',
     flask: flask?.best ? { item_id: flask.best.item_id, name: flask.best.name } : undefined,
     food: food?.best ? { item_id: food.best.item_id, name: food.best.name } : undefined,
     potion: potion?.best ? { item_id: potion.best.item_id, name: potion.best.name } : undefined,
+    gems: gems?.best ? { item_id: gems.best.item_id, name: gems.best.name } : undefined,
     gear: Object.keys(gear).length > 0 ? gear : undefined,
     expected_dps: gearScan?.winner?.mean_dps ?? catalog?.best_loadout_dps,
   };
