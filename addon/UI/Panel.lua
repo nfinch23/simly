@@ -1083,6 +1083,9 @@ function Panel.Refresh()
 		if c.augment_rune then
 			table.insert(lines, "  |cff66ccffAugment Rune:|r " .. c.augment_rune.name)
 		end
+		if c.gems then
+			table.insert(lines, "  |cff66ccffGems:|r " .. c.gems.name)
+		end
 	else
 		table.insert(lines, "|cffaaaaaa(No sim results yet — click \"Update sims\" then /reload.)|r")
 	end

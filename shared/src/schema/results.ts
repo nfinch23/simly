@@ -44,6 +44,7 @@ export interface BestConsumableResult {
 export type BestFlaskResult = BestConsumableResult;
 export type BestFoodResult = BestConsumableResult;
 export type BestPotionResult = BestConsumableResult;
+export type BestGemsResult = BestConsumableResult;
 
 /** Compact identifier for an item slot, used in scan results that name specific items. */
 export interface ScannedItemRef {
@@ -126,6 +127,11 @@ export interface ComposedLoadout {
   food?: { item_id: number; name: string };
   potion?: { item_id: number; name: string };
   augment_rune?: { item_id: number; name: string };
+  /**
+   * Best gem-stat recommendation. v1 surfaces a single "stack this stat
+   * in every socket" answer; per-socket optimization is deferred.
+   */
+  gems?: { item_id: number; name: string };
   /**
    * Per-slot recommended gear, keyed by SimC slot name (head, neck,
    * shoulder, back, chest, wrist, hands, waist, legs, feet, finger1,
@@ -219,6 +225,7 @@ export interface ScanCollection {
   best_flask?: ScanRecord<BestFlaskResult>;
   best_food?: ScanRecord<BestFoodResult>;
   best_potion?: ScanRecord<BestPotionResult>;
+  best_gems?: ScanRecord<BestGemsResult>;
   consumables_gems_enchants?: ScanRecord<unknown>;
   /**
    * Phase 7 — per-slot "+1 tier" upgrade priority ranking. Estimated via
