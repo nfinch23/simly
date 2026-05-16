@@ -46,6 +46,12 @@ export type BestFoodResult = BestConsumableResult;
 export type BestPotionResult = BestConsumableResult;
 export type BestGemsResult = BestConsumableResult;
 
+/** Per-slot enchant winners. Each slot has its own picker. */
+export interface BestEnchantsResult {
+  label: string;
+  per_slot: Record<string, BestConsumableResult>;
+}
+
 /** Compact identifier for an item slot, used in scan results that name specific items. */
 export interface ScannedItemRef {
   item_id: number;
@@ -132,6 +138,12 @@ export interface ComposedLoadout {
    * in every socket" answer; per-socket optimization is deferred.
    */
   gems?: { item_id: number; name: string };
+  /**
+   * Best enchant per slot, keyed by SimC slot name. Populated by the
+   * best_enchants scan. v1 covers legs + main_hand only — slots with
+   * the highest DPS variance between enchants.
+   */
+  enchants?: Record<string, { enchant_id: number; name: string }>;
   /**
    * Per-slot recommended gear, keyed by SimC slot name (head, neck,
    * shoulder, back, chest, wrist, hands, waist, legs, feet, finger1,
@@ -226,6 +238,7 @@ export interface ScanCollection {
   best_food?: ScanRecord<BestFoodResult>;
   best_potion?: ScanRecord<BestPotionResult>;
   best_gems?: ScanRecord<BestGemsResult>;
+  best_enchants?: ScanRecord<BestEnchantsResult>;
   consumables_gems_enchants?: ScanRecord<unknown>;
   /**
    * Phase 7 — per-slot "+1 tier" upgrade priority ranking. Estimated via
