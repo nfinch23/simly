@@ -47,33 +47,68 @@ interface GemDataRow {
 }
 
 /**
- * Build the candidate set: every Flawless 2-stat allocation, one ID
- * per unique (primary, secondary) pair.
+ * Raidbots' canonical "Q2 DPS gem" catalog for Midnight (12.0.5).
+ * 3 Eversong Diamonds + 16 Flawless tier-2 secondary gems
+ * (4 colors × 4 adjectives = 16). 19 total.
  *
- * The pairs are ORDER-SENSITIVE — "Mastery + Haste" (Amethyst) and
- * "Haste + Mastery" (Peridot) are different gems with different stat
- * allocations. Both ship as candidates so the sim can decide which
- * fits the player's stat priorities.
+ * Tank/healer-only gems (extra meta variants for those specs) are
+ * deferred — custom-logic per spec is a future slice.
+ */
+const RAIDBOTS_GEM_NAMES: readonly string[] = [
+  // Meta gems — player can only equip 1 of 3 per character.
+  'Telluric Eversong Diamond',
+  'Powerful Eversong Diamond',
+  'Indecipherable Eversong Diamond',
+  // 16 Flawless secondary gems (4 colors × 4 adjectives).
+  'Flawless Deadly Garnet',
+  'Flawless Quick Garnet',
+  'Flawless Masterful Garnet',
+  'Flawless Versatile Garnet',
+  'Flawless Deadly Peridot',
+  'Flawless Quick Peridot',
+  'Flawless Masterful Peridot',
+  'Flawless Versatile Peridot',
+  'Flawless Deadly Amethyst',
+  'Flawless Quick Amethyst',
+  'Flawless Masterful Amethyst',
+  'Flawless Versatile Amethyst',
+  'Flawless Deadly Lapis',
+  'Flawless Quick Lapis',
+  'Flawless Masterful Lapis',
+  'Flawless Versatile Lapis',
+];
+
+/**
+ * Build the candidate set from the Raidbots Q2 whitelist. Each name
+ * resolves to multiple IDs in the SimC data (regular + WoW Token /
+ * faction variants); we pick the lowest ID for deterministic output.
+ *
+ * Result naming:
+ *   - Dual-stat gems → "Flawless Quick Amethyst (Mastery + Haste)"
+ *   - Single-stat gems (Quick Peridot, Masterful Amethyst, Deadly
+ *     Garnet, Versatile Lapis) → "Flawless Quick Peridot (Haste)"
+ *   - Eversong Diamonds → name only (special effects, no stat decode)
  */
 function buildCandidateSet(rows: readonly GemDataRow[]): GemCandidate[] {
-  const flawless = rows.filter(
-    (g) => g.name.startsWith('Flawless') && g.stats.length === 2,
-  );
-  // Dedupe by stat-pair signature, keeping the LOWER item_id (stable
-  // pick across runs). The two paired IDs per allocation differ only
-  // in some binding flag, not in stats.
-  const byKey = new Map<string, GemDataRow>();
-  for (const g of flawless) {
-    const key = `${g.stats[0]}+${g.stats[1]}`;
-    const prior = byKey.get(key);
-    if (!prior || g.id < prior.id) byKey.set(key, g);
+  const byName = new Map<string, GemDataRow>();
+  for (const g of rows) {
+    if (!RAIDBOTS_GEM_NAMES.includes(g.name)) continue;
+    const prior = byName.get(g.name);
+    if (!prior || g.id < prior.id) byName.set(g.name, g);
   }
-  return Array.from(byKey.values()).map((g) => ({
-    key: `${g.stats[0]!.toLowerCase().replace(/\s+/g, '_')}_${g.stats[1]!.toLowerCase().replace(/\s+/g, '_')}`,
-    item_id: g.id,
-    name: `${g.name} (${g.stats.join(' + ')})`,
-    stats: g.stats,
-  }));
+  // Emit in the canonical order from RAIDBOTS_GEM_NAMES so panel
+  // displays are stable and predictable.
+  const out: GemCandidate[] = [];
+  for (const name of RAIDBOTS_GEM_NAMES) {
+    const row = byName.get(name);
+    if (!row) continue; // Defensive — every name is verified at regen time.
+    const stats = row.stats;
+    const display = stats.length > 0 ? `${row.name} (${stats.join(' + ')})` : row.name;
+    // Stable key derived from the name (lowercase, underscored).
+    const key = row.name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
+    out.push({ key, item_id: row.id, name: display, stats });
+  }
+  return out;
 }
 
 export const GEM_CANDIDATES: readonly GemCandidate[] = buildCandidateSet(
