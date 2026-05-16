@@ -24,9 +24,9 @@ Current phase: **Phases 4, 5, and 6 all shipped to main. Phase 7 (content recomm
 
 Live status (auto-synced on `/ship` — see "Auto-sync on /ship" section):
 
-- Latest main commit: <!-- AUTOSYNC: latest_main_commit -->5fc3a22<!-- /AUTOSYNC -->
-- Merged PRs: <!-- AUTOSYNC: merged_prs -->1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54<!-- /AUTOSYNC -->
-- Last synced: <!-- AUTOSYNC: last_synced_at -->2026-05-15T22:00:55Z<!-- /AUTOSYNC -->
+- Latest main commit: <!-- AUTOSYNC: latest_main_commit -->e42db0f<!-- /AUTOSYNC -->
+- Merged PRs: <!-- AUTOSYNC: merged_prs -->1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68<!-- /AUTOSYNC -->
+- Last synced: <!-- AUTOSYNC: last_synced_at -->2026-05-16T02:06:28Z<!-- /AUTOSYNC -->
 
 ### Phase 3 sub-status (all done)
 
@@ -81,10 +81,23 @@ These shipped during live testing on Felfriend (Demo Warlock, Zul'jin):
 - **Renderer state-push fix + addon status block fixes** — PR #5 (`b736220`, `249171c`, `0648df4`). Window show/focus events re-push `QueueState` so the Status tab can't get stuck on `isRunning: true` after a scan completes off-screen. Addon status block now reads `generated_at` from active-scenario bucket with v2 fallback, and compares request to MAX `generated_at` across scenarios so switching to an unscanned scenario doesn't falsely show "Scan running".
 - **Update All gate hardening** — PR #5 (`3747b0c`). `lastCompletedAllAt` initialized in constructor (defends against stale `update_all_requested_at` re-firing all 4 scenarios on desktop restart). `runAllScenarios` now bumps both `lastCompletedAt` and `lastCompletedAllAt` (prevents spurious single-scenario replay after Update All). Both caught + fixed inline by /ship's pre-landing review.
 
+### Round 3 — Mage smoke-test session (PRs #56–#68)
+
+14 PRs shipped post-Phase-6/7, all driven by live testing on the user's Frost Mage. High-level grouping:
+
+- **Correctness / parity:** [#56](https://github.com/nfinch23/simly/pull/56) cross-character `/simly` gate + EPIPE swallow, [#57](https://github.com/nfinch23/simly/pull/57) raid-buff block (closes ~5% DPS gap vs Raidbots — see `desktop/src/main/raid-buffs.ts`).
+- **UX polish:** [#58](https://github.com/nfinch23/simly/pull/58) per-scenario "Scan running" status, [#59](https://github.com/nfinch23/simly/pull/59) desktop heartbeat + addon detection, [#60](https://github.com/nfinch23/simly/pull/60) per-scenario talent dropdown rows, [#61](https://github.com/nfinch23/simly/pull/61) sim-type button grid (9 buttons), [#63](https://github.com/nfinch23/simly/pull/63) content grouped by source.
+- **New scans:** [#62](https://github.com/nfinch23/simly/pull/62) `best_potion`, [#64](https://github.com/nfinch23/simly/pull/64)/[#66](https://github.com/nfinch23/simly/pull/66)/[#67](https://github.com/nfinch23/simly/pull/67) `best_gems` (final state = Raidbots Q2 whitelist, 19 candidates), [#65](https://github.com/nfinch23/simly/pull/65)/[#68](https://github.com/nfinch23/simly/pull/68) `best_enchants` (final = Raidbots Q2 whitelist, 26 candidates across 4 slots).
+- **Data automation:** `scripts/regen-gems.mjs` + `scripts/regen-enchants.mjs` pull SimC's `item_data.inc` / `gem_data.inc` / `permanent_enchant.inc` / `spell_item_enchantment.inc` per-patch. Re-run after each WoW expansion.
+
 ### What's next
 
+- **Smoke-test pass** — user is staged to live-verify the whole Round 3 stack on their Mage in WoW. Next session opens with their findings.
+- **Slice K — Nebulous Voidcore scan** — deferred until embellishment-data work is scoped.
+- **Slice F2 — selective scan-queue execution per button** — Sim Gems / Sim Crests etc. still trigger the full pipeline today. Per-button gating is its own refactor of the 2200-line `scan-queue.ts`.
+- **Enchant stat decoder** — sim picks winners correctly; only display labels would benefit from the deeper spell-effect join.
 - **Phase 7 — content recommender** (v2 territory; deferred per SCOPE).
-- **Pre-v1 polish slices** are the active work today. Live tracking lives in session memory + the `/loop` skill todos. Known open items at this snapshot: end-to-end live verification of the calibrated pruner on a real M+ gear_coarse run (deferred until next in-game M+ session).
+- **Pre-v1 polish slices** are the active work today. Known open: end-to-end live verification of the calibrated pruner on a real M+ gear_coarse run (deferred until next in-game M+ session).
 
 ### Phase 2 prep TODOs (still open)
 
@@ -93,7 +106,7 @@ These shipped during live testing on Felfriend (Demo Warlock, Zul'jin):
 
 ### Test counts
 
-- <!-- AUTOSYNC: test_count_desktop -->661<!-- /AUTOSYNC --> desktop unit tests passing (started Phase 4 with ~100). Major suites: `composer` (20), `gear-pruner` (53 — +18 from Phase 6's calibration), `gear-rerank` (8), `gear-coarse` (4), `gear-catalog` (19), `quick-sim` (9), `swap-test` (13), `trinket-cache` (18), `trinket-pre-scan` (6), `swap-test-result-mapping`, `ignore-list` (12), `stage-logger` (12), `lua-parser` (5), `lua-writer` (9), `simc-export-parser` (20), `simc-runner`/`simc-installer`/`simc-version-source`/`simc-paths`/`simc-bootstrap`/`scan-queue`/`scans/registry`/`scans/index`/`scans/best-flask`/`scans/best-food`/`scans/stat-weights`/`wow-paths`.
+- <!-- AUTOSYNC: test_count_desktop -->726<!-- /AUTOSYNC --> desktop unit tests passing (started Phase 4 with ~100). Major suites: `composer` (20), `gear-pruner` (53 — +18 from Phase 6's calibration), `gear-rerank` (8), `gear-coarse` (4), `gear-catalog` (19), `quick-sim` (9), `swap-test` (13), `trinket-cache` (18), `trinket-pre-scan` (6), `swap-test-result-mapping`, `ignore-list` (12), `stage-logger` (12), `lua-parser` (5), `lua-writer` (9), `simc-export-parser` (20), `simc-runner`/`simc-installer`/`simc-version-source`/`simc-paths`/`simc-bootstrap`/`scan-queue`/`scans/registry`/`scans/index`/`scans/best-flask`/`scans/best-food`/`scans/stat-weights`/`wow-paths`.
 
 ## gstack
 
