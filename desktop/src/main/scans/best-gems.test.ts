@@ -51,11 +51,21 @@ function mkExport(equipped: ParsedItem[]): ParsedExport {
   };
 }
 
-describe('GEM_CANDIDATES (loaded from data/gems.json)', () => {
-  it('contains at least the 6 unique two-stat combinations', () => {
-    // 4-choose-2 = 6 distinct stat pairs; each pair has 2 orientations
-    // (primary/secondary) for 12 distinct gem allocations.
-    expect(GEM_CANDIDATES.length).toBeGreaterThanOrEqual(6);
+describe('GEM_CANDIDATES (Raidbots Q2 DPS whitelist)', () => {
+  it('contains exactly 19 gems (3 diamonds + 16 Flawless secondary)', () => {
+    expect(GEM_CANDIDATES).toHaveLength(19);
+  });
+
+  it('includes all 3 Eversong Diamonds', () => {
+    const names = GEM_CANDIDATES.map((c) => c.name);
+    for (const d of ['Telluric', 'Powerful', 'Indecipherable']) {
+      expect(names.some((n) => n.includes(`${d} Eversong Diamond`))).toBe(true);
+    }
+  });
+
+  it('includes all 16 Flawless secondary-stat gems', () => {
+    const flawless = GEM_CANDIDATES.filter((c) => c.name.startsWith('Flawless'));
+    expect(flawless).toHaveLength(16);
   });
 
   it('every candidate has a positive item_id', () => {
@@ -64,15 +74,28 @@ describe('GEM_CANDIDATES (loaded from data/gems.json)', () => {
     }
   });
 
-  it('every candidate is two-stat (decoded from SimC data)', () => {
-    for (const c of GEM_CANDIDATES) {
-      expect(c.stats).toHaveLength(2);
+  it('dual-stat Flawless gems show "(Stat1 + Stat2)" in the name', () => {
+    const dualStat = GEM_CANDIDATES.filter((c) => c.stats.length === 2);
+    // Of the 16 Flawless, 12 are dual-stat (color/adjective differ).
+    expect(dualStat).toHaveLength(12);
+    for (const c of dualStat) {
+      expect(c.name).toMatch(/\(.+ \+ .+\)/);
     }
   });
 
-  it('candidate name includes the stat decode in parens', () => {
-    for (const c of GEM_CANDIDATES) {
-      expect(c.name).toMatch(/\(.+ \+ .+\)/);
+  it('single-stat Flawless gems show "(Stat)" in the name', () => {
+    const singleStat = GEM_CANDIDATES.filter(
+      (c) => c.stats.length === 1 && c.name.startsWith('Flawless'),
+    );
+    // 4 "doubled" gems where adjective matches color (Quick Peridot etc.).
+    expect(singleStat).toHaveLength(4);
+  });
+
+  it('Eversong Diamonds have no stat decode (special effects)', () => {
+    const diamonds = GEM_CANDIDATES.filter((c) => c.name.includes('Eversong Diamond'));
+    expect(diamonds).toHaveLength(3);
+    for (const d of diamonds) {
+      expect(d.stats).toHaveLength(0);
     }
   });
 });
