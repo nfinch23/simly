@@ -1126,10 +1126,14 @@ function Panel.Refresh()
 		table.insert(lines, "")
 	end
 
-	-- Best content to chase (Phase 7) — for each item you could acquire
-	-- from enabled content (Content tab in desktop), the projected DPS
-	-- gain. Color-coded by source: 'mplus' yellow, 'raid' purple.
-	-- Top 6 only; desktop shows top 25.
+	-- Best content to chase (Phase 7 / Slice J) — group opportunities by
+	-- source (dungeon / raid encounter) and surface per-source totals
+	-- alongside the top items. Answers the user's "which dungeon should
+	-- I farm?" by showing total potential DPS gain per source.
+	--
+	-- v1 EV proxy: sum of delta_dps for upgrades in that source. True
+	-- per-item drop probability isn't in our data tables yet — total
+	-- potential is the best "value per clear" estimate available.
 	if scenarioData and scenarioData.scans
 		and scenarioData.scans.best_content
 		and scenarioData.scans.best_content.status == "done"
@@ -1137,33 +1141,88 @@ function Panel.Refresh()
 	then
 		local data = scenarioData.scans.best_content.data
 		local ops = data.opportunities or {}
+
+		-- Group opportunities by source_label (Lua mirror of the
+		-- desktop's groupContentBySource helper; same logic, same
+		-- contract). Drop non-upgrades (delta_dps <= 0).
+		local groupMap = {}
+		local groupOrder = {}
+		for _, op in ipairs(ops) do
+			local dps = op.delta_dps or 0
+			if dps > 0 then
+				local label = op.source_label or "?"
+				local g = groupMap[label]
+				if not g then
+					g = {
+						source_label = label,
+						source_category = op.source_category,
+						upgrade_count = 0,
+						total_potential_dps = 0,
+						items = {},
+					}
+					groupMap[label] = g
+					table.insert(groupOrder, g)
+				end
+				g.upgrade_count = g.upgrade_count + 1
+				g.total_potential_dps = g.total_potential_dps + dps
+				table.insert(g.items, op)
+			end
+		end
+		-- Sort groups desc by total_potential_dps.
+		table.sort(groupOrder, function(a, b)
+			return a.total_potential_dps > b.total_potential_dps
+		end)
+		-- Within each group, sort items desc by delta_dps.
+		for _, g in ipairs(groupOrder) do
+			table.sort(g.items, function(a, b)
+				return (a.delta_dps or 0) > (b.delta_dps or 0)
+			end)
+		end
+
 		table.insert(lines, string.format(
-			"|cffffd700Best content to chase|r |cffaaaaaa(%d candidates evaluated)|r",
-			data.candidates_evaluated or 0
+			"|cffffd700Best content to chase|r |cffaaaaaa(%d candidates evaluated, %d sources with upgrades)|r",
+			data.candidates_evaluated or 0,
+			#groupOrder
 		))
-		if #ops == 0 then
+		if #groupOrder == 0 then
 			table.insert(lines, "  |cffaaaaaa(nothing in enabled content beats your current gear)|r")
 		else
-			for i = 1, math.min(6, #ops) do
-				local o = ops[i]
-				local slot = o.slot or "?"
-				local name = o.name or ("Item #" .. tostring(o.item_id))
-				local sourceColor = (o.source_category == "raid") and "|cffce93d8" or "|cffffd966"
-				local gainColor = (o.delta_dps and o.delta_dps > 0) and "|cff66bb6a" or "|cffaaaaaa"
+			-- Show top 4 sources × top 2 items each.
+			local SOURCES_SHOWN = 4
+			local ITEMS_PER_SOURCE = 2
+			for gi = 1, math.min(SOURCES_SHOWN, #groupOrder) do
+				local g = groupOrder[gi]
+				local sourceColor = (g.source_category == "raid") and "|cffce93d8" or "|cffffd966"
 				table.insert(lines, string.format(
-					"  |cffaaaaaa%s|r %s %s%s|r |cffaaaaaa(ilvl %d)|r %s+%d|r |cffaaaaaa(%+.2f%%)|r",
-					slot,
-					name,
+					"  %s%s|r |cffaaaaaa\226\148\128 %d upgrade%s available, +%d total DPS|r",
 					sourceColor,
-					o.source_label or "?",
-					o.target_ilvl or 0,
-					gainColor,
-					o.delta_dps or 0,
-					o.delta_pct or 0
+					g.source_label,
+					g.upgrade_count,
+					g.upgrade_count == 1 and "" or "s",
+					math.floor(g.total_potential_dps + 0.5)
 				))
+				for ii = 1, math.min(ITEMS_PER_SOURCE, #g.items) do
+					local o = g.items[ii]
+					local slot = o.slot or "?"
+					local name = o.name or ("Item #" .. tostring(o.item_id))
+					table.insert(lines, string.format(
+						"      |cffaaaaaa%s|r %s |cffaaaaaa(ilvl %d)|r |cff66bb6a+%d|r |cffaaaaaa(%+.2f%%)|r",
+						slot, name, o.target_ilvl or 0,
+						o.delta_dps or 0, o.delta_pct or 0
+					))
+				end
+				if #g.items > ITEMS_PER_SOURCE then
+					table.insert(lines, string.format(
+						"      |cffaaaaaa(+%d more in the desktop window)|r",
+						#g.items - ITEMS_PER_SOURCE
+					))
+				end
 			end
-			if #ops > 6 then
-				table.insert(lines, string.format("  |cffaaaaaa(+%d more in the desktop window)|r", #ops - 6))
+			if #groupOrder > SOURCES_SHOWN then
+				table.insert(lines, string.format(
+					"  |cffaaaaaa(+%d more sources in the desktop window)|r",
+					#groupOrder - SOURCES_SHOWN
+				))
 			end
 		end
 		table.insert(lines, "")
