@@ -50,15 +50,20 @@ function mkExport(equipped: ParsedItem[]): ParsedExport {
   };
 }
 
-describe('ENCHANT_CANDIDATES_BY_SLOT', () => {
-  it('covers legs + main_hand in v1', () => {
-    expect(ENCHANT_CANDIDATES_BY_SLOT).toHaveProperty('legs');
-    expect(ENCHANT_CANDIDATES_BY_SLOT).toHaveProperty('main_hand');
+describe('ENCHANT_CANDIDATES_BY_SLOT (Raidbots Q2 DPS whitelist)', () => {
+  it('covers legs + main_hand + off_hand + chest + finger1 + finger2', () => {
+    expect(ENCHANT_CANDIDATES_BY_SLOT['legs']!.length).toBe(6);
+    expect(ENCHANT_CANDIDATES_BY_SLOT['main_hand']!.length).toBe(7);
+    expect(ENCHANT_CANDIDATES_BY_SLOT['off_hand']!.length).toBe(7);
+    expect(ENCHANT_CANDIDATES_BY_SLOT['chest']!.length).toBe(4);
+    expect(ENCHANT_CANDIDATES_BY_SLOT['finger1']!.length).toBe(9);
+    expect(ENCHANT_CANDIDATES_BY_SLOT['finger2']!.length).toBe(9);
   });
 
-  it('has at least 4 leg enchants and 4 weapon enchants', () => {
-    expect(ENCHANT_CANDIDATES_BY_SLOT['legs']!.length).toBeGreaterThanOrEqual(4);
-    expect(ENCHANT_CANDIDATES_BY_SLOT['main_hand']!.length).toBeGreaterThanOrEqual(4);
+  it('leaves head/shoulder/back/wrist/hands/feet empty (no Q2 DPS enchants)', () => {
+    for (const slot of ['head', 'shoulder', 'back', 'wrist', 'hands', 'feet']) {
+      expect(ENCHANT_CANDIDATES_BY_SLOT[slot]).toEqual([]);
+    }
   });
 
   it('every candidate has a positive enchant_id + non-empty name', () => {
@@ -69,20 +74,29 @@ describe('ENCHANT_CANDIDATES_BY_SLOT', () => {
       }
     }
   });
+
+  it('includes the canonical Raidbots names with apostrophes', () => {
+    const ringNames = ENCHANT_CANDIDATES_BY_SLOT['finger1']!.map((c) => c.name);
+    expect(ringNames).toContain("Nature's Fury");
+    expect(ringNames).toContain("Zul'jin's Mastery");
+    const weaponNames = ENCHANT_CANDIDATES_BY_SLOT['main_hand']!.map((c) => c.name);
+    expect(weaponNames).toContain("Acuity of the Ren'dorei");
+    expect(weaponNames).toContain("Berserker's Rage");
+  });
 });
 
 describe('rewriteItemEnchant', () => {
   it('replaces an existing enchant_id', () => {
     const line = 'legs=,id=250059,enchant_id=7935,bonus_id=1';
-    expect(rewriteItemEnchant(line, 8159)).toBe(
-      'legs=,id=250059,enchant_id=8159,bonus_id=1',
+    expect(rewriteItemEnchant(line, 8160)).toBe(
+      'legs=,id=250059,enchant_id=8160,bonus_id=1',
     );
   });
 
   it('appends an enchant_id when missing', () => {
     const line = 'legs=,id=250059,bonus_id=1';
-    expect(rewriteItemEnchant(line, 8159)).toBe(
-      'legs=,id=250059,enchant_id=8159,bonus_id=1',
+    expect(rewriteItemEnchant(line, 8160)).toBe(
+      'legs=,id=250059,enchant_id=8160,bonus_id=1',
     );
   });
 });
@@ -90,55 +104,57 @@ describe('rewriteItemEnchant', () => {
 describe('synthesizeItemLineWithEnchant', () => {
   it('overrides enchant_id while preserving bonus_id', () => {
     const item = mkItem('legs');
-    const out = synthesizeItemLineWithEnchant(item, 8159);
-    expect(out).toContain('enchant_id=8159');
+    const out = synthesizeItemLineWithEnchant(item, 8160);
+    expect(out).toContain('enchant_id=8160');
     expect(out).toContain('bonus_id=1/2/3');
     expect(out).not.toContain('enchant_id=7935');
   });
 
   it('preserves gem_id from extras when present', () => {
     const item = mkItem('legs', { extras: { enchant_id: '7935', gem_id: '240898/240898' } });
-    const out = synthesizeItemLineWithEnchant(item, 8159);
+    const out = synthesizeItemLineWithEnchant(item, 8160);
     expect(out).toContain('gem_id=240898/240898');
   });
 });
 
 describe('buildEnchantsProfilesetLines', () => {
   it('skips slots the player does not have equipped', () => {
-    const xport = mkExport([mkItem('head')]); // no legs / main_hand equipped
+    const xport = mkExport([mkItem('head')]); // no legs / main_hand equipped, head has no Q2 DPS enchants
     expect(buildEnchantsProfilesetLines(xport)).toBe('');
   });
 
-  it('emits one profileset per (slot, candidate)', () => {
+  it('emits one profileset per (slot, candidate) for covered slots', () => {
     const xport = mkExport([
       mkItem('legs'),
       mkItem('main_hand', { item_id: 258218 }),
+      mkItem('finger1', { item_id: 193708 }),
     ]);
     const out = buildEnchantsProfilesetLines(xport);
     const lines = out.split('\n').filter((l) => l.length > 0);
     const legsCount = ENCHANT_CANDIDATES_BY_SLOT['legs']!.length;
     const mhCount = ENCHANT_CANDIDATES_BY_SLOT['main_hand']!.length;
-    expect(lines).toHaveLength(legsCount + mhCount);
+    const ringCount = ENCHANT_CANDIDATES_BY_SLOT['finger1']!.length;
+    expect(lines).toHaveLength(legsCount + mhCount + ringCount);
     for (const c of ENCHANT_CANDIDATES_BY_SLOT['legs']!) {
       expect(out).toContain(`profileset."enchant_legs_${c.key}"+="legs`);
-    }
-    for (const c of ENCHANT_CANDIDATES_BY_SLOT['main_hand']!) {
-      expect(out).toContain(`profileset."enchant_main_hand_${c.key}"+="main_hand`);
     }
   });
 });
 
 describe('parseBestEnchants', () => {
   it('groups results by slot and picks per-slot winner', () => {
+    // Pull two real candidates from the loaded data for each slot.
+    const legsKeys = ENCHANT_CANDIDATES_BY_SLOT['legs']!.slice(0, 2);
+    const mhKeys = ENCHANT_CANDIDATES_BY_SLOT['main_hand']!.slice(0, 2);
     const run = mkRun([
-      { name: 'enchant_legs_sunfire_silk', mean: 700 },
-      { name: 'enchant_legs_arcanoweave', mean: 650 },
-      { name: 'enchant_main_hand_acuity_rendorei', mean: 720 },
-      { name: 'enchant_main_hand_arcane_mastery', mean: 715 },
+      { name: `enchant_legs_${legsKeys[0]!.key}`, mean: 700 },
+      { name: `enchant_legs_${legsKeys[1]!.key}`, mean: 650 },
+      { name: `enchant_main_hand_${mhKeys[0]!.key}`, mean: 720 },
+      { name: `enchant_main_hand_${mhKeys[1]!.key}`, mean: 715 },
     ]);
     const result = parseBestEnchants(run);
-    expect(result?.per_slot['legs']!.best.name).toBe('Sunfire Silk Spellthread');
-    expect(result?.per_slot['main_hand']!.best.name).toBe("Acuity of the Ren'dorei");
+    expect(result?.per_slot['legs']!.best.name).toBe(legsKeys[0]!.name);
+    expect(result?.per_slot['main_hand']!.best.name).toBe(mhKeys[0]!.name);
   });
 
   it('returns undefined when no enchant profilesets matched', () => {
@@ -146,8 +162,12 @@ describe('parseBestEnchants', () => {
   });
 
   it('handles a slot with only one matched candidate (winner, no alternatives)', () => {
+    const sunfire = ENCHANT_CANDIDATES_BY_SLOT['legs']!.find(
+      (c) => c.name === 'Sunfire Silk Spellthread',
+    );
+    expect(sunfire).toBeDefined();
     const run = mkRun([
-      { name: 'enchant_legs_sunfire_silk', mean: 700 },
+      { name: `enchant_legs_${sunfire!.key}`, mean: 700 },
     ]);
     const result = parseBestEnchants(run);
     expect(result?.per_slot['legs']!.best.name).toBe('Sunfire Silk Spellthread');

@@ -1,94 +1,189 @@
 /**
  * best_enchants scan — pick the best permanent enchant per slot.
  *
- * Each WoW slot has a small set of permanent-enchant options. The
- * stat profile of each enchant varies (haste / crit / mast / vers /
- * primary), so the right choice depends on the player's gear + spec.
- * We sim every candidate per slot and surface a per-slot winner.
+ * Slice G4 catalog: Raidbots' canonical Q2 DPS enchant whitelist.
+ * 4 slots covered (weapon, chest, legs, ring); tank/healer-only
+ * enchants are deferred to a per-spec-logic future slice.
  *
- * v1 candidate set: legs + main_hand only — the two slots with the
- * highest DPS variance between enchants. Head/shoulder/feet/ring/back
- * deltas are typically <0.3%; deferring those keeps the prescan
- * runtime down. Schema is per-slot so future slices can extend
- * without changing it.
+ * Slot totals:
+ *   - weapon (7 DPS options) — sim'd for main_hand; dual-wield specs
+ *     also for off_hand. SimC's weapon enchants live with
+ *     item_class=2 / slot_mask=0.
+ *   - chest (4 Mark variants)
+ *   - legs (6 — armor kits + spellthreads)
+ *   - ring (9 — applies to both finger1 and finger2)
  *
- * Candidate IDs sourced from SimC's `permanent_enchant.inc` on the
- * Midnight branch.
+ * Data flow:
+ *   - scripts/regen-enchants.mjs pulls SimC's permanent_enchant.inc +
+ *     spell_item_enchantment.inc on the midnight branch, emits
+ *     data/enchants.json.
+ *   - We import that JSON, then match each Raidbots-whitelisted
+ *     simc_name to its row. The whitelist's display name is what
+ *     surfaces in the UI (canonical apostrophes/casing the regen
+ *     script can't fully reconstruct for armor-kit/spellthread types).
  *
- * Like best_gems, this scan lives outside the SCANS registry — its
- * profilesets need the parsed export to re-emit item lines with
- * different enchant_ids.
+ * Per-patch maintenance: re-run regen-enchants.mjs; if Blizzard adds
+ * new DPS enchants, append the simc_name + display_name to
+ * RAIDBOTS_WHITELIST below.
  */
 import type { BestConsumableResult } from '@simly/shared';
 import type { ParsedExport, ParsedItem } from '../simc-export-parser';
 import type { SimcRunResult } from '../simc-runner';
 import { roundTo } from './index';
+import enchantsData from '../../../../data/enchants.json';
 
-/** One enchant option for a given slot. */
 export interface EnchantCandidate {
   key: string;
   enchant_id: number;
   name: string;
 }
 
-/**
- * Per-slot candidate map. Sim every candidate against the player's
- * current item-line context — the profileset re-emits that slot's
- * item with the candidate enchant_id, everything else inherits from
- * the base actor.
- *
- * Slot keys match `ParsedItem.slot` (SimC's canonical names).
- */
-export const ENCHANT_CANDIDATES_BY_SLOT: Readonly<Record<string, readonly EnchantCandidate[]>> = {
-  legs: [
-    { key: 'sunfire_silk', enchant_id: 7935, name: 'Sunfire Silk Spellthread' },
-    { key: 'arcanoweave', enchant_id: 7937, name: 'Arcanoweave Spellthread' },
-    { key: 'forest_hunters', enchant_id: 8159, name: "Forest Hunter's Armor Kit" },
-    { key: 'thalassian_scout', enchant_id: 8161, name: 'Thalassian Scout Armor Kit' },
-    { key: 'blood_knights', enchant_id: 8163, name: "Blood Knight's Armor Kit" },
-  ],
-  main_hand: [
-    { key: 'acuity_rendorei', enchant_id: 8039, name: "Acuity of the Ren'dorei" },
-    { key: 'arcane_mastery', enchant_id: 8041, name: 'Arcane Mastery' },
-    { key: 'janalais_precision', enchant_id: 7981, name: "Jan'alai's Precision" },
-    { key: 'berserkers_rage', enchant_id: 7983, name: "Berserker's Rage" },
-  ],
-};
-
-/**
- * Result schema: one BestConsumableResult per scanned slot. The addon
- * iterates the per_slot map and renders each slot's winner.
- */
 export interface BestEnchantsResult {
   label: string;
   per_slot: Record<string, BestConsumableResult>;
 }
 
+interface EnchantDataRow {
+  id: number;
+  simc_name: string;
+  display_name: string;
+  slot: string;
+  slot_mask: string;
+  item_class: number;
+}
+
+/**
+ * Raidbots' DPS-only whitelist, keyed by SimC slot then by
+ * `simc_name -> display_name`. Tank/healer enchants (e.g. weapon
+ * worldsoul_aegis / worldsoul_cradle) are intentionally excluded;
+ * per-spec custom logic is a future slice.
+ */
+const RAIDBOTS_WHITELIST: Readonly<Record<string, Readonly<Record<string, string>>>> = {
+  weapon: {
+    enchant_weapon__acuity_of_the_rendorei: "Acuity of the Ren'dorei",
+    enchant_weapon__arcane_mastery: 'Arcane Mastery',
+    enchant_weapon__berserkers_rage: "Berserker's Rage",
+    enchant_weapon__flames_of_the_sindorei: "Flames of the Sin'dorei",
+    enchant_weapon__janalais_precision: "Jan'alai's Precision",
+    enchant_weapon__strength_of_halazzi: 'Strength of Halazzi',
+    enchant_weapon__worldsoul_tenacity: 'Worldsoul Tenacity',
+  },
+  chest: {
+    enchant_chest__mark_of_nalorakk: 'Mark of Nalorakk',
+    enchant_chest__mark_of_the_magister: 'Mark of the Magister',
+    enchant_chest__mark_of_the_rootwarden: 'Mark of the Rootwarden',
+    enchant_chest__mark_of_the_worldsoul: 'Mark of the Worldsoul',
+  },
+  legs: {
+    bright_linen_spellthread: 'Bright Linen Spellthread',
+    blood_knights_armor_kit: "Blood Knight's Armor Kit",
+    arcanoweave_spellthread: 'Arcanoweave Spellthread',
+    sunfire_silk_spellthread: 'Sunfire Silk Spellthread',
+    forest_hunters_armor_kit: "Forest Hunter's Armor Kit",
+    thalassian_scout_armor_kit: 'Thalassian Scout Armor Kit',
+  },
+  ring: {
+    enchant_ring__eyes_of_the_eagle: 'Eyes of the Eagle',
+    enchant_ring__natures_fury: "Nature's Fury",
+    enchant_ring__silvermoons_tenacity: "Silvermoon's Tenacity",
+    enchant_ring__silvermoons_alacrity: "Silvermoon's Alacrity",
+    enchant_ring__zuljins_mastery: "Zul'jin's Mastery",
+    enchant_ring__thalassian_haste: 'Thalassian Haste',
+    enchant_ring__thalassian_versatility: 'Thalassian Versatility',
+    enchant_ring__amani_mastery: 'Amani Mastery',
+    enchant_ring__natures_wrath: "Nature's Wrath",
+  },
+};
+
+/**
+ * Build the per-slot candidate map by joining the whitelist against
+ * the regenerated enchant data. Weapon enchants apply to main_hand
+ * AND off_hand (dual-wield specs); rings apply to both finger
+ * slots. Other slots map one-to-one.
+ *
+ * For slots where SimC's row exists but the whitelist key doesn't
+ * match (data drift / typo), the candidate is dropped — better to
+ * skip than emit a broken profileset.
+ */
+function buildSlotCandidates(rows: readonly EnchantDataRow[]): Record<string, EnchantCandidate[]> {
+  // Lower-id deduplication: SimC sometimes has multiple ranks for the
+  // same enchant. Keep the highest enchant_id since that's the highest
+  // tier (rank 3 > rank 2 > rank 1).
+  const byKey = new Map<string, EnchantDataRow>();
+  for (const row of rows) {
+    const prior = byKey.get(row.simc_name);
+    if (!prior || row.id > prior.id) byKey.set(row.simc_name, row);
+  }
+
+  const out: Record<string, EnchantCandidate[]> = {};
+  for (const [simcSlot, whitelist] of Object.entries(RAIDBOTS_WHITELIST)) {
+    const slotKey = simcSlot;
+    out[slotKey] = [];
+    for (const [simcName, displayName] of Object.entries(whitelist)) {
+      const row = byKey.get(simcName);
+      if (!row) {
+        console.warn(
+          `[best-enchants] whitelist entry not found in data/enchants.json: ${simcName}`,
+        );
+        continue;
+      }
+      out[slotKey]!.push({
+        key: simcName.replace(/^enchant_[a-z]+__/, '').replace(/[^a-z0-9_]/g, ''),
+        enchant_id: row.id,
+        name: displayName,
+      });
+    }
+  }
+  return out;
+}
+
+const SLOT_CANDIDATES = buildSlotCandidates(
+  (enchantsData.enchants ?? []) as EnchantDataRow[],
+);
+
+/**
+ * The actual ENCHANT_CANDIDATES_BY_SLOT map used by build/parse
+ * helpers. Maps ParsedItem slot names (head, shoulder, legs,
+ * main_hand, off_hand, finger1, finger2, chest) to candidate lists.
+ *
+ * Weapon enchants apply to both main_hand + off_hand; ring enchants
+ * apply to both finger slots.
+ */
+export const ENCHANT_CANDIDATES_BY_SLOT: Readonly<Record<string, readonly EnchantCandidate[]>> = {
+  head: [],
+  shoulder: [],
+  chest: SLOT_CANDIDATES['chest'] ?? [],
+  back: [],
+  wrist: [],
+  hands: [],
+  legs: SLOT_CANDIDATES['legs'] ?? [],
+  feet: [],
+  finger1: SLOT_CANDIDATES['ring'] ?? [],
+  finger2: SLOT_CANDIDATES['ring'] ?? [],
+  main_hand: SLOT_CANDIDATES['weapon'] ?? [],
+  off_hand: SLOT_CANDIDATES['weapon'] ?? [],
+};
+
 const PREFIX = 'enchant';
 
 /**
  * Replace enchant_id in an item line with the candidate's ID. Adds
- * a new enchant_id field if the original line lacked one (some bag
- * items might be in this state). Returns the modified line.
+ * a new enchant_id field if the original line lacked one.
  */
 export function rewriteItemEnchant(itemLine: string, candidateId: number): string {
   if (/enchant_id=[0-9]+/.test(itemLine)) {
     return itemLine.replace(/enchant_id=[0-9]+/, `enchant_id=${candidateId}`);
   }
-  // No enchant_id — append it. Splice it in right after the id= field
-  // for consistency with other item lines.
   return itemLine.replace(/(id=\d+)/, `$1,enchant_id=${candidateId}`);
 }
 
 /**
  * Synthesize a SimC item line from a ParsedItem with the enchant_id
- * overridden to the candidate's value. Preserves all other fields
- * (bonus_id, gem_id, crafted_stats, etc.).
+ * overridden to the candidate's value. Preserves all other fields.
  */
 export function synthesizeItemLineWithEnchant(item: ParsedItem, enchantIdOverride: number): string {
   const parts: string[] = [`${item.slot}=,id=${item.item_id}`];
   parts.push(`enchant_id=${enchantIdOverride}`);
-  // Preserve gem_id from extras when present.
   if (item.extras?.['gem_id']) {
     parts.push(`gem_id=${item.extras['gem_id']}`);
   }
@@ -107,17 +202,10 @@ export function synthesizeItemLineWithEnchant(item: ParsedItem, enchantIdOverrid
   return parts.join(',');
 }
 
-/**
- * Build enchant profilesets for every (slot, candidate) the player can
- * use. Skips slots not in ENCHANT_CANDIDATES_BY_SLOT or where the
- * player doesn't have the slot equipped.
- *
- * Profileset names follow `enchant_<slot>_<candidate.key>` so the
- * parser can group by slot.
- */
 export function buildEnchantsProfilesetLines(parsed: ParsedExport): string {
   const blocks: string[] = [];
   for (const [slot, candidates] of Object.entries(ENCHANT_CANDIDATES_BY_SLOT)) {
+    if (candidates.length === 0) continue;
     const item = parsed.equipped.find((i) => i.slot === slot);
     if (!item) continue;
     for (const candidate of candidates) {
@@ -128,13 +216,10 @@ export function buildEnchantsProfilesetLines(parsed: ParsedExport): string {
   return blocks.join('\n');
 }
 
-/**
- * Parse the enchant profilesets out of a SimC run and group them by
- * slot. Each slot gets its own BestConsumableResult.
- */
 export function parseBestEnchants(run: SimcRunResult): BestEnchantsResult | undefined {
   const per_slot: Record<string, BestConsumableResult> = {};
   for (const [slot, candidates] of Object.entries(ENCHANT_CANDIDATES_BY_SLOT)) {
+    if (candidates.length === 0) continue;
     const slotResults: Array<{ candidate: EnchantCandidate; mean: number }> = [];
     for (const candidate of candidates) {
       const name = `${PREFIX}_${slot}_${candidate.key}`;
