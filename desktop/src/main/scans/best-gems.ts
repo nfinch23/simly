@@ -1,33 +1,32 @@
 /**
- * best_gems scan — pick the best socket gem stat for the player's build.
+ * best_gems scan — pick the best 2-stat gem allocation for the build.
  *
- * Unlike flask/food/potion, gems are slotted per-item via `gem_id=N` on
- * the item line. To compare gem-stat options we re-emit every socketed
- * item line with a different gem_id under each profileset. Multi-socket
- * items (`gem_id=A/B`) get the same candidate repeated across all
- * sockets — we don't optimize per-socket in v1.
+ * Midnight gems provide TWO secondary stats: a primary (color-coded)
+ * and a secondary (adjective-coded). e.g. "Flawless Quick Amethyst"
+ * is Mastery-primary + Haste-secondary; "Flawless Masterful Peridot"
+ * is Haste-primary + Mastery-secondary. The same stat pair has two
+ * distinct gems depending on which stat dominates.
  *
- * Candidate set (4 secondary-stat options):
- *   - Haste — Flawless Quick Amethyst (240900)
- *   - Crit  — Flawless Deadly Amethyst (240898)
- *   - Mast  — Flawless Masterful Garnet (240908)
- *   - Vers  — Flawless Versatile Amethyst (240902)
+ * Candidate set is loaded from `data/gems.json` (regenerated from
+ * SimC's gem_data.inc + item_data.inc on the midnight branch — see
+ * scripts/regen-gems.mjs). v1 of this scan filters to Flawless-tier
+ * 2-stat gems, deduplicating to one canonical item id per
+ * stat-allocation (12 unique combinations).
  *
- * Item IDs sourced from SimC's `item_data.inc` (Midnight branch); the
- * naming convention is well-established WoW lore (Quick=Haste etc.).
- * Meta-gem variants (Eversong Diamonds 240967 / 240983) are deferred —
- * they have special effects beyond raw stats and need their own pass.
+ * Per-patch maintenance: `node scripts/regen-gems.mjs` after SimC
+ * pushes new gem data. Works across expansions as long as SimC's
+ * data-file shape is unchanged.
  *
- * Why this scan lives outside SCANS registry: buildLines() in the
- * standard Scan interface is parameterless, but gem profilesets need
- * the parsed export to know which items have sockets. Scan-queue calls
- * `buildGemsProfilesetLines(parsed)` directly when running the
- * consumables prescan.
+ * SimC mechanics: profilesets re-emit every socketed item line with
+ * the candidate's gem_id substituted in every socket position
+ * (gem_id=A or gem_id=A/B for multi-socket items). Other slots
+ * inherit from the base actor.
  */
 import type { BestConsumableResult } from '@simly/shared';
 import type { ParsedExport, ParsedItem } from '../simc-export-parser';
 import type { SimcRunResult } from '../simc-runner';
 import { matchProfilesetsByPrefix, roundTo } from './index';
+import gemsData from '../../../../data/gems.json';
 
 export type BestGemsResult = BestConsumableResult;
 
@@ -35,16 +34,51 @@ export interface GemCandidate {
   key: string;
   item_id: number;
   name: string;
-  /** The stat the gem provides — surfaced in result.best.name. */
-  stat: 'haste' | 'crit' | 'mastery' | 'versatility';
+  /** Decoded stats from SimC's gem_data.inc — exactly 2 secondaries. */
+  stats: readonly string[];
 }
 
-export const GEM_CANDIDATES: readonly GemCandidate[] = [
-  { key: 'haste', item_id: 240900, name: 'Quick gems (haste)', stat: 'haste' },
-  { key: 'crit', item_id: 240898, name: 'Deadly gems (crit)', stat: 'crit' },
-  { key: 'mastery', item_id: 240908, name: 'Masterful gems (mastery)', stat: 'mastery' },
-  { key: 'versatility', item_id: 240902, name: 'Versatile gems (versatility)', stat: 'versatility' },
-];
+interface GemDataRow {
+  id: number;
+  name: string;
+  gem_property_id: number;
+  color_mask: string;
+  stats: string[];
+}
+
+/**
+ * Build the candidate set: every Flawless 2-stat allocation, one ID
+ * per unique (primary, secondary) pair.
+ *
+ * The pairs are ORDER-SENSITIVE — "Mastery + Haste" (Amethyst) and
+ * "Haste + Mastery" (Peridot) are different gems with different stat
+ * allocations. Both ship as candidates so the sim can decide which
+ * fits the player's stat priorities.
+ */
+function buildCandidateSet(rows: readonly GemDataRow[]): GemCandidate[] {
+  const flawless = rows.filter(
+    (g) => g.name.startsWith('Flawless') && g.stats.length === 2,
+  );
+  // Dedupe by stat-pair signature, keeping the LOWER item_id (stable
+  // pick across runs). The two paired IDs per allocation differ only
+  // in some binding flag, not in stats.
+  const byKey = new Map<string, GemDataRow>();
+  for (const g of flawless) {
+    const key = `${g.stats[0]}+${g.stats[1]}`;
+    const prior = byKey.get(key);
+    if (!prior || g.id < prior.id) byKey.set(key, g);
+  }
+  return Array.from(byKey.values()).map((g) => ({
+    key: `${g.stats[0]!.toLowerCase().replace(/\s+/g, '_')}_${g.stats[1]!.toLowerCase().replace(/\s+/g, '_')}`,
+    item_id: g.id,
+    name: `${g.name} (${g.stats.join(' + ')})`,
+    stats: g.stats,
+  }));
+}
+
+export const GEM_CANDIDATES: readonly GemCandidate[] = buildCandidateSet(
+  (gemsData.gems ?? []) as GemDataRow[],
+);
 
 const PREFIX = 'gems';
 
@@ -61,19 +95,7 @@ export function rewriteItemGems(itemLine: string, candidateId: number): string |
   return itemLine.replace(/gem_id=[0-9]+(?:\/[0-9]+)*/, replacement);
 }
 
-/**
- * Build the gem profileset block. One profileset per candidate; each
- * contains re-emitted item lines (one per socketed equipped item) with
- * the candidate's gem_id substituted.
- *
- * Returns an empty string when the player has no sockets — SimC would
- * choke on a profileset with no `+=` lines.
- */
 export function buildGemsProfilesetLines(parsed: ParsedExport): string {
-  // Find every equipped item that currently has a gem. Re-using the
-  // raw item line shape requires reconstructing it from ParsedItem;
-  // since the player's export already had a line per equipped item,
-  // we synthesize the override from the parser's fields.
   const socketedEquipped: ParsedItem[] = parsed.equipped.filter(
     (i) => i.extras?.['gem_id'] || i.extras?.['gem_id'] === '0',
   );
@@ -82,9 +104,6 @@ export function buildGemsProfilesetLines(parsed: ParsedExport): string {
   const blocks: string[] = [];
   for (const candidate of GEM_CANDIDATES) {
     for (const item of socketedEquipped) {
-      // Re-emit the item line with the original bonus_id + gem_id
-      // replaced by the candidate. We keep all other fields (item_id,
-      // bonus_id, enchant_id, crafted_stats, etc.) intact.
       const itemLine = synthesizeItemLine(item, candidate.item_id);
       blocks.push(`profileset."${PREFIX}_${candidate.key}"+="${itemLine}"`);
     }
@@ -98,9 +117,6 @@ export function buildGemsProfilesetLines(parsed: ParsedExport): string {
  */
 export function synthesizeItemLine(item: ParsedItem, gemIdOverride: number): string {
   const parts: string[] = [`${item.slot}=,id=${item.item_id}`];
-  // Determine original socket count from the parsed gem_id field.
-  // ParsedItem.extras holds `gem_id` as a raw string (slash-separated
-  // when multi-socket).
   const origGemRaw = item.extras?.['gem_id'] ?? '';
   const socketCount = origGemRaw ? origGemRaw.split('/').length : 1;
   parts.push(`gem_id=${Array(socketCount).fill(gemIdOverride).join('/')}`);
@@ -116,16 +132,12 @@ export function synthesizeItemLine(item: ParsedItem, gemIdOverride: number): str
   if (item.drop_level !== undefined) {
     parts.push(`drop_level=${item.drop_level}`);
   }
-  // Preserve enchant_id from extras since the parser tucks it there.
   if (item.extras?.['enchant_id']) {
     parts.push(`enchant_id=${item.extras['enchant_id']}`);
   }
   return parts.join(',');
 }
 
-/**
- * Pick the winning gem candidate's item_id from a SimC run.
- */
 export function pickWinningGemItemId(run: SimcRunResult): number | undefined {
   const matched = matchProfilesetsByPrefix(run, PREFIX, GEM_CANDIDATES);
   if (matched.length === 0) return undefined;
@@ -142,7 +154,7 @@ export function parseBestGems(run: SimcRunResult): BestGemsResult | undefined {
   const winnerDps = winner.mean;
 
   return {
-    label: 'Best gem stat',
+    label: 'Best gem allocation',
     best: {
       item_id: winner.candidate.item_id,
       name: winner.candidate.name,

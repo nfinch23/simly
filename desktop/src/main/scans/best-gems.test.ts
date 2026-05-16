@@ -51,15 +51,28 @@ function mkExport(equipped: ParsedItem[]): ParsedExport {
   };
 }
 
-describe('GEM_CANDIDATES', () => {
-  it('covers all four secondary stats', () => {
-    const stats = GEM_CANDIDATES.map((c) => c.stat).sort();
-    expect(stats).toEqual(['crit', 'haste', 'mastery', 'versatility']);
+describe('GEM_CANDIDATES (loaded from data/gems.json)', () => {
+  it('contains at least the 6 unique two-stat combinations', () => {
+    // 4-choose-2 = 6 distinct stat pairs; each pair has 2 orientations
+    // (primary/secondary) for 12 distinct gem allocations.
+    expect(GEM_CANDIDATES.length).toBeGreaterThanOrEqual(6);
   });
 
   it('every candidate has a positive item_id', () => {
     for (const c of GEM_CANDIDATES) {
       expect(c.item_id).toBeGreaterThan(0);
+    }
+  });
+
+  it('every candidate is two-stat (decoded from SimC data)', () => {
+    for (const c of GEM_CANDIDATES) {
+      expect(c.stats).toHaveLength(2);
+    }
+  });
+
+  it('candidate name includes the stat decode in parens', () => {
+    for (const c of GEM_CANDIDATES) {
+      expect(c.name).toMatch(/\(.+ \+ .+\)/);
     }
   });
 });
@@ -127,8 +140,8 @@ describe('buildGemsProfilesetLines', () => {
     ]);
     const out = buildGemsProfilesetLines(xport);
     const lines = out.split('\n');
-    // 4 candidates × 2 socketed items = 8 lines.
-    expect(lines).toHaveLength(8);
+    // N candidates × 2 socketed items.
+    expect(lines).toHaveLength(GEM_CANDIDATES.length * 2);
     for (const candidate of GEM_CANDIDATES) {
       expect(out).toContain(`profileset."gems_${candidate.key}"+="finger1`);
       expect(out).toContain(`profileset."gems_${candidate.key}"+="finger2`);
@@ -146,14 +159,16 @@ describe('buildGemsProfilesetLines', () => {
 
 describe('parseBestGems', () => {
   it('picks the highest mean DPS as the winner', () => {
+    // Use whatever the first two candidates' keys actually are at
+    // load time — keeps the test resilient to data updates.
+    const c1 = GEM_CANDIDATES[0]!;
+    const c2 = GEM_CANDIDATES[1]!;
     const run = mkRun([
-      { name: 'gems_haste', mean: 640 },
-      { name: 'gems_crit', mean: 700 },
-      { name: 'gems_mastery', mean: 680 },
-      { name: 'gems_versatility', mean: 620 },
+      { name: `gems_${c1.key}`, mean: 640 },
+      { name: `gems_${c2.key}`, mean: 700 },
     ]);
     const result = parseBestGems(run);
-    expect(result?.best.name).toBe('Deadly gems (crit)');
+    expect(result?.best.name).toBe(c2.name);
     expect(result?.best.dps).toBe(700);
   });
 
@@ -163,11 +178,13 @@ describe('parseBestGems', () => {
 });
 
 describe('pickWinningGemItemId', () => {
-  it('returns the winner\'s item_id', () => {
+  it("returns the winner's item_id", () => {
+    const c1 = GEM_CANDIDATES[0]!;
+    const c2 = GEM_CANDIDATES[1]!;
     const run = mkRun([
-      { name: 'gems_haste', mean: 640 },
-      { name: 'gems_crit', mean: 700 },
+      { name: `gems_${c1.key}`, mean: 640 },
+      { name: `gems_${c2.key}`, mean: 700 },
     ]);
-    expect(pickWinningGemItemId(run)).toBe(240898);
+    expect(pickWinningGemItemId(run)).toBe(c2.item_id);
   });
 });
