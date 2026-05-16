@@ -22,6 +22,71 @@ import { getItemName } from '../item-names';
 import type { ContentPrefs } from '../settings';
 import type { ParsedItem } from '../simc-export-parser';
 
+/**
+ * Per-source grouping of content opportunities. Each source (e.g.
+ * "Operation: Mechagon - Workshop M+ +10", "Heroic raid") gets one
+ * GroupedSource with the opportunities that ranked as upgrades plus
+ * a simple "potential value" total = sum of delta_dps across the
+ * source's upgrades.
+ *
+ * Used by the addon panel's Slice J "Sim Dungeons" / "Sim Raids" view
+ * to answer: "for this dungeon, how many upgrades are available and
+ * what's the total DPS I'd gain by farming it?"
+ *
+ * True expected value (drop-chance × dps-gain) is deferred — KeystoneLoot
+ * data has the per-source loot pool but not per-item drop probability.
+ * Total-potential-gain is the v1 EV proxy.
+ */
+export interface GroupedSource {
+  source_label: string;
+  source_category: 'mplus' | 'raid';
+  upgrade_count: number;
+  /** Sum of delta_dps across upgrades (delta_dps > 0 only). */
+  total_potential_dps: number;
+  /** All upgrades from this source, sorted desc by delta_dps. */
+  opportunities: readonly ContentOpportunity[];
+}
+
+/**
+ * Group content opportunities by source_label and compute per-source
+ * upgrade count + total potential DPS. Sources with zero upgrades are
+ * excluded. Result is sorted desc by total_potential_dps so the most-
+ * valuable source surfaces first.
+ *
+ * Pure function — no IO. Exported so the addon-format helper and
+ * tests can both use it.
+ */
+export function groupContentBySource(
+  opportunities: readonly ContentOpportunity[],
+): GroupedSource[] {
+  const byLabel = new Map<string, GroupedSource>();
+  for (const op of opportunities) {
+    if (op.delta_dps <= 0) continue;
+    let group = byLabel.get(op.source_label);
+    if (!group) {
+      group = {
+        source_label: op.source_label,
+        source_category: op.source_category,
+        upgrade_count: 0,
+        total_potential_dps: 0,
+        opportunities: [],
+      };
+      byLabel.set(op.source_label, group);
+    }
+    group.upgrade_count += 1;
+    group.total_potential_dps += op.delta_dps;
+    (group.opportunities as ContentOpportunity[]).push(op);
+  }
+  for (const group of byLabel.values()) {
+    (group.opportunities as ContentOpportunity[]).sort(
+      (a, b) => b.delta_dps - a.delta_dps,
+    );
+  }
+  return Array.from(byLabel.values()).sort(
+    (a, b) => b.total_potential_dps - a.total_potential_dps,
+  );
+}
+
 /** Hard cap on profilesets per run. 60 × 3000 iter ≈ 10 min on a typical box. */
 export const MAX_BEST_CONTENT_COMBOS = 60;
 

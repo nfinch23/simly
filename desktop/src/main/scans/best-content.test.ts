@@ -7,10 +7,28 @@ import {
   MAX_BEST_CONTENT_COMBOS,
   PROFILESET_PREFIX,
   buildBestContentProfilesets,
+  groupContentBySource,
   parseBestContentResult,
   runBestContentScan,
   selectContentCandidates,
 } from './best-content';
+import type { ContentOpportunity } from '@simly/shared';
+
+function mkOp(overrides: Partial<ContentOpportunity> = {}): ContentOpportunity {
+  return {
+    item_id: 1,
+    name: 'Mock',
+    slot: 'head',
+    target_ilvl: 290,
+    source_label: 'Mythic raid',
+    source_category: 'raid',
+    current_dps: 100_000,
+    upgraded_dps: 101_000,
+    delta_dps: 1000,
+    delta_pct: 1.0,
+    ...overrides,
+  };
+}
 
 function mkItem(slot: ParsedItem['slot'], overrides: Partial<ParsedItem> = {}): ParsedItem {
   return {
@@ -240,5 +258,68 @@ describe('runBestContentScan', () => {
     expect(captured).toContain('iterations=3000');
     expect(captured).toContain(`profileset."${PROFILESET_PREFIX}_baseline"+=`);
     expect(result.baseline_dps).toBe(90000);
+  });
+});
+
+describe('groupContentBySource', () => {
+  it('groups opportunities by source_label', () => {
+    const ops = [
+      mkOp({ source_label: 'Mythic raid', delta_dps: 500 }),
+      mkOp({ source_label: 'Mythic raid', delta_dps: 300, slot: 'neck' }),
+      mkOp({ source_label: 'M+ +12', source_category: 'mplus', delta_dps: 800 }),
+    ];
+    const groups = groupContentBySource(ops);
+    expect(groups).toHaveLength(2);
+    const mplus = groups.find((g) => g.source_label === 'M+ +12');
+    const raid = groups.find((g) => g.source_label === 'Mythic raid');
+    expect(mplus?.upgrade_count).toBe(1);
+    expect(raid?.upgrade_count).toBe(2);
+  });
+
+  it('totals delta_dps per source', () => {
+    const ops = [
+      mkOp({ source_label: 'X', delta_dps: 500 }),
+      mkOp({ source_label: 'X', delta_dps: 300, slot: 'neck' }),
+    ];
+    const groups = groupContentBySource(ops);
+    expect(groups[0]!.total_potential_dps).toBe(800);
+  });
+
+  it('drops non-upgrades (delta_dps <= 0)', () => {
+    const ops = [
+      mkOp({ source_label: 'X', delta_dps: 500 }),
+      mkOp({ source_label: 'X', delta_dps: 0, slot: 'neck' }),
+      mkOp({ source_label: 'X', delta_dps: -100, slot: 'back' }),
+    ];
+    const groups = groupContentBySource(ops);
+    expect(groups[0]!.upgrade_count).toBe(1);
+    expect(groups[0]!.total_potential_dps).toBe(500);
+  });
+
+  it('drops sources with no upgrades entirely', () => {
+    const ops = [mkOp({ source_label: 'AllDowngrades', delta_dps: -50 })];
+    const groups = groupContentBySource(ops);
+    expect(groups).toHaveLength(0);
+  });
+
+  it('sorts groups desc by total_potential_dps', () => {
+    const ops = [
+      mkOp({ source_label: 'Small', delta_dps: 100 }),
+      mkOp({ source_label: 'Big', delta_dps: 5000 }),
+      mkOp({ source_label: 'Medium', delta_dps: 1000 }),
+    ];
+    const groups = groupContentBySource(ops);
+    expect(groups.map((g) => g.source_label)).toEqual(['Big', 'Medium', 'Small']);
+  });
+
+  it('sorts opportunities within a group desc by delta_dps', () => {
+    const ops = [
+      mkOp({ source_label: 'X', delta_dps: 200, slot: 'head' }),
+      mkOp({ source_label: 'X', delta_dps: 800, slot: 'neck' }),
+      mkOp({ source_label: 'X', delta_dps: 500, slot: 'back' }),
+    ];
+    const groups = groupContentBySource(ops);
+    const dpsOrdered = groups[0]!.opportunities.map((o) => o.delta_dps);
+    expect(dpsOrdered).toEqual([800, 500, 200]);
   });
 });
